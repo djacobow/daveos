@@ -19,6 +19,19 @@ Longer-term applications may include multiple UARTs, CAN buses, and an Ethernet 
 * Standard library facilities are allowed subject to these allocation rules.
 * Use `constexpr` where possible.
 
+## Namespaces
+
+| Namespace | Contents |
+| --- | --- |
+| `daveos::core` | Scheduler, module interface, task descriptors, events, timers, queues, logging, status enums, and the platform contract. |
+| `daveos::platform::host` | Real-time host platform and simulated interrupts. |
+| `daveos::platform::stm32h5` | STM32H5 platform implementation. |
+| `daveos::platform::fake` | Fake clock, timer, and sleep implementation. |
+
+The core platform contract belongs in `daveos::core`; concrete implementations
+belong under `daveos::platform`. Application modules and event enums use
+application-owned namespaces.
+
 ## Design
 
 DaveOS has a hardware-independent core with platform support injected at
@@ -317,6 +330,10 @@ pending due times and arms the platform timer for the earliest one. When the
 platform timer fires, the layer processes due timers, finds the next due time,
 and rearms the platform timer. Adding an earlier timer must update that arm.
 
+The public callback type is `using TimerCallback = void (*)();`: a plain function
+pointer with no arguments or return value. Function-pointer equality identifies
+timers for replacement and cancellation. No object or context argument is carried.
+
 DaveOS timer requests require a strictly positive delay. A zero-delay request
 returns an error without creating a timer or modifying an existing timer.
 
@@ -409,8 +426,9 @@ Logging is accessible to all modules.
   automatically halt, reset, or stop the scheduler
 - Without subscribers, messages are discarded. A host subscriber could print to
   standard output; an embedded subscriber could write to a UART.
-- subscribers are supplied at construction time, with fixed subscriber storage,
-  and are available for initialization diagnostics
+- Subscribers are supplied in a list at construction time and are available for
+  initialization diagnostics. Fixed subscriber storage is sized at compile time
+  from that list; no separate subscriber-capacity setting is needed.
 - logging is buffered and may be called from module callbacks and interrupt
   handlers; logging calls enqueue records without invoking subscribers
 - subscribers receive buffered records later in the scheduler's execution
@@ -455,6 +473,10 @@ Host support will provide both:
   operation returns. Callbacks run in simulated interrupt context and follow the
   same interrupt serialization and critical-section rules. Fake time requires no
   dedicated timer thread.
+  Fake-time sleep uses the same advancement modes as awake waiting. In automatic
+  mode it advances to the next wake deadline. In manual mode it waits for the test
+  to advance time or trigger an interrupt. With no deadline, it waits for an
+  explicit simulated wakeup rather than advancing time indefinitely.
 * A real-time platform using a monotonic host clock, such as
   `std::chrono::steady_clock`, for tests that run in real time. Integration tests
   may interact with other processes through sockets or similar host facilities.
