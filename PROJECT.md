@@ -24,7 +24,7 @@ Longer-term applications may include multiple UARTs, CAN buses, and an Ethernet 
 
 | Namespace | Contents |
 | --- | --- |
-| `daveos::core` | Scheduler, module interface, task descriptors, events, timers, queues, logging, status enums, and the platform contract. |
+| `daveos::core` | Scheduler, module interface, task descriptors, events, timers, queues, optional logging, command descriptors and dispatch, name matching, status enums, and the platform contract. |
 | `daveos::platform::host` | Real-time host platform and simulated interrupts. |
 | `daveos::platform::stm32h5` | STM32H5 platform implementation. |
 | `daveos::platform::fake` | Fake clock, timer, and sleep implementation. |
@@ -39,7 +39,9 @@ DaveOS has a hardware-independent core with platform support injected at
 construction. The core depends only on permitted C++ standard library facilities.
 Platform implementations may depend on an OS or other libraries.
 
-The core consists of a scheduler and one or more modules.
+The core provides a scheduler with one or more modules, an optional logging
+service, and an independent command dispatcher. Applications may use logging,
+commands, both, or neither.
 
 ### Execution model
 
@@ -56,24 +58,27 @@ Shared scheduler state is protected by short platform-provided critical sections
 
 ### Module
 
-A module is a class with one or more schedulable member functions.
+A module is a class with zero or more schedulable member functions. Modules may
+provide commands, handle events, or participate in initialization without declaring
+any tasks. The default task and command descriptor arrays are empty.
 
 A module also has:
 
-* A name.
+* A nonempty `static constexpr const char* name()` accessor.
 * A `can_sleep()` callback that indicates whether the module permits system sleep.
 * An `on_event()` callback that receives an application-defined event enum value.
 * An `init(InitStage stage)` callback used at startup.
 * A reference or pointer to the module-facing scheduler interface.
 
-Each module exposes a compile-time array of task descriptors through an accessor.
-Each descriptor pairs a human-readable string name with its schedulable member
+Each module may override `tasks()` to expose a constexpr array of task descriptors
+and `commands()` to expose command descriptors (see Command System below).
+Each task descriptor pairs a human-readable string name with its schedulable member
 function. The array defines the task callbacks and their names; its size provides
 the task count without a separate count accessor. Statistics tables identify tasks
 by module name and task name.
 Module names are nonempty static constexpr metadata and must be unique ignoring
-ASCII case within a scheduler, checked at compile time. Task names must be unique within
-their module; different modules may use the same task names.
+ASCII case within a scheduler, checked at compile time. Task names must be unique
+within their module; different modules may use the same task names.
 
 ### Module initialization
 
@@ -96,6 +101,10 @@ not provide module lookup or dependency resolution.
 ### Scheduler
 
 The scheduler registers its modules and receives the platform at construction.
+The application may also attach its logger by reference. Use
+`make_scheduler<Event, Events, Timers>(platform, modules)` without a logger, or
+pass the logger as the third argument. Event and timer capacities default to
+32 and 16; log capacities belong to the logger.
 The application constructs and owns the module instances, passing their pointers
 in a typed `ModuleList`, for example `ModuleList{&fooMod, &barMod, &bazMod}`.
 The list preserves each module's concrete type so module counts and task descriptor
@@ -253,8 +262,8 @@ Define a common `enum class` for errors the scheduler can report or encounter.
 Use explicit status returns rather than exceptions, with a success value for
 operations that complete normally. Distinguish error conditions such as repeated
 initialization, module initialization failure, invalid repeat interval, event
-queue overflow, timer overflow, and `not_running`. The complete enumerator set
-and type name remain to be finalized.
+queue overflow, timer overflow, and `not_running`. The shared type is
+`daveos::core::Status`, declared in `core/platform.h`; commands use it too.
 `not_running` consistently reports that an operation requires an active scheduler
 run. It is an explicit error for both a pre-run `stop()` call and a timer request
 during initialization, rather than a silently accepted operation.
@@ -426,6 +435,8 @@ Logging is accessible to all modules through an optional service.
 Logging is an application-owned optional service, independent of commands and
 outside `ModuleList`. Construct the logger before the scheduler and pass it by
 reference when attaching it; it and its subscribers must outlive the scheduler.
+`make_logger<Records, MessageBytes>(platform, subscribers)` deduces the platform
+and subscriber types. The logger and scheduler must use the same platform.
 The scheduler owns no logging buffers, subscriber storage, filtering state, or
 logging counters. Logger construction makes logging available before module
 initialization. Calls through `scheduler().log(...)` remain forwarding conveniences.
@@ -438,7 +449,8 @@ according to normal C++ function-call rules. With logging enabled but no logger
 attached, log calls also return `Status::ok` and discard output. Commands and
 logging support all four combinations independently.
 
-The logger owns its severity threshold, diagnostic counters, and reset API.
+The logger owns its severity threshold (`minimum()`), diagnostic snapshot
+(`counters()`), and counter reset (`reset()`).
 Scheduler snapshots and resets cover only task, event, and timer statistics;
 the scheduler's table helper uses the optional logging API. A scheduler without
 an attached logger has no log-draining work. An attached logger delivers one
@@ -493,15 +505,15 @@ sleep entry. Initialization failure and shutdown flush remaining records.
 
 ## Supported platforms
 
-The first implementation pass targets the host, including fake-time unit tests
-and real-time integration tests. ARM support through the STM32H5 HAL follows in
-a later pass; the core remains hardware-independent from the outset.
+The implementation provides real-time host and fake-time adapters, an STM32H563
+adapter, and a CubeMX-based LED example. STM32CubeH5 is pinned as a submodule.
+The core remains hardware-independent; hardware validation is tracked in TODO.md.
 
 * Host: clang++.
-* ARM: latest arm-gcc and STM32H5 HAL; pin concrete versions when setting up the build.
+* ARM: arm-none-eabi GCC and the pinned STM32H5 HAL.
   The initial MCU target is STM32H563.
 
-Host support will provide both:
+Host support provides both:
 
 * A fake clock and timer for fast, deterministic unit tests without real-time waits.
   Tests can advance time manually or enable automatic advancement to the next due
@@ -538,7 +550,8 @@ initial host simulation scope.
 
 ## Build system
 
-Use Meson. Add Python build helpers as needed, with dependencies managed by uv.
+Use Meson. Python helpers currently use only the standard library; use uv if
+Python package dependencies are introduced.
 Build configurations live under `build/` (for example `build/host`, `build/fake`,
 `build/asan`, and `build/arm`). All generated intermediates and caches belong under
 that ignored directory and can be removed and regenerated.
@@ -554,10 +567,11 @@ cppcheck.
   appearance, is less than 15 lines.
 * Do not repeat the class name in member names.
 
-## Open decisions from specification review
+## Remaining platform validation
 
-* Platform setup: confirm the STM32H563 Nucleo board configuration and select the
-  clock/timer source when implementing the embedded platform.
+The STM32H563 example selects LD1 (PB0), TIM2 at 1 MHz, and shallow WFI sleep.
+Validate blinking, timer timing, and sleep/wake on the NUCLEO-H563ZI board; these
+hardware checks remain tracked in TODO.md.
 
 ## Implementation review checklist
 
@@ -579,25 +593,34 @@ These checks follow from the agreed behavior; they do not introduce additional A
   pre-run errors, capacity limits, and the reserved scheduler slot.
 * Verify sleep is bounded by pending task and timer due times, and shutdown ends
   timer activity and flushes logs before returning.
+* Verify compile-time module/command metadata validation, case-insensitive exact
+  and unique-prefix matching, quoting, input limits, help, and handler statuses.
+* Verify handler logging context and argument views survive nested-dispatch
+  rejection, and that command-only modules require no task slots.
+* Exercise all four combinations of commands and logging. Disabled macros must
+  skip argument evaluation; disabled logger instances must have no buffer storage.
+* Verify logger counters reset independently of scheduler statistics, interrupt
+  enqueue notifies idle dispatch, and pending records prevent sleep.
+* Verify console EOF does not stop the scheduler; `console exit` does.
 
-Exact C++ signatures, status enumerator names, timer rearming mechanics, and storage
-layout can be settled during implementation while preserving this specification.
-
-
+Public headers define concrete C++ signatures and status values. Changes to those
+interfaces must keep this specification and the application examples consistent.
 
 ## Command System
 
 Provide an allocation-free dispatcher in `daveos::core`, separate from scheduler
 internals. The application passes the same `ModuleList` used by its scheduler and
 its `SchedulerInterface<Event>&`. `dispatch(std::string_view)` returns `Status`.
+Calls before normal dispatch starts or after shutdown return `not_running`; calls
+from interrupt context return `invalid_argument`.
 Applications assemble complete lines and dispatch them from normal scheduler
 callbacks after successful initialization. Interrupt input must be buffered by
 the application. All input shares one command stream; all output uses logging.
 
 Modules expose constexpr command descriptor arrays containing command names,
-short help strings, member-function callbacks, and C++ handler names. A helper
-macro captures the callback and C++ function name from one identifier. Handlers
-return `Status` and receive `std::span<const std::string_view>` containing only
+short help strings, member-function callbacks, and C++ handler names. The
+`DAVEOS_COMMAND(ModuleType, command, function, description)` macro captures the
+callback and C++ function name from one identifier. Handlers return `Status` and receive `std::span<const std::string_view>` containing only
 arguments after the module prefix and command. These borrowed views last until
 the handler returns. Handlers validate their own argument counts and values.
 Default task and command arrays are empty; command-only modules need no dummy
@@ -625,8 +648,9 @@ succeed without action. Nested dispatch on the same instance returns
 input rather than calling the dispatcher concurrently.
 
 At both routing levels an exact case-insensitive match wins, otherwise a unique
-prefix wins. Unknown names return `not_found`; ambiguous matches, parse errors,
-oversized lines, and too many arguments have distinct error statuses. Argument
+prefix wins. Unknown names return `not_found`. Ambiguous matches, malformed input,
+oversized lines, and argument overflow return `ambiguous_match`, `parse_error`,
+`line_too_long`, and `too_many_arguments`, respectively. Argument
 case is preserved. `help` prints the complete tree, while `<module>` and
 `<module> help` print that module's commands. Extra arguments to these help forms
 are errors. Help includes short command descriptions.
@@ -635,7 +659,9 @@ Help and errors use existing buffered logging under `core/command`. Handler logs
 use the target module and its C++ handler function name; the previous logging
 context is restored afterward. Normal filtering, truncation, and overflow apply,
 including best-effort help output as for statistics tables. Logging failure does
-not replace the command result. There are no per-input reply callbacks or sessions.
+not replace the command result. Without logging, handlers still execute and return
+their statuses; help and diagnostics produce no output. There are no per-input
+reply callbacks or sessions.
 
 Add an interactive host console example with buffered stdin input and a
 `console exit` command for orderly shutdown and log flushing. EOF has no command

@@ -2,8 +2,9 @@
 
 A C++20 cooperative scheduler for embedded applications. [PROJECT.md](PROJECT.md)
 is the behavioral specification. The initial implementation supplies real-time
-Linux host and deterministic fake-time platforms, plus an STM32H563 adapter and
-a CubeMX-based DaveOS LED example.
+Linux host and deterministic fake-time platforms, an STM32H563 adapter and
+CubeMX-based LED example, an optional logging service, and command dispatch with
+an interactive host console.
 
 ## Build and run
 
@@ -104,8 +105,9 @@ meson setup build/arm --cross-file meson/stm32h563.ini
 meson compile -C build/arm
 ```
 
-This builds a Cortex-M33 static archive that instantiates the scheduler and queue
-APIs without host dependencies. The STM32 adapter library is also built, even with examples disabled.
+This builds a Cortex-M33 static archive that instantiates the scheduler, queue,
+command dispatcher, and optional logger APIs without host dependencies. The
+STM32 adapter library is also built, even with examples disabled.
 Neither static library is a firmware image.
 The cross-file uses the Cortex-M33 FPv5 single-precision hard-float ABI for both
 C and C++, matching the generated CubeMX toolchain.
@@ -335,9 +337,10 @@ errors use ordinary best-effort buffered logging under `core/command`. Output
 buffer overflow and filtering apply just as for statistics tables; increase the
 logger's capacity if the default cannot accommodate a full tree.
 
-Run the host console example with:
+Build and run the host console example with:
 
 ```sh
+meson compile -C build/host console-host
 ./build/host/examples/console/console-host
 # Try: help, console echo "Hello World", console exit
 ```
@@ -378,9 +381,9 @@ meson compile -C build/tsan -j 4
 meson test -C build/tsan --print-errorlogs
 ```
 
-GitHub Actions runs host/fake tests, sanitizers, format/lint checks, and the ARM core
-and LED firmware builds. Allocation tests instrument C++ `new` during representative core
-operations in ordinary and ASan builds (TSan owns its own allocator interceptors);
+GitHub Actions runs host/fake tests, a host build with logging disabled, sanitizers,
+format/lint checks, and the ARM core and LED firmware builds. Allocation tests
+instrument C++ `new` during representative core operations in ordinary and ASan builds (TSan owns its own allocator interceptors);
 they do not certify allocator behavior inside every platform libc
 formatting implementation. ARM firmware must validate its chosen libc as well.
 
