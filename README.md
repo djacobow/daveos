@@ -16,8 +16,8 @@ there are no Python package dependencies yet.
 meson setup build/host --native-file meson/clang.ini
 meson compile -C build/host
 meson test -C build/host --print-errorlogs
-./build/host/hello-host
-./build/host/system-host
+./build/host/examples/hello/hello-host
+./build/host/examples/system/system-host
 ```
 
 The host configuration also builds fake-time tests and examples. To build only the
@@ -27,7 +27,7 @@ fake adapter:
 meson setup build/fake --native-file meson/clang.ini -Dplatform=fake
 meson compile -C build/fake
 meson test -C build/fake --print-errorlogs
-./build/fake/system-fake
+./build/fake/examples/system/system-fake
 ```
 
 `-Dtests=false` omits Catch2 and unit/integration test executables.
@@ -37,6 +37,28 @@ meson test -C build/fake --print-errorlogs
 All generated files, downloaded test sources, and analysis caches live under the
 ignored `build/` directory. It can be removed entirely and regenerated. Installed
 toolchains in `tools/external/` are separately ignored inputs, not build outputs.
+
+## Build structure
+
+Build definitions follow the dependency and target directories:
+
+- `src/core/meson.build`: allocation-free core headers.
+- `src/platform/{host,fake,stm32h5}/meson.build`: reusable adapter libraries.
+- `platform/stm32h5/{cmsis,hal}/meson.build`: vendor headers, device flags,
+  and HAL component source dependencies.
+- `examples/{hello,system,stm32h563_blinky}/meson.build`: application targets
+  that select dependencies and supply their own configuration.
+- `tests/catch2/meson.build`: test framework dependency; other test directories
+  define their respective test executables.
+- `tools/meson.build`: formatting and lint targets.
+
+The root `meson.build` selects the platform and includes these groups. HAL sources
+compile separately for each firmware target, using that target's
+`stm32h5xx_hal_conf.h`. Host/fake configurations do not require ST submodules;
+STM32 configurations require CMSIS even when examples are disabled.
+
+Example and test binaries live in their corresponding directories under `build/`.
+Use `meson test -C build/host` to run tests without depending on binary paths.
 
 ## Formatting and linting
 
@@ -83,7 +105,8 @@ meson compile -C build/arm
 ```
 
 This builds a Cortex-M33 static archive that instantiates the scheduler and queue
-APIs without host dependencies. The compile check alone is not a firmware image.
+APIs without host dependencies. The STM32 adapter library is also built, even with examples disabled.
+Neither static library is a firmware image.
 The cross-file uses the Cortex-M33 FPv5 single-precision hard-float ABI for both
 C and C++, matching the generated CubeMX toolchain.
 
@@ -103,8 +126,8 @@ cross-compiled, but not tested on hardware.
 The CubeMX source project is `examples/stm32h563_blinky/blinky_demo.ioc`, selecting
 STM32H563ZIT6. Keep generated Core sources, the startup assembly, and the FLASH
 linker script in Git. Copied drivers and generated CMake files are ignored;
-Meson owns the build. After CubeMX regeneration, update the example's HAL source
-list if enabled peripherals change. Run builds through Meson to keep all outputs
+Meson owns the build. After CubeMX regeneration, update the example's HAL dependency
+selection if enabled peripherals change. Run builds through Meson to keep all outputs
 under the repository's `build/` directory.
 
 The generated `main.c` calls `DaveOS_Run()` from a CubeMX USER CODE section after
@@ -174,8 +197,8 @@ The optional numeric template arguments are event slots, application timer slots
 log records, and message bytes, defaulting to `32, 16, 32, 128`. Subscriber storage
 is inferred from the list, and task storage from the descriptor arrays.
 
-See [hello.cc](examples/hello.cc) for a complete program and
-[system.cc](examples/system.cc) for repeating work, events, interrupt timers,
+See [hello.cc](examples/hello/hello.cc) for a complete program and
+[system.cc](examples/system/system.cc) for repeating work, events, interrupt timers,
 deferred task execution, and statistics output.
 
 Modules, the platform, subscriber contexts, and module/task name strings must
