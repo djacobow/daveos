@@ -9,8 +9,10 @@ an interactive host console.
 ## Build and run
 
 Install Meson (1.3 or newer), Ninja, clang++, Python 3, clang-format 15, and
-cppcheck. The first test-enabled setup downloads Catch2 3.16.0 and verifies its
-SHA-256. It is a test-only dependency. Python helpers use only the standard library;
+cppcheck 2.19.0. CI builds this pinned version from a checksum-verified upstream
+archive under `build/ci-tools/`; Ubuntu 24.04’s packaged 2.13 cannot expand
+the C++20 `__VA_OPT__` used by our enum macros. The first test-enabled setup
+downloads Catch2 3.16.0 and verifies its SHA-256. It is a test-only dependency. Python helpers use only the standard library;
 there are no Python package dependencies yet.
 
 ```sh
