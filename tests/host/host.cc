@@ -17,8 +17,8 @@ TEST_CASE(
   Host platform;
   TestModule module;
   Sink sink;
-  auto scheduler = make_scheduler<Event>(platform, ModuleList{&module},
-                                         SubscriberList{sink.subscriber()});
+  auto logger = make_logger(platform, SubscriberList{sink.subscriber()});
+  auto scheduler = make_scheduler<Event>(platform, ModuleList{&module}, logger);
   int sockets[2];
   REQUIRE(::socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) == 0);
   std::binary_semaphore callback_started(0), interrupt_done(0);
@@ -63,9 +63,13 @@ TEST_CASE(
   ::close(sockets[1]);
   CHECK(concurrent);
   CHECK(schedule_status == Status::ok);
+#if DAVEOS_LOGGING
   REQUIRE(sink.records.size() == 2);
   CHECK(sink.records[0].task == "interrupt");
   CHECK(sink.records[1].task == "first");
+#else
+  CHECK(sink.records.empty());
+#endif
 }
 
 TEST_CASE("host timer runs in interrupt context and finishes before shutdown") {

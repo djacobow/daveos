@@ -5,6 +5,7 @@
 #include <utility>
 
 #include "daveos/core/module.h"
+#include "daveos/core/queue.h"
 
 namespace daveos::core {
 
@@ -33,31 +34,26 @@ struct Statistics {
   std::array<TaskStatistics, Tasks> tasks;
   std::uint64_t event_overflows = 0;
   std::uint64_t timer_overflows = 0;
-  LogCounters logs;
 };
 
 // Fixed-storage cooperative scheduler. Prefer make_scheduler() for deduction.
-// Event is the application's enum. ModuleList determines module/task capacity;
-// SubscriberList determines output capacity. Other sizes are template
-// arguments, and MessageSize includes the log record's terminating NUL.
-// Platform, modules, subscriber contexts and name strings must outlive this
-// object. At least one module and one task per module are required.
+// Event is the application's enum. ModuleList determines module/task capacity.
+// Logging is an optional borrowed service; the scheduler owns no log buffers.
+// Platform, modules, logger and name strings must outlive this
+// object. At least one module is required; task arrays may be empty.
 // One thread owns init()/run()/destruction; these are never ISR entry points.
-template <typename Event, typename Modules, typename Subscribers, typename P,
-          std::size_t EventCapacity = 32, std::size_t TimerCapacity = 16,
-          std::size_t LogCapacity = 32, std::size_t MessageSize = 128>
+template <typename Event, typename Modules, typename Logging, typename P,
+          std::size_t EventCapacity = 32, std::size_t TimerCapacity = 16>
 class Scheduler;
 
-template <typename Event, typename P, typename... Modules,
-          std::size_t Subscribers, std::size_t EventCapacity,
-          std::size_t TimerCapacity, std::size_t LogCapacity,
-          std::size_t MessageSize>
-class Scheduler<Event, ModuleList<Modules...>, SubscriberList<Subscribers>, P,
-                EventCapacity, TimerCapacity, LogCapacity, MessageSize>
+template <typename Event, typename P, typename... Modules, typename Logging,
+          std::size_t EventCapacity, std::size_t TimerCapacity>
+class Scheduler<Event, ModuleList<Modules...>, Logging, P, EventCapacity,
+                TimerCapacity>
     final : public SchedulerInterface<Event> {
   static constexpr std::size_t kTasks =
       (std::tuple_size_v<decltype(Modules::tasks())> + ... + 0);
-  static_assert(sizeof...(Modules) > 0 && kTasks > 0);
+  static_assert(sizeof...(Modules) > 0);
   enum class State {
     fresh,
     initializing,
@@ -100,9 +96,8 @@ class Scheduler<Event, ModuleList<Modules...>, SubscriberList<Subscribers>, P,
  public:
   // Bind module interfaces immediately; validation and callbacks wait for
   // init().
-  Scheduler(P& platform, ModuleList<Modules...> modules,
-            SubscriberList<Subscribers> subscribers)
-      : platform_(platform), logger_(platform, subscribers) {
+  Scheduler(P& platform, ModuleList<Modules...> modules, Logging logging = {})
+      : platform_(platform), logging_(logging) {
     this->bind(*this);
     std::apply([&](auto*... module) { (Register(module), ...); },
                modules.items);
@@ -144,7 +139,8 @@ class Scheduler<Event, ModuleList<Modules...>, SubscriberList<Subscribers>, P,
         event_count_ = 0;
       }
     }
-    if (status != Status::ok) logger_.flush();
+    if constexpr (!std::is_same_v<Logging, NoLogging>)
+      if (status != Status::ok) logging_.flush();
     return status;
   }
 
@@ -247,7 +243,8 @@ class Scheduler<Event, ModuleList<Modules...>, SubscriberList<Subscribers>, P,
         }
         continue;
       }
-      if (logger_.dispatch()) continue;
+      if constexpr (!std::is_same_v<Logging, NoLogging>)
+        if (logging_.dispatch()) continue;
       bool sleep = platform_.can_sleep();
       for (const auto& module : modules_) {
         ContextGuard context(platform_, {module.name, "can_sleep"});
@@ -257,6 +254,8 @@ class Scheduler<Event, ModuleList<Modules...>, SubscriberList<Subscribers>, P,
       {
         Guard guard(platform_);
         if (stop_requested_) continue;
+        if constexpr (!std::is_same_v<Logging, NoLogging>)
+          if (!logging_.empty()) continue;
         for (const auto& task : tasks_)
           if (task.active && task.due < deadline) deadline = task.due;
         timers_[TimerCapacity] = {deadline != kForever, deadline, nullptr};
@@ -275,7 +274,7 @@ class Scheduler<Event, ModuleList<Modules...>, SubscriberList<Subscribers>, P,
       event_count_ = 0;
     }
     platform_.quiesce();
-    logger_.flush();
+    if constexpr (!std::is_same_v<Logging, NoLogging>) logging_.flush();
     {
       Guard guard(platform_);
       state_ = State::stopped;
@@ -347,14 +346,11 @@ class Scheduler<Event, ModuleList<Modules...>, SubscriberList<Subscribers>, P,
     }
     return Status::not_found;
   }
-  void minimum(Level level) { logger_.minimum(level); }
   // Synchronized copy, available in every lifecycle state, including from ISRs.
   // Callers own the values, but module/task name strings remain borrowed.
   Statistics<kTasks> snapshot() {
     Guard guard(platform_);
-    auto snapshot = statistics_;
-    snapshot.logs = logger_.counters();
-    return snapshot;
+    return statistics_;
   }
   // Reset timing/counters while retaining names, pending work and buffered
   // logs. An in-progress task records its whole iteration when it subsequently
@@ -366,11 +362,11 @@ class Scheduler<Event, ModuleList<Modules...>, SubscriberList<Subscribers>, P,
       statistics_.tasks[index].module = tasks_[index].module_name;
       statistics_.tasks[index].task = tasks_[index].name;
     }
-    logger_.reset();
   }
   // Queue an info-level snapshot table; it may be filtered, truncated or
   // dropped.
   void log_statistics() {
+#if DAVEOS_LOGGING
     auto stats = snapshot();
     this->log(Level::info,
               "Module/task | calls late | lateness min max avg (us)");
@@ -383,12 +379,10 @@ class Scheduler<Event, ModuleList<Modules...>, SubscriberList<Subscribers>, P,
           static_cast<unsigned long long>(task.min_duration),
           static_cast<unsigned long long>(task.max_duration), task.average());
     }
-    this->log(Level::info,
-              "Overflow events=%llu timers=%llu logs=%llu truncated=%llu",
+    this->log(Level::info, "Overflow events=%llu timers=%llu",
               static_cast<unsigned long long>(stats.event_overflows),
-              static_cast<unsigned long long>(stats.timer_overflows),
-              static_cast<unsigned long long>(stats.logs.dropped),
-              static_cast<unsigned long long>(stats.logs.truncated));
+              static_cast<unsigned long long>(stats.timer_overflows));
+#endif
   }
 
  private:
@@ -418,7 +412,6 @@ class Scheduler<Event, ModuleList<Modules...>, SubscriberList<Subscribers>, P,
         [](void* self) { return static_cast<M*>(self)->permits_sleep(); }};
     module->bind(*this);
     constexpr auto descriptors = M::tasks();
-    static_assert(descriptors.size() > 0);
     for (std::size_t index = 0; index < descriptors.size(); ++index) {
       tasks_[task_count_] = {
           module,
@@ -441,14 +434,6 @@ class Scheduler<Event, ModuleList<Modules...>, SubscriberList<Subscribers>, P,
   }
   Status Validate() {
     if (registration_error_) return Status::invalid_argument;
-    for (std::size_t index = 0; index < modules_.size(); ++index) {
-      const char* name = modules_[index].name;
-      if (!name || !*name) return Status::invalid_argument;
-      for (std::size_t previous = 0; previous < index; ++previous) {
-        if (std::strcmp(name, modules_[previous].name) == 0)
-          return Status::duplicate_name;
-      }
-    }
     for (std::size_t index = 0; index < kTasks; ++index) {
       if (!tasks_[index].name || !*tasks_[index].name)
         return Status::invalid_argument;
@@ -489,8 +474,17 @@ class Scheduler<Event, ModuleList<Modules...>, SubscriberList<Subscribers>, P,
       }
     return Status::not_found;
   }
+  Status Invoke(Context context, Status (*callback)(void*), void* argument) {
+    if (platform_.in_interrupt()) return Status::invalid_argument;
+    {
+      Guard guard(platform_);
+      if (state_ != State::running) return Status::not_running;
+    }
+    ContextGuard guard(platform_, context);
+    return callback(argument);
+  }
   Status LogArgs(Level level, const char* format, std::va_list args) {
-    return logger_.write(level, format, args);
+    return logging_.write(level, format, args);
   }
   // Called under the platform guard; the final slot is the scheduler's own wake
   // timer.
@@ -537,7 +531,7 @@ class Scheduler<Event, ModuleList<Modules...>, SubscriberList<Subscribers>, P,
     }
   }
   P& platform_;
-  Logger<LogCapacity, MessageSize, Subscribers, P> logger_;
+  [[no_unique_address]] Logging logging_;
   std::array<Registration, sizeof...(Modules)> modules_{};
   std::array<Task, kTasks> tasks_{};
   std::array<EventRecord, EventCapacity> events_{};
@@ -549,24 +543,25 @@ class Scheduler<Event, ModuleList<Modules...>, SubscriberList<Subscribers>, P,
   Status failure_ = Status::initialization_failed;
 };
 
-// Deduce module, subscriber and platform types; optional sizes are event slots,
-// application timer slots, log slots, and bytes per log message, respectively.
-// The overload without subscribers disables delivery while keeping the log API.
+// Deduce module/platform types; optional sizes are event and timer slots.
+// With no logger there is no logging storage or work. An attached logger is
+// borrowed and must use the same platform and outlive the scheduler.
 template <typename Event, std::size_t Events = 32, std::size_t Timers = 16,
-          std::size_t Logs = 32, std::size_t Message = 128, typename P,
-          typename... Modules, std::size_t Subscribers>
-auto make_scheduler(P& platform, ModuleList<Modules...> modules,
-                    SubscriberList<Subscribers> subscribers) {
-  return Scheduler<Event, ModuleList<Modules...>, SubscriberList<Subscribers>,
-                   P, Events, Timers, Logs, Message>(platform, modules,
-                                                     subscribers);
+          typename P, typename... Modules>
+auto make_scheduler(P& platform, ModuleList<Modules...> modules) {
+  return Scheduler<Event, ModuleList<Modules...>, NoLogging, P, Events, Timers>(
+      platform, modules);
 }
 template <typename Event, std::size_t Events = 32, std::size_t Timers = 16,
-          std::size_t Logs = 32, std::size_t Message = 128, typename P,
-          typename... Modules>
-auto make_scheduler(P& platform, ModuleList<Modules...> modules) {
-  return make_scheduler<Event, Events, Timers, Logs, Message>(platform, modules,
-                                                              SubscriberList{});
+          typename P, typename... Modules, typename L>
+auto make_scheduler(P& platform, ModuleList<Modules...> modules, L& logger) {
+#if DAVEOS_LOGGING
+  return Scheduler<Event, ModuleList<Modules...>, LogService<L>, P, Events,
+                   Timers>(platform, modules, LogService<L>(logger));
+#else
+  (void)logger;
+  return make_scheduler<Event, Events, Timers>(platform, modules);
+#endif
 }
 
 

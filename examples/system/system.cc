@@ -1,5 +1,6 @@
 #include <cstdio>
 
+#include "daveos/core/logger.h"
 #include "daveos/core/scheduler.h"
 #ifdef DAVEOS_FAKE
 #include "daveos/platform/fake/platform.h"
@@ -14,7 +15,7 @@ using namespace daveos::core;
 enum class Event { pulse };
 class Producer final : public Module<Producer, Event> {
  public:
-  Producer() : Module("producer") {}
+  static constexpr const char* name() { return "producer"; }
   static constexpr auto tasks() {
     return std::array{
         TaskDescriptor<Producer>{"pulse", &Producer::pulse},
@@ -28,7 +29,8 @@ class Producer final : public Module<Producer, Event> {
     return Status::ok;
   }
   void pulse() {
-    I_("pulse %u", ++count_);
+    ++count_;
+    I_("pulse %u", count_);
     scheduler().post(Event::pulse, this);
     if (count_ == 3) {
       scheduler().cancel(*this, &Producer::pulse);
@@ -49,7 +51,7 @@ class Producer final : public Module<Producer, Event> {
 };
 class Consumer final : public Module<Consumer, Event> {
  public:
-  Consumer() : Module("consumer") {}
+  static constexpr const char* name() { return "consumer"; }
   static constexpr auto tasks() {
     return std::array{TaskDescriptor<Consumer>{"report", &Consumer::report}};
   }
@@ -70,9 +72,10 @@ int main() {
   Platform platform;
   app::Producer producer;
   app::Consumer consumer;
+  auto logger = daveos::core::make_logger(
+      platform, daveos::core::SubscriberList{
+                    daveos::core::Subscriber{nullptr, app::Output}});
   auto scheduler = daveos::core::make_scheduler<app::Event>(
-      platform, daveos::core::ModuleList{&producer, &consumer},
-      daveos::core::SubscriberList{
-          daveos::core::Subscriber{nullptr, app::Output}});
+      platform, daveos::core::ModuleList{&producer, &consumer}, logger);
   return scheduler.run() == daveos::core::Status::ok ? 0 : 1;
 }

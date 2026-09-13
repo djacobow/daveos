@@ -46,7 +46,7 @@ Build definitions follow the dependency and target directories:
 - `src/platform/{host,fake,stm32h5}/meson.build`: reusable adapter libraries.
 - `platform/stm32h5/{cmsis,hal}/meson.build`: vendor headers, device flags,
   and HAL component source dependencies.
-- `examples/{hello,system,stm32h563_blinky}/meson.build`: application targets
+- `examples/{hello,system,console,stm32h563_blinky}/meson.build`: application targets
   that select dependencies and supply their own configuration.
 - `tests/catch2/meson.build`: test framework dependency; other test directories
   define their respective test executables.
@@ -174,7 +174,7 @@ enum class Event { ready };
 
 class Blinker : public Module<Blinker, Event> {
  public:
-  Blinker() : Module("blinker") {}
+  static constexpr const char* name() { return "blinker"; }
   static constexpr auto tasks() {
     return std::array{TaskDescriptor<Blinker>{"tick", &Blinker::tick}};
   }
@@ -191,11 +191,26 @@ class Blinker : public Module<Blinker, Event> {
 };
 ```
 
-Construct a platform, modules, and subscriber objects before the scheduler. Use
-`make_scheduler<Event>(platform, ModuleList{&one, &two}, SubscriberList{...})`.
-The optional numeric template arguments are event slots, application timer slots,
-log records, and message bytes, defaulting to `32, 16, 32, 128`. Subscriber storage
-is inferred from the list, and task storage from the descriptor arrays.
+Construct a platform and modules before the scheduler. Without logging, use
+`make_scheduler<Event>(platform, ModuleList{&one, &two})`. The optional numeric
+template arguments now specify only event and timer slots, defaulting to `32, 16`.
+Task storage is inferred from module descriptors.
+
+To attach logging, include `daveos/core/logger.h` and construct an application-owned
+logger before the scheduler:
+
+```cpp
+auto logger = make_logger(platform, SubscriberList{Subscriber{nullptr, Output}});
+auto scheduler = make_scheduler<Event>(platform, modules, logger);
+```
+
+The logger and scheduler must use the same platform. `make_logger<32, 128>` controls
+record capacity and message bytes (including the terminating NUL); subscriber
+storage is inferred from the list. The logger and subscriber contexts must outlive
+the scheduler. Do not move an attached logger. The scheduler stores only a borrowed
+attachment, not the buffers. Use `logger.minimum(Level::debug)`,
+`logger.counters()`, and `logger.reset()` for logging configuration and diagnostics.
+Scheduler snapshots/resets cover task, event, and timer statistics separately.
 
 See [hello.cc](examples/hello/hello.cc) for a complete program and
 [system.cc](examples/system/system.cc) for repeating work, events, interrupt timers,
@@ -220,10 +235,35 @@ I_("started");
 W_("retry %u", retry_count);
 ```
 
-These macros call `this->scheduler().log(...)` and return its `Status`. They
-preserve format checking, evaluate arguments once, and use the same buffered,
-line-oriented logging. `F_` only selects severity; it does not halt execution.
-Outside module member functions, use an explicit scheduler reference to log.
+With logging enabled, these macros call `this->scheduler().log(...)` and return
+its `Status`. They preserve format checking, evaluate arguments once, and use
+buffered, line-oriented logging. `F_` only selects severity; it does not halt execution.
+Outside module member functions, use `DAVEOS_LOG(scheduler, Level::info, ...)`
+for the same compile-time elision, or call `scheduler.log(...)` directly.
+
+Logging is enabled by default and independent of commands. To build without it:
+
+```sh
+meson setup build/no-logging --native-file meson/clang.ini -Dlogging=false
+meson test -C build/no-logging --print-errorlogs
+```
+
+In that configuration, the macros return `Status::ok` without evaluating any
+arguments. Keep program state changes outside logging arguments. Direct `.log()`
+calls also return `ok`, but C++ still evaluates their arguments. There are no log
+buffers, formatting, or scheduler drain/flush hooks; the logger type becomes empty,
+so applications can retain the same construction code. Without Meson, consistently
+define `DAVEOS_LOGGING=0` across all translation units (default is `1`).
+
+An enabled build can also omit the logger attachment; calls then discard output
+successfully. An attached logger delivers one record during idle time before the
+scheduler checks due work again. Pending output prevents sleep, and enqueueing
+notifies the platform, including from interrupts. Init failure and shutdown flush
+remaining records. Logging counters and resets belong solely to the logger.
+
+Commands run in either build: without logging, help, echo, and diagnostics are
+silent, but handlers and their status results still work, including `console exit`.
+Neither facility requires the other.
 
 `Queue<T, N>` provides ordinary fixed storage. `ThreadSafeQueue<T, N, Platform>`
 uses a suitable platform mutex or falls back to critical sections. All of its
@@ -236,6 +276,76 @@ exceptions; interrupt callers must also keep element operations bounded.
 Callbacks are identified by pointer equality and execute in interrupt context;
 use wrapper functions for separate timers. Zero delays are rejected. Pre-run timer
 requests return `not_running`; pre-run *task* schedules are retained instead.
+
+## Commands
+
+Include `daveos/core/command.h` and expose a constexpr descriptor array:
+
+```cpp
+class Motor : public Module<Motor, Event> {
+ public:
+  static constexpr const char* name() { return "motor"; }
+  static constexpr auto commands() {
+    return std::array{
+        DAVEOS_COMMAND(Motor, "speed", SetSpeed, "Set motor speed")};
+  }
+  Status SetSpeed(CommandArguments args) {
+    if (args.size() != 1) return Status::invalid_argument;
+    I_("requested speed: %.*s", static_cast<int>(args[0].size()), args[0].data());
+    return Status::ok;
+  }
+};
+```
+
+`DAVEOS_COMMAND` captures `SetSpeed` as both the member-function pointer and its
+logging name. Logs from this handler identify `motor/SetSpeed`. Task and command
+arrays default to empty; command-only modules need no task. Module names are now
+static constexpr accessors, not constructor arguments. Modules with different
+instance names must use different template instantiations. Names must be nonempty
+and unique ignoring ASCII case; registration checks this at compile time.
+
+Construct `CommandDispatcher dispatcher(modules, scheduler)` using the same
+`ModuleList` supplied to the scheduler. Call `dispatcher.dispatch(line)` from a
+normal scheduled task or event callback, after initialization. The application
+collects complete lines and serializes inputs. Interrupt-time dispatch is rejected,
+and dispatch before `run()` or after shutdown returns `not_running`.
+
+`motor speed 100` calls `SetSpeed` with just `100`. Matching ignores ASCII case:
+an exact name wins, otherwise a unique prefix is accepted. Override
+`static constexpr const char* command_prefix()` to route using another name.
+Prefixes and command names allow ASCII letters, digits, `_`, and `-`; duplicates,
+invalid names/callback metadata, and reserved `help` collisions fail compilation.
+
+Double quotes group whole arguments, including empty arguments; mixed forms such
+as `ab"cd"` are invalid. Backslash escapes quotes and backslashes; other sequences
+remain literal. Handlers receive `CommandArguments`, a
+`std::span<const std::string_view>` valid only until they return, and validate their
+own arguments. Nested calls on the same dispatcher return `busy` and preserve
+active views. Inputs need no terminating NUL; embedded NUL bytes are rejected.
+
+Defaults are 256 input bytes and 16 arguments, counting the prefix and command.
+To customize, use `CommandDispatcher<Event, decltype(modules), 512, 24>`.
+Overflows reject the complete line without invoking a handler. Specific results
+are `parse_error`, `ambiguous_match`, `line_too_long`, and `too_many_arguments`;
+unknown names return `not_found`. Handler results propagate unchanged.
+
+`help` lists the complete tree and short descriptions. `motor` or `motor help`
+lists that module's commands; extra arguments to help are errors. All help and
+errors use ordinary best-effort buffered logging under `core/command`. Output
+buffer overflow and filtering apply just as for statistics tables; increase the
+logger's capacity if the default cannot accommodate a full tree.
+
+Run the host console example with:
+
+```sh
+./build/host/examples/console/console-host
+# Try: help, console echo "Hello World", console exit
+```
+
+Its input thread assembles lines into a bounded queue; a scheduled task dispatches
+them. `console exit` requests shutdown and log flushing. EOF only ends input
+collection and does not stop the scheduler. UART transport integration is left
+to the application and is not part of this example.
 
 ## Fake time and host interrupts
 

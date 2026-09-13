@@ -71,7 +71,8 @@ Each descriptor pairs a human-readable string name with its schedulable member
 function. The array defines the task callbacks and their names; its size provides
 the task count without a separate count accessor. Statistics tables identify tasks
 by module name and task name.
-Module names must be unique within a scheduler. Task names must be unique within
+Module names are nonempty static constexpr metadata and must be unique ignoring
+ASCII case within a scheduler, checked at compile time. Task names must be unique within
 their module; different modules may use the same task names.
 
 ### Module initialization
@@ -242,8 +243,9 @@ Provide an API to obtain a snapshot of per-task statistics and diagnostic counte
 and an explicit operation to reset them. Also provide a helper that logs a readable
 table from a snapshot, identifying tasks by module and task name and showing
 execution counts, late-start counts, maximum lateness, and minimum, maximum, and
-average execution duration. Include diagnostic counters such as event and timer
-overflows, dropped logs, and truncated messages.
+average execution duration. Include event and timer overflow counters. Logging
+counters (dropped and truncated messages) belong to the logger and have their own
+snapshot/reset API.
 
 ### Error reporting
 
@@ -417,7 +419,35 @@ delivery metadata; the event callback still receives only the enum value.
 
 ## Logging
 
-Logging is accessible to all modules.
+Logging is accessible to all modules through an optional service.
+
+### Ownership and optional builds
+
+Logging is an application-owned optional service, independent of commands and
+outside `ModuleList`. Construct the logger before the scheduler and pass it by
+reference when attaching it; it and its subscribers must outlive the scheduler.
+The scheduler owns no logging buffers, subscriber storage, filtering state, or
+logging counters. Logger construction makes logging available before module
+initialization. Calls through `scheduler().log(...)` remain forwarding conveniences.
+
+A build-wide Meson boolean `logging`, enabled by default, controls logging support.
+With logging disabled, severity macros return `Status::ok` without evaluating
+any arguments, and logging buffers, formatting, and scheduler logging hooks are
+omitted. Direct log calls become successful no-ops but still evaluate arguments
+according to normal C++ function-call rules. With logging enabled but no logger
+attached, log calls also return `Status::ok` and discard output. Commands and
+logging support all four combinations independently.
+
+The logger owns its severity threshold, diagnostic counters, and reset API.
+Scheduler snapshots and resets cover only task, event, and timer statistics;
+the scheduler's table helper uses the optional logging API. A scheduler without
+an attached logger has no log-draining work. An attached logger delivers one
+record during idle dispatch, after which the scheduler checks due tasks/events
+again. Pending records prevent sleep. Successful enqueue, including from interrupt
+context, notifies the platform so idle delivery cannot be stranded by a race with
+sleep entry. Initialization failure and shutdown flush remaining records.
+
+### Record and delivery contract
 
 - Initially use printf-style formatting during the logging call, capturing argument
   values into fixed message storage before returning, including in interrupt context.
@@ -433,7 +463,7 @@ Logging is accessible to all modules.
   automatically halt, reset, or stop the scheduler
 - Without subscribers, messages are discarded. A host subscriber could print to
   standard output; an embedded subscriber could write to a UART.
-- Subscribers are supplied in a list at construction time and are available for
+- Subscribers are supplied in a list at logger construction time and are available for
   initialization diagnostics. Fixed subscriber storage is sized at compile time
   from that list; no separate subscriber-capacity setting is needed.
 - logging is buffered and may be called from module callbacks and interrupt
@@ -552,3 +582,65 @@ These checks follow from the agreed behavior; they do not introduce additional A
 
 Exact C++ signatures, status enumerator names, timer rearming mechanics, and storage
 layout can be settled during implementation while preserving this specification.
+
+
+
+## Command System
+
+Provide an allocation-free dispatcher in `daveos::core`, separate from scheduler
+internals. The application passes the same `ModuleList` used by its scheduler and
+its `SchedulerInterface<Event>&`. `dispatch(std::string_view)` returns `Status`.
+Applications assemble complete lines and dispatch them from normal scheduler
+callbacks after successful initialization. Interrupt input must be buffered by
+the application. All input shares one command stream; all output uses logging.
+
+Modules expose constexpr command descriptor arrays containing command names,
+short help strings, member-function callbacks, and C++ handler names. A helper
+macro captures the callback and C++ function name from one identifier. Handlers
+return `Status` and receive `std::span<const std::string_view>` containing only
+arguments after the module prefix and command. These borrowed views last until
+the handler returns. Handlers validate their own argument counts and values.
+Default task and command arrays are empty; command-only modules need no dummy
+task. Modules without commands do not appear in routing or help.
+
+Module names are static constexpr metadata exposed by `name()`, replacing the
+base constructor's name argument. Distinct names for instances require distinct
+template instantiations. Command prefixes default to module names and may be
+overridden. Compile-time validation rejects empty or duplicate module names,
+duplicate command prefixes, duplicate commands within a module, invalid callback
+metadata, and reserved `help` collisions. Comparisons are ASCII case-insensitive.
+Command names and prefixes contain only ASCII letters, digits, underscores, and
+hyphens; display names may contain spaces if the command prefix is overridden.
+
+The dispatcher owns fixed storage, with template defaults of 256 input bytes
+and 16 arguments including prefix and command. Overflow rejects the entire line
+without truncation or handler invocation. Tokenization happens exactly once.
+ASCII whitespace separates arguments. Double quotes must surround whole
+arguments; empty quoted arguments are preserved. Mixed quoted/unquoted forms,
+unmatched quotes, and embedded NUL bytes are parse errors. Backslash escapes
+only a double quote or another backslash, inside or outside quotes; other
+backslashes remain literal. Input views need no terminating NUL. Blank lines
+succeed without action. Nested dispatch on the same instance returns
+`Status::busy` without changing active arguments; application code serializes
+input rather than calling the dispatcher concurrently.
+
+At both routing levels an exact case-insensitive match wins, otherwise a unique
+prefix wins. Unknown names return `not_found`; ambiguous matches, parse errors,
+oversized lines, and too many arguments have distinct error statuses. Argument
+case is preserved. `help` prints the complete tree, while `<module>` and
+`<module> help` print that module's commands. Extra arguments to these help forms
+are errors. Help includes short command descriptions.
+
+Help and errors use existing buffered logging under `core/command`. Handler logs
+use the target module and its C++ handler function name; the previous logging
+context is restored afterward. Normal filtering, truncation, and overflow apply,
+including best-effort help output as for statistics tables. Logging failure does
+not replace the command result. There are no per-input reply callbacks or sessions.
+
+Add an interactive host console example with buffered stdin input and a
+`console exit` command for orderly shutdown and log flushing. EOF has no command
+meaning and must not stop the scheduler or cause a busy loop. STM32 UART input
+integration is deferred. Test parsing, matching, boundaries, help, context
+restoration, nested calls, command-only modules, compile-time validation, and
+allocation-free core operations on the fake platform, alongside existing host,
+sanitizer, ARM compile, formatting, and lint checks.

@@ -26,6 +26,8 @@ jobs:
           meson setup build/fake --native-file meson/clang.ini -Dplatform=fake
           meson compile -C build/fake -j 2
           meson test -C build/fake --print-errorlogs
+          meson setup build/no-logging --native-file meson/clang.ini -Dlogging=false
+          meson test -C build/no-logging --print-errorlogs
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

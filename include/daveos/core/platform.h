@@ -25,7 +25,11 @@ enum class Status {
   empty,
   busy,
   duplicate_name,
-  truncated
+  truncated,
+  parse_error,
+  ambiguous_match,
+  line_too_long,
+  too_many_arguments
 };
 // All modules finish stage1 before any module begins stage2.
 enum class InitStage { stage1, stage2 };

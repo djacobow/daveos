@@ -1,5 +1,6 @@
 #include <cstdio>
 
+#include "daveos/core/logger.h"
 #include "daveos/core/scheduler.h"
 #ifdef DAVEOS_FAKE
 #include "daveos/platform/fake/platform.h"
@@ -14,7 +15,7 @@ using namespace daveos::core;
 enum class Event { hello };
 class Hello final : public Module<Hello, Event> {
  public:
-  Hello() : Module("hello") {}
+  static constexpr const char* name() { return "hello"; }
   static constexpr auto tasks() {
     return std::array{TaskDescriptor<Hello>{"greet", &Hello::greet}};
   }
@@ -38,9 +39,10 @@ void Output(void*, const LogRecord& record) {
 int main() {
   Platform platform;
   app::Hello hello;
+  auto logger = daveos::core::make_logger(
+      platform, daveos::core::SubscriberList{
+                    daveos::core::Subscriber{nullptr, app::Output}});
   auto scheduler = daveos::core::make_scheduler<app::Event>(
-      platform, daveos::core::ModuleList{&hello},
-      daveos::core::SubscriberList{
-          daveos::core::Subscriber{nullptr, app::Output}});
+      platform, daveos::core::ModuleList{&hello}, logger);
   return scheduler.run() == daveos::core::Status::ok ? 0 : 1;
 }

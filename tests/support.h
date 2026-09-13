@@ -1,9 +1,11 @@
 #pragma once
+#include <algorithm>
 #include <functional>
 #include <string>
 #include <vector>
 
 #include "catch_amalgamated.hpp"
+#include "daveos/core/logger.h"
 #include "daveos/core/scheduler.h"
 #include "daveos/platform/fake/platform.h"
 
@@ -11,17 +13,23 @@ namespace testing {
 using namespace daveos::core;
 using Fake = daveos::platform::fake::Platform;
 enum class Event { first, second };
-struct TestModule : daveos::core::Module<TestModule, Event> {
-  explicit TestModule(const char* name = "module")
-      : daveos::core::Module<TestModule, Event>(name) {}
+template <std::size_t N>
+struct TestName {
+  char value[N];
+  constexpr TestName(const char (&text)[N]) { std::copy_n(text, N, value); }
+};
+template <TestName Name>
+struct NamedModule : daveos::core::Module<NamedModule<Name>, Event> {
+  static constexpr const char* name() { return Name.value; }
   std::function<Status(InitStage)> initializer;
   std::function<void()> first_action, second_action, third_action;
   std::function<void(Event)> receiver;
   bool sleep = true;
   static constexpr auto tasks() {
-    return std::array{TaskDescriptor<TestModule>{"first", &TestModule::first},
-                      TaskDescriptor<TestModule>{"second", &TestModule::second},
-                      TaskDescriptor<TestModule>{"third", &TestModule::third}};
+    return std::array{
+        TaskDescriptor<NamedModule>{"first", &NamedModule::first},
+        TaskDescriptor<NamedModule>{"second", &NamedModule::second},
+        TaskDescriptor<NamedModule>{"third", &NamedModule::third}};
   }
   Status init(InitStage stage) {
     return initializer ? initializer(stage) : Status::ok;
@@ -40,6 +48,7 @@ struct TestModule : daveos::core::Module<TestModule, Event> {
     if (third_action) third_action();
   }
 };
+using TestModule = NamedModule<"module">;
 struct Record {
   Time timestamp;
   Level severity;

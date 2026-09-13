@@ -8,7 +8,7 @@ daveos::platform::stm32h5::Platform* active_platform = nullptr;
 enum class Event { unused };
 class Blinker final : public Module<Blinker, Event> {
  public:
-  Blinker() : Module("blinker") {}
+  static constexpr const char* name() { return "blinker"; }
   static constexpr auto tasks() {
     return std::array{TaskDescriptor<Blinker>{"toggle", &Blinker::toggle}};
   }

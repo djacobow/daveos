@@ -2,25 +2,35 @@
 
 #include <array>
 #include <cstdarg>
-#include <cstdio>
 #include <string_view>
 
-#include "daveos/core/queue.h"
+#include "daveos/core/platform.h"
 
-// Module member-function shorthand. Each expression returns the log Status.
-// Forward the format string and any arguments unchanged for compiler checking.
-// Example: I_("ready") or E_("error %d", code). Arguments are evaluated once,
-// including for filtered messages. F_ sets severity only; it does not halt.
+// Non-Meson consumers default to logging enabled. This setting must agree
+// across every translation unit in an application.
+#ifndef DAVEOS_LOGGING
+#define DAVEOS_LOGGING 1
+#endif
+
+// General shorthand and module severity aliases. Disabled macros evaluate
+// neither the target nor any arguments; their result remains Status::ok.
+// Enabled macros preserve printf checking and evaluate arguments once, even
+// when filtered at runtime. F_ sets severity only; it never halts.
+#if DAVEOS_LOGGING
+#define DAVEOS_LOG(target, level, ...) ((target).log(level, __VA_ARGS__))
+#else
+#define DAVEOS_LOG(target, level, ...) (::daveos::core::Status::ok)
+#endif
 #define D_(...) \
-  (this->scheduler().log(::daveos::core::Level::debug, __VA_ARGS__))
+  DAVEOS_LOG(this->scheduler(), ::daveos::core::Level::debug, __VA_ARGS__)
 #define I_(...) \
-  (this->scheduler().log(::daveos::core::Level::info, __VA_ARGS__))
+  DAVEOS_LOG(this->scheduler(), ::daveos::core::Level::info, __VA_ARGS__)
 #define W_(...) \
-  (this->scheduler().log(::daveos::core::Level::warning, __VA_ARGS__))
+  DAVEOS_LOG(this->scheduler(), ::daveos::core::Level::warning, __VA_ARGS__)
 #define E_(...) \
-  (this->scheduler().log(::daveos::core::Level::error, __VA_ARGS__))
+  DAVEOS_LOG(this->scheduler(), ::daveos::core::Level::error, __VA_ARGS__)
 #define F_(...) \
-  (this->scheduler().log(::daveos::core::Level::fatal, __VA_ARGS__))
+  DAVEOS_LOG(this->scheduler(), ::daveos::core::Level::fatal, __VA_ARGS__)
 
 namespace daveos::core {
 
@@ -39,7 +49,7 @@ struct LogRecord {
   std::string_view message;
 };
 // Non-owning output callback/context pair. The context must outlive the
-// scheduler. Delivery occurs in scheduler context, never synchronously from the
+// logger. Delivery occurs in scheduler context, never synchronously from the
 // log caller.
 struct Subscriber {
   void* context;
@@ -61,107 +71,28 @@ struct LogCounters {
   std::uint64_t truncated = 0;
 };
 
-// Scheduler-owned bounded log buffer. MessageSize includes the terminating NUL.
-// Producers may run in interrupt context; delivery has one scheduler consumer.
-// Formatting happens at the call site, so arguments need not survive delivery.
-// The application must choose a printf implementation suitable for its ISR and
-// allocation constraints; buffering alone does not make libc formatting
-// ISR-safe.
-template <std::size_t Capacity, std::size_t MessageSize,
-          std::size_t Subscribers, typename P>
-class Logger {
-  static_assert(MessageSize > 0);
-  struct Stored {
-    Time timestamp{};
-    Level severity{};
-    Context context{};
-    std::array<char, MessageSize> text{};
-    std::size_t length{};
-  };
-
+// Empty scheduler policy: no storage, formatting, idle work or shutdown work.
+struct NoLogging {
+  static Status write(Level, const char*, std::va_list) { return Status::ok; }
+  static bool dispatch() { return false; }
+  static void flush() {}
+  static bool empty() { return true; }
+};
+// Statically typed, non-owning attachment. The logger and scheduler must use
+// the same platform; the logger must outlive scheduler shutdown/destruction.
+template <typename L>
+class LogService {
  public:
-  Logger(P& platform, SubscriberList<Subscribers> subscribers)
-      : platform_(platform), subscribers_(subscribers) {}
-  // Filtered/no-subscriber calls return ok without queuing. full drops the new
-  // record; truncated queues shortened text. Invalid formatting returns an
-  // error.
+  explicit LogService(L& logger) : logger_(logger) {}
   Status write(Level level, const char* format, std::va_list args) {
-    if (!format) return Status::invalid_argument;
-    Stored record;
-    record.timestamp = platform_.now();
-    record.context = platform_.in_interrupt() ? Context{"core", "interrupt"}
-                                              : platform_.context();
-    record.severity = level;
-    {
-      Guard guard(platform_);
-      if (level < minimum_ || Subscribers == 0) return Status::ok;
-    }
-    int length = std::vsnprintf(record.text.data(), MessageSize, format, args);
-    if (length < 0) return Status::invalid_argument;
-    bool truncated = static_cast<std::size_t>(length) >= MessageSize;
-    record.length =
-        truncated ? MessageSize - 1 : static_cast<std::size_t>(length);
-    Guard guard(platform_);
-    if (records_.full()) {
-      ++counters_.dropped;
-      return Status::full;
-    }
-    if (truncated) ++counters_.truncated;
-    records_.push(record);
-    platform_.notify();
-    return truncated ? Status::truncated : Status::ok;
+    return logger_.write(level, format, args);
   }
-  // Deliver one record to all subscribers outside the lock; false means empty.
-  bool dispatch() {
-    Stored record;
-    {
-      Guard guard(platform_);
-      if (records_.pop(record) != Status::ok) return false;
-    }
-    LogRecord view{record.timestamp,
-                   record.severity,
-                   record.context.module,
-                   record.context.task,
-                   {record.text.data(), record.length}};
-    ContextGuard context(platform_, {"core", "logging"});
-    for (const auto& subscriber : subscribers_.items) {
-      if (subscriber.write) subscriber.write(subscriber.context, view);
-    }
-    return true;
-  }
-  // Drain records during shutdown/init failure. Subscriber callbacks must
-  // finish.
-  void flush() {
-    while (dispatch()) {
-    }
-  }
-  // Default is info. Changing the threshold does not discard buffered records.
-  void minimum(Level level) {
-    Guard guard(platform_);
-    minimum_ = level;
-  }
-  bool empty() {
-    Guard guard(platform_);
-    return records_.empty();
-  }
-  // Return a synchronized copy; the caller owns the result.
-  LogCounters counters() {
-    Guard guard(platform_);
-    return counters_;
-  }
-  // Reset diagnostic counts only; retain queued records and the level
-  // threshold.
-  void reset() {
-    Guard guard(platform_);
-    counters_ = {};
-  }
+  bool dispatch() { return logger_.dispatch(); }
+  void flush() { logger_.flush(); }
+  bool empty() { return logger_.empty(); }
 
  private:
-  P& platform_;
-  SubscriberList<Subscribers> subscribers_;
-  Queue<Stored, Capacity> records_;
-  Level minimum_ = Level::info;
-  LogCounters counters_{};
+  L& logger_;
 };
 
 

@@ -6,14 +6,15 @@ using namespace testing;
 
 TEST_CASE("startup is two passes; task deadlines start at run") {
   Fake platform;
-  TestModule one("one"), two("two");
+  NamedModule<"one"> one;
+  NamedModule<"two"> two;
   std::vector<int> stages;
   auto scheduler = make_scheduler<Event>(platform, ModuleList{&one, &two});
   one.initializer = [&](InitStage stage) {
     stages.push_back(stage == InitStage::stage1 ? 1 : 3);
     if (stage == InitStage::stage1) {
       CHECK(&one.scheduler() == &scheduler);
-      CHECK(scheduler.schedule(one, &TestModule::first, 10) == Status::ok);
+      CHECK(scheduler.schedule(one, &decltype(one)::first, 10) == Status::ok);
       platform.advance(100);
     }
     return Status::ok;
@@ -41,11 +42,13 @@ TEST_CASE("startup is two passes; task deadlines start at run") {
 
 TEST_CASE("initialization failure discards work and flushes diagnostics") {
   Fake platform;
-  TestModule module, later("later");
+  TestModule module;
+  NamedModule<"later"> later;
   Sink sink;
   bool ran = false;
-  auto scheduler = make_scheduler<Event>(platform, ModuleList{&module, &later},
-                                         SubscriberList{sink.subscriber()});
+  auto logger = make_logger(platform, SubscriberList{sink.subscriber()});
+  auto scheduler =
+      make_scheduler<Event>(platform, ModuleList{&module, &later}, logger);
   module.first_action = [&] { ran = true; };
   module.initializer = [&](InitStage) {
     scheduler.schedule(module, &TestModule::first, 0);
@@ -61,16 +64,13 @@ TEST_CASE("initialization failure discards work and flushes diagnostics") {
   CHECK(scheduler.run() == Status::initialization_failed);
   CHECK(scheduler.init() == Status::initialization_failed);
   CHECK_FALSE(ran);
+#if DAVEOS_LOGGING
   REQUIRE(sink.records.size() == 1);
   CHECK(sink.records[0].message == "startup failed");
+#else
+  CHECK(sink.records.empty());
+#endif
   CHECK(scheduler.post(Event::first) == Status::not_running);
-}
-
-TEST_CASE("module names must be unique") {
-  Fake platform;
-  TestModule first, second;
-  auto scheduler = make_scheduler<Event>(platform, ModuleList{&first, &second});
-  CHECK(scheduler.init() == Status::duplicate_name);
 }
 
 TEST_CASE(
@@ -128,7 +128,9 @@ TEST_CASE("replacement and self-rescheduling take precedence") {
 TEST_CASE(
     "events preserve broadcasts, exclude sender and overflow explicitly") {
   Fake platform;
-  TestModule sender("sender"), one("one"), two("two");
+  NamedModule<"sender"> sender;
+  NamedModule<"one"> one;
+  NamedModule<"two"> two;
   auto scheduler =
       make_scheduler<Event, 1>(platform, ModuleList{&sender, &one, &two});
   std::vector<int> received;

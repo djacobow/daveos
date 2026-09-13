@@ -1,4 +1,5 @@
-exe = executable('test-logging', 'logging.cc', dependencies: test_support_dep)
+logging_source = get_option('logging') ? 'logging.cc' : 'disabled.cc'
+exe = executable('test-logging', logging_source, dependencies: test_support_dep)
 test('logging', exe, suite: 'unit', timeout: 20)
 
 # Verify the public printf annotation, including failure for mismatched types.

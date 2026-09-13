@@ -3,6 +3,7 @@ subdir('catch2')
 test_support_dep = declare_dependency(include_directories: include_directories('.'),
   dependencies: [fake_dep, catch_dep])
 subdir('core')
+subdir('commands')
 subdir('timers')
 subdir('logging')
 subdir('stm32h5')

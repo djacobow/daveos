@@ -5,3 +5,4 @@
 - [x] Implement the STM32H563 platform, CubeMX startup/linker integration, and DaveOS LED example.
 - [ ] Validate STM32H563 blinking, timer timing, and sleep/wake on the NUCLEO-H563ZI hardware.
 - [ ] Explore a MISRA-friendly alternative to printf-style log formatting.
+- [ ] Add STM32 UART command input using application-owned line buffering.
