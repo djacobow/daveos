@@ -1,0 +1,3 @@
+option('platform', type: 'combo', choices: ['host', 'fake', 'stm32h5'], value: 'host')
+option('tests', type: 'boolean', value: true)
+option('examples', type: 'boolean', value: true)
