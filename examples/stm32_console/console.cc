@@ -38,7 +38,7 @@ class Board final : public Module<Board, Event> {
   static constexpr auto commands() {
     return std::array{
         DAVEOS_COMMAND(Board, "led", Led, "led <1|2|3> <on|off|toggle>"),
-        DAVEOS_COMMAND(Board, "button", Button, "Read BTN1 (PC13)"),
+        DAVEOS_COMMAND(Board, "button", Button, "Read button level"),
         DAVEOS_COMMAND(Board, "stats", Stats, "Log scheduler statistics"),
         DAVEOS_COMMAND(Board, "reset", Reset, "Reset the MCU immediately")};
   }
@@ -89,15 +89,11 @@ class Board final : public Module<Board, Event> {
     if (args.size() != 2 || args[0].size() != 1 || args[0][0] < '1' ||
         args[0][0] > '3')
       return Status::invalid_argument;
-    constexpr std::array<std::uint16_t, 3> pins{LD1_Pin, LD2_Pin, LD3_Pin};
-    const std::array<GPIO_TypeDef*, 3> ports{LD1_GPIO_Port, LD2_GPIO_Port,
-                                             LD3_GPIO_Port};
     auto index = static_cast<std::size_t>(args[0][0] - '1');
     if (args[1] == "toggle")
-      HAL_GPIO_TogglePin(ports[index], pins[index]);
+      board::ToggleLed(index);
     else if (args[1] == "on" || args[1] == "off")
-      HAL_GPIO_WritePin(ports[index], pins[index],
-                        args[1] == "on" ? GPIO_PIN_SET : GPIO_PIN_RESET);
+      board::SetLed(index, args[1] == "on");
     else
       return Status::invalid_argument;
     I_("LED %c %.*s", args[0][0], static_cast<int>(args[1].size()),
@@ -106,8 +102,8 @@ class Board final : public Module<Board, Event> {
   }
   Status Button(CommandArguments args) {
     if (!args.empty()) return Status::invalid_argument;
-    [[maybe_unused]] auto state = HAL_GPIO_ReadPin(BTN1_GPIO_Port, BTN1_Pin);
-    I_("BTN1: %s", state == GPIO_PIN_SET ? "high" : "low");
+    [[maybe_unused]] auto state = board::ReadButton();
+    I_("BTN1: %s", state ? "high" : "low");
     return Status::ok;
   }
   Status Stats(CommandArguments args) {

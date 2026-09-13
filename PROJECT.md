@@ -690,7 +690,7 @@ reply callbacks or sessions.
 
 Add an interactive host console example with buffered stdin input and a
 `console exit` command for orderly shutdown and log flushing. EOF has no command
-meaning and must not stop the scheduler or cause a busy loop. The H755 example provides USART3 input with application-owned line buffering. Test parsing, matching, boundaries, help, context
+meaning and must not stop the scheduler or cause a busy loop. The H563 and H755 examples share USART3 input with application-owned line buffering. Test parsing, matching, boundaries, help, context
 restoration, nested calls, command-only modules, compile-time validation, and
 allocation-free core operations on the fake platform, alongside existing host,
 sanitizer, ARM compile, formatting, and lint checks.

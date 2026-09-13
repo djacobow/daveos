@@ -148,7 +148,7 @@ under the repository's `build/` directory.
 The generated `main.c` calls `DaveOS_Run()` from a CubeMX USER CODE section after
 peripheral initialization. Shared commands, logging, input, and IRQ bridges live
 in `examples/stm32_console/`; each target supplies `board_config.h` and `console.cc`
-for its platform, DMA storage/cache handling, and timer clock.
+for its platform, LED/button access, DMA storage/cache handling, and timer clock.
 The scheduler lives on the main stack; the `.ioc` and FLASH linker script reserve
 16 KiB for it and interrupt frames. GCC's `.su` stack reports are emitted beside
 the example's object files. C++ exceptions and RTTI are disabled. The example
