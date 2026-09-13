@@ -230,8 +230,7 @@ class CommandDispatcher<Event, ModuleList<Modules...>, LineCapacity,
       default:
         break;
     }
-    scheduler_.log(Level::error, "%s (status %u)", message,
-                   static_cast<unsigned>(status));
+    scheduler_.log(Level::error, "%s (status %s)", message, enum_name(status));
 #endif
   }
   SchedulerInterface<Event>& scheduler_;

@@ -690,3 +690,15 @@ and a left-aligned `module.function` field so message text lines up. The default
 context width is 22 characters, with display-only ellipsis for longer names.
 Days use at least three digits; raw records retain microsecond timestamps and
 complete context names.
+
+Status diagnostics use enumerator names rather than numbers. A namespace-scope
+X-macro builder generates an `enum class` with an explicit underlying type and a
+`constexpr enum_name()` overload from one list. Names are borrowed static strings;
+unknown values return `"unknown"`. Explicit values are supported without requiring
+contiguous numbering; duplicate-value aliases are outside this helper's scope.
+
+The UART console echoes buffered input in task context, clears the typed line on
+Return, and logs the submitted command before dispatch. UART interrupts do not
+transmit or log synchronously. Backspace/Delete support basic line editing, and
+log output preserves unfinished input by erasing and redrawing it. Terminal-local
+echo should be disabled; wrapped-line editing is outside the initial scope.

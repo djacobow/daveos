@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <limits>
 
+#include "daveos/core/enum.h"
+
 namespace daveos::core {
 
 
@@ -13,24 +15,25 @@ inline constexpr Time kForever = std::numeric_limits<Time>::max();
 // Shared operation results. Failures normally leave the requested work
 // unchanged; truncated is the exception: the shortened log record has been
 // accepted.
-enum class Status {
-  ok,
-  not_running,
-  already_initialized,
-  already_run,
-  initialization_failed,
-  invalid_argument,
-  not_found,
-  full,
-  empty,
-  busy,
-  duplicate_name,
-  truncated,
-  parse_error,
-  ambiguous_match,
-  line_too_long,
-  too_many_arguments
-};
+#define DAVEOS_STATUS_VALUES(X) \
+  X(ok)                         \
+  X(not_running)                \
+  X(already_initialized)        \
+  X(already_run)                \
+  X(initialization_failed)      \
+  X(invalid_argument)           \
+  X(not_found)                  \
+  X(full)                       \
+  X(empty)                      \
+  X(busy)                       \
+  X(duplicate_name)             \
+  X(truncated)                  \
+  X(parse_error)                \
+  X(ambiguous_match)            \
+  X(line_too_long)              \
+  X(too_many_arguments)
+DAVEOS_ENUM(Status, int, DAVEOS_STATUS_VALUES)
+#undef DAVEOS_STATUS_VALUES
 // All modules finish stage1 before any module begins stage2.
 enum class InitStage { stage1, stage2 };
 // Repeat cadence is based on scheduled time, not callback completion.

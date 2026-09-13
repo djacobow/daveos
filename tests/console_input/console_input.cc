@@ -1,3 +1,4 @@
+#include <string>
 #include <string_view>
 
 #include "../../examples/stm32h755_console/CM7/input.h"
@@ -66,4 +67,51 @@ TEST_CASE("UART errors discard the damaged line through its terminator") {
   CHECK(View(line) == "help");
   CHECK_FALSE(input.pop(line));
   CHECK(input.take_dropped() == 1);
+}
+
+TEST_CASE("UART preview tracks editing and clears after Return or error") {
+  Platform platform;
+  app::Input input(platform);
+  Feed(input,
+       "helx\bp\x7f"
+       "p");
+  CHECK(input.preview().view() == "help");
+  Feed(input, "\r\n");
+  CHECK(input.preview().view().empty());
+  app::Line line;
+  REQUIRE(input.pop(line));
+  CHECK(line.view() == "help");
+  Feed(input, "bad");
+  input.error();
+  CHECK(input.preview().view().empty());
+}
+
+namespace {
+std::string terminal_output;
+void TerminalWrite(std::string_view text) { terminal_output += text; }
+}  // namespace
+TEST_CASE("UART echo clears on submit and preserves input around log output") {
+  terminal_output.clear();
+  app::LineDisplay display(TerminalWrite);
+  app::Line line;
+  line.bytes[0] = 'h';
+  line.size = 1;
+  display.show(line);
+  CHECK(terminal_output == "h");
+  display.show(line);
+  CHECK(terminal_output == "h");
+  line.bytes[1] = 'i';
+  line.size = 2;
+  display.show(line);
+  CHECK(terminal_output == "h\r\x1b[2Khi");
+  terminal_output.clear();
+  display.before_log();
+  TerminalWrite("log\r\n");
+  display.after_log();
+  CHECK(terminal_output == "\r\x1b[2Klog\r\nhi");
+  terminal_output.clear();
+  display.clear();
+  CHECK(terminal_output == "\r\x1b[2K");
+  display.after_log();
+  CHECK(terminal_output == "\r\x1b[2K");
 }

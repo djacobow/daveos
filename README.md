@@ -387,7 +387,7 @@ for the separate core power domains. DaveOS runs only on M7; its critical sectio
 do not synchronize shared state with M4.
 
 Connect USART3 **PD8 TX / PD9 RX**, **1,000,000 baud, 8N1**, no flow control.
-Enable local echo in the terminal if desired. CR, LF, and CRLF terminate input:
+Disable local echo in the terminal: the console echoes input itself. CR, LF, and CRLF terminate input:
 
 ```text
 help
@@ -527,3 +527,27 @@ with the context left aligned in 22 columns. Names longer than that are
 ellipsized for display; records retain their full names. Days expand past three
 digits after 999 days. `daveos::core::LogPrefix<Width>` supplies the shared prefix
 formatter; subscribers still choose the transport and line ending.
+
+### Named enums
+
+`daveos/core/enum.h` generates scoped enums and `constexpr enum_name()` overloads
+from a single list, with no allocation or separate string table to maintain:
+
+```cpp
+#define APP_STATES(X) X(idle) X(running) X(failed, 10)
+DAVEOS_ENUM(State, unsigned, APP_STATES)
+#undef APP_STATES
+// enum_name(State::failed) returns "failed" (const char*).
+```
+
+Declare these at namespace scope. Lookup works through ADL; explicit sparse or
+negative values are supported, duplicate-value aliases are not. Values without
+a named enumerator return `"unknown"`. `daveos::core::Status` uses this mechanism,
+and command diagnostics print status names instead of numeric values.
+
+The H755 console echoes the pending line from its scheduled input task. Return
+clears that line with an ANSI erase-line sequence, then logs `> command` before
+dispatch. Backspace/Delete remove the last character. Incoming logs temporarily
+clear and redraw unfinished input. This is a single-line editor: use an ANSI
+terminal and keep input within the terminal width. Echo remains available without
+logging; the submitted-command record follows normal logging/filtering rules.

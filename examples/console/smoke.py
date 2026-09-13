@@ -5,13 +5,14 @@ import sys
 
 executable = sys.argv[1]
 result = subprocess.run(
-    [executable], input='help\nconsole echo "Hello World"\nconsole exit\n',
+    [executable], input='help\nconsole echo "Hello World"\nconsole exit extra\nconsole exit\n',
     text=True, capture_output=True, timeout=5, check=True)
 if sys.argv[2] == 'enabled':
     for context, message in [('core.command', 'console:'),
                              ('console.Echo', 'Hello World'),
                              ('console.Exit', 'Exiting')]:
         assert f'{context:<22}: {message}' in result.stdout, result.stdout
+    assert '(status invalid_argument)' in result.stdout, result.stdout
     for line in result.stdout.splitlines():
         assert re.match(r'^\[\d{3}:\d{2}:\d{2}:\d{2}\.\d{3}\] [DIWEF] .{22}: ', line), line
 else:

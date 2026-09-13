@@ -17,6 +17,10 @@ Platform* active_platform = nullptr;
 Input<Platform>* active_input = nullptr;
 std::uint8_t rx_byte;
 enum class Event {};
+void Write(std::string_view text) {
+  HAL_UART_Transmit(&huart3, reinterpret_cast<const std::uint8_t*>(text.data()),
+                    static_cast<std::uint16_t>(text.size()), 100);
+}
 class Console final : public Module<Console, Event> {
  public:
   explicit Console(Input<Platform>& input) : input_(input) {}
@@ -43,14 +47,29 @@ class Console final : public Module<Console, Event> {
     return scheduler().schedule(*this, &Console::Poll, 1000, Mode::repeat);
   }
 
+  void output(const LogRecord& record) {
+    display_.before_log();
+    LogPrefix prefix(record);
+    Write(prefix.view());
+    Write(record.message);
+    Write("\r\n");
+    display_.after_log();
+  }
+
  private:
   void Poll() {
     [[maybe_unused]] auto dropped = input_.take_dropped();
     if (dropped)
       W_("Dropped %lu input lines/errors", static_cast<unsigned long>(dropped));
     Line line;
-    if (input_.pop(line))
-      dispatch_(dispatcher_, std::string_view(line.bytes.data(), line.size));
+    if (input_.pop(line)) {
+      display_.clear();
+      if (line.size)
+        I_("> %.*s", static_cast<int>(line.size), line.bytes.data());
+      dispatch_(dispatcher_, line.view());
+    } else {
+      display_.show(input_.preview());
+    }
   }
   Status Led(CommandArguments args) {
     if (args.size() != 2 || args[0].size() != 1 || args[0][0] < '1' ||
@@ -83,20 +102,14 @@ class Console final : public Module<Console, Event> {
     return Status::ok;
   }
   Input<Platform>& input_;
+  LineDisplay display_{Write};
   void* dispatcher_ = nullptr;
   Status (*dispatch_)(void*, std::string_view) = nullptr;
 };
-void Output(void*, const LogRecord& record) {
-  LogPrefix prefix(record);
-  auto text = prefix.view();
-  HAL_UART_Transmit(&huart3, reinterpret_cast<const std::uint8_t*>(text.data()),
-                    static_cast<std::uint16_t>(text.size()), 100);
-  HAL_UART_Transmit(
-      &huart3, reinterpret_cast<const std::uint8_t*>(record.message.data()),
-      static_cast<std::uint16_t>(record.message.size()), 100);
-  constexpr std::uint8_t newline[]{'\r', '\n'};
-  HAL_UART_Transmit(&huart3, newline, sizeof(newline), 100);
+void Output(void* context, const LogRecord& record) {
+  static_cast<Console*>(context)->output(record);
 }
+
 void Receive() {
   if (HAL_UART_Receive_IT(&huart3, &rx_byte, 1) != HAL_OK) Error_Handler();
 }
@@ -134,7 +147,7 @@ extern "C" void DaveOS_Run() {
   app::Console console(input);
   auto modules = ModuleList{&console};
   auto logger =
-      make_logger(platform, SubscriberList{Subscriber{nullptr, app::Output}});
+      make_logger(platform, SubscriberList{Subscriber{&console, app::Output}});
   auto scheduler = make_scheduler<app::Event>(platform, modules, logger);
   CommandDispatcher dispatcher(modules, scheduler);
   console.dispatcher(dispatcher);

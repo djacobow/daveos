@@ -246,3 +246,23 @@ TEST_CASE("thread-safe queue falls back to critical sections without a mutex") {
   CHECK(value == 3);
   CHECK(platform.depth == 0);
 }
+
+namespace enum_test {
+#define TEST_VALUES(X) X(negative, -4) X(zero, 0) X(next) X(sparse, 100)
+DAVEOS_ENUM(Value, int, TEST_VALUES)
+#undef TEST_VALUES
+static_assert(std::string_view(enum_name(Value::negative)) == "negative");
+static_assert(static_cast<int>(Value::next) == 1);
+static_assert(std::string_view(enum_name(static_cast<Value>(99))) == "unknown");
+}  // namespace enum_test
+
+TEST_CASE(
+    "enum names preserve scoped values and handle invalid representations") {
+  CHECK(std::string_view(enum_name(enum_test::Value::sparse)) == "sparse");
+  CHECK(std::string_view(enum_name(Status::invalid_argument)) ==
+        "invalid_argument");
+  CHECK(std::string_view(enum_name(Status::too_many_arguments)) ==
+        "too_many_arguments");
+  CHECK(std::string_view(enum_name(static_cast<Status>(-1))) == "unknown");
+  CHECK(std::string_view(enum_name(static_cast<Status>(999))) == "unknown");
+}
