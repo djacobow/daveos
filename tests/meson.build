@@ -1,4 +1,7 @@
 subdir('catch2')
+# Shared fixtures remain in tests/support.h.
+test_support_dep = declare_dependency(include_directories: include_directories('.'),
+  dependencies: [fake_dep, catch_dep])
 subdir('core')
 subdir('timers')
 subdir('logging')

@@ -1,2 +1,2 @@
-exe = executable('test-host', '../host.cc', dependencies: [host_dep, fake_dep, catch_dep])
+exe = executable('test-host', 'host.cc', dependencies: [host_dep, test_support_dep])
 test('host', exe, suite: 'integration', timeout: 30)

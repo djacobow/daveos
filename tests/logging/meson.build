@@ -1,4 +1,4 @@
-exe = executable('test-logging', '../logging.cc', dependencies: [fake_dep, catch_dep])
+exe = executable('test-logging', 'logging.cc', dependencies: test_support_dep)
 test('logging', exe, suite: 'unit', timeout: 20)
 
 # Verify the public printf annotation, including failure for mismatched types.

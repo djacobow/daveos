@@ -1,2 +1,2 @@
-exe = executable('test-allocation', '../allocation.cc', dependencies: [fake_dep, catch_dep])
+exe = executable('test-allocation', 'allocation.cc', dependencies: test_support_dep)
 test('allocation', exe, suite: 'unit', timeout: 20)
