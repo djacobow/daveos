@@ -208,6 +208,22 @@ Run returns only after timer activity has stopped and queued logs have been flus
 External producer threads must finish before destroying the platform. Log record
 views are valid during the subscriber call; copy data needed for later output.
 Subscribers append line endings themselves, as shown in the examples.
+On GCC and Clang, `SchedulerInterface::log()` checks literal printf format strings
+against their arguments at compile time. Test configuration verifies that valid
+arguments compile and mismatched types fail with `-Werror=format`.
+
+Module member functions can use `D_`, `I_`, `W_`, `E_`, and `F_` from
+`daveos/core/log.h` for debug, info, warning, error, and fatal messages:
+
+```cpp
+I_("started");
+W_("retry %u", retry_count);
+```
+
+These macros call `this->scheduler().log(...)` and return its `Status`. They
+preserve format checking, evaluate arguments once, and use the same buffered,
+line-oriented logging. `F_` only selects severity; it does not halt execution.
+Outside module member functions, use an explicit scheduler reference to log.
 
 `Queue<T, N>` provides ordinary fixed storage. `ThreadSafeQueue<T, N, Platform>`
 uses a suitable platform mutex or falls back to critical sections. All of its

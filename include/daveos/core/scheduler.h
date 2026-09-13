@@ -7,6 +7,11 @@
 #include "daveos/core/module.h"
 
 namespace daveos::core {
+
+
+// Completed task iterations since reset. Durations/lateness are microseconds;
+// min/max/average are zero before the first completion. Any late start counts.
+// Name pointers are borrowed from the registered module/task descriptors.
 struct TaskStatistics {
   const char* module = "";
   const char* task = "";
@@ -22,6 +27,7 @@ struct TaskStatistics {
                       : 0;
   }
 };
+// Copyable diagnostic snapshot; task entries remain in registration order.
 template <std::size_t Tasks>
 struct Statistics {
   std::array<TaskStatistics, Tasks> tasks;
@@ -30,6 +36,13 @@ struct Statistics {
   LogCounters logs;
 };
 
+// Fixed-storage cooperative scheduler. Prefer make_scheduler() for deduction.
+// Event is the application's enum. ModuleList determines module/task capacity;
+// SubscriberList determines output capacity. Other sizes are template
+// arguments, and MessageSize includes the log record's terminating NUL.
+// Platform, modules, subscriber contexts and name strings must outlive this
+// object. At least one module and one task per module are required.
+// One thread owns init()/run()/destruction; these are never ISR entry points.
 template <typename Event, typename Modules, typename Subscribers, typename P,
           std::size_t EventCapacity = 32, std::size_t TimerCapacity = 16,
           std::size_t LogCapacity = 32, std::size_t MessageSize = 128>
@@ -85,6 +98,8 @@ class Scheduler<Event, ModuleList<Modules...>, SubscriberList<Subscribers>, P,
   };
 
  public:
+  // Bind module interfaces immediately; validation and callbacks wait for
+  // init().
   Scheduler(P& platform, ModuleList<Modules...> modules,
             SubscriberList<Subscribers> subscribers)
       : platform_(platform), logger_(platform, subscribers) {
@@ -94,8 +109,12 @@ class Scheduler<Event, ModuleList<Modules...>, SubscriberList<Subscribers>, P,
   }
   Scheduler(const Scheduler&) = delete;
   Scheduler& operator=(const Scheduler&) = delete;
+  // Quiesce platform callbacks before releasing scheduler-owned storage.
   ~Scheduler() { platform_.quiesce(); }
 
+  // Validate registration, then run stage1 for every module followed by stage2.
+  // First failure is terminal: discard queued tasks/events and flush logs.
+  // Successful initialization is never repeated; later calls report an error.
   Status init() {
     {
       Guard guard(platform_);
@@ -129,6 +148,13 @@ class Scheduler<Event, ModuleList<Modules...>, SubscriberList<Subscribers>, P,
     return status;
   }
 
+  // Single-use dispatch loop; initialize automatically when still fresh.
+  // Due tasks/events run earliest-first, with unspecified tie order. Repeating
+  // tasks retain every overdue iteration and advance from their scheduled
+  // times. Logs dispatch one record at a time when no task/event is due. Idle
+  // considers both task and timer deadlines and sleeps only when every module
+  // permits it. A supported stop waits for active callbacks, discards work,
+  // then flushes logs.
   Status run() {
     bool initialize = false;
     {
@@ -257,6 +283,8 @@ class Scheduler<Event, ModuleList<Modules...>, SubscriberList<Subscribers>, P,
     return Status::ok;
   }
 
+  // ISR-safe cooperative request; does not interrupt the current callback or
+  // partially delivered broadcast. Platforms may make this a successful no-op.
   Status stop() {
     Guard guard(platform_);
     if (state_ != State::running) return Status::not_running;
@@ -266,6 +294,8 @@ class Scheduler<Event, ModuleList<Modules...>, SubscriberList<Subscribers>, P,
     }
     return Status::ok;
   }
+  // Queue a timestamped broadcast. sender, if supplied, must be registered and
+  // is excluded from reception. Queue overflow increments event_overflows.
   Status post(Event value, void* sender = nullptr) {
     Guard guard(platform_);
     if (!AcceptsWork()) return Status::not_running;
@@ -278,6 +308,9 @@ class Scheduler<Event, ModuleList<Modules...>, SubscriberList<Subscribers>, P,
     platform_.notify();
     return Status::ok;
   }
+  // Multiplex a positive-delay callback over the one platform timer. Safe from
+  // interrupts, but rejected before run(). Replacing a callback needs no new
+  // slot; a new callback at capacity fails and increments timer_overflows.
   Status timer(Time delay, TimerCallback callback) {
     Guard guard(platform_);
     if (state_ != State::running) return Status::not_running;
@@ -299,6 +332,8 @@ class Scheduler<Event, ModuleList<Modules...>, SubscriberList<Subscribers>, P,
     platform_.notify();
     return Status::ok;
   }
+  // ISR-safe cancellation of a pending callback, identified by function
+  // pointer.
   Status cancel_timer(TimerCallback callback) {
     Guard guard(platform_);
     if (state_ != State::running) return Status::not_running;
@@ -313,12 +348,17 @@ class Scheduler<Event, ModuleList<Modules...>, SubscriberList<Subscribers>, P,
     return Status::not_found;
   }
   void minimum(Level level) { logger_.minimum(level); }
+  // Synchronized copy, available in every lifecycle state, including from ISRs.
+  // Callers own the values, but module/task name strings remain borrowed.
   Statistics<kTasks> snapshot() {
     Guard guard(platform_);
     auto snapshot = statistics_;
     snapshot.logs = logger_.counters();
     return snapshot;
   }
+  // Reset timing/counters while retaining names, pending work and buffered
+  // logs. An in-progress task records its whole iteration when it subsequently
+  // finishes.
   void reset_statistics() {
     Guard guard(platform_);
     statistics_ = {};
@@ -328,6 +368,8 @@ class Scheduler<Event, ModuleList<Modules...>, SubscriberList<Subscribers>, P,
     }
     logger_.reset();
   }
+  // Queue an info-level snapshot table; it may be filtered, truncated or
+  // dropped.
   void log_statistics() {
     auto stats = snapshot();
     this->log(Level::info,
@@ -418,7 +460,7 @@ class Scheduler<Event, ModuleList<Modules...>, SubscriberList<Subscribers>, P,
     }
     return Status::ok;
   }
-  Status schedule_slot(void* module, std::size_t index, Time delay, Mode mode) {
+  Status ScheduleSlot(void* module, std::size_t index, Time delay, Mode mode) {
     Guard guard(platform_);
     if (!AcceptsWork()) return Status::not_running;
     if (mode == Mode::repeat && !delay) return Status::invalid_argument;
@@ -434,7 +476,7 @@ class Scheduler<Event, ModuleList<Modules...>, SubscriberList<Subscribers>, P,
       }
     return Status::not_found;
   }
-  Status cancel_slot(void* module, std::size_t index) {
+  Status CancelSlot(void* module, std::size_t index) {
     if (platform_.in_interrupt()) return Status::invalid_argument;
     Guard guard(platform_);
     if (!AcceptsWork()) return Status::not_running;
@@ -447,9 +489,11 @@ class Scheduler<Event, ModuleList<Modules...>, SubscriberList<Subscribers>, P,
       }
     return Status::not_found;
   }
-  Status log_args(Level level, const char* format, std::va_list args) {
+  Status LogArgs(Level level, const char* format, std::va_list args) {
     return logger_.write(level, format, args);
   }
+  // Called under the platform guard; the final slot is the scheduler's own wake
+  // timer.
   void Rearm() {
     Time earliest = kForever;
     for (const auto& timer : timers_)
@@ -463,6 +507,8 @@ class Scheduler<Event, ModuleList<Modules...>, SubscriberList<Subscribers>, P,
         earliest > now ? earliest - now : 0,
         [](void* self) { static_cast<Scheduler*>(self)->Fire(); }, this);
   }
+  // Platform interrupt callback: remove each due timer before invoking it so
+  // callbacks can safely rearm/cancel timers. User code runs outside our guard.
   void Fire() {
     while (true) {
       TimerCallback callback = nullptr;
@@ -503,6 +549,9 @@ class Scheduler<Event, ModuleList<Modules...>, SubscriberList<Subscribers>, P,
   Status failure_ = Status::initialization_failed;
 };
 
+// Deduce module, subscriber and platform types; optional sizes are event slots,
+// application timer slots, log slots, and bytes per log message, respectively.
+// The overload without subscribers disables delivery while keeping the log API.
 template <typename Event, std::size_t Events = 32, std::size_t Timers = 16,
           std::size_t Logs = 32, std::size_t Message = 128, typename P,
           typename... Modules, std::size_t Subscribers>
@@ -519,4 +568,6 @@ auto make_scheduler(P& platform, ModuleList<Modules...> modules) {
   return make_scheduler<Event, Events, Timers, Logs, Message>(platform, modules,
                                                               SubscriberList{});
 }
+
+
 }  // namespace daveos::core

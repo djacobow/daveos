@@ -1,6 +1,44 @@
 #include "support.h"
 using namespace testing;
 
+TEST_CASE("severity macros preserve arguments status and deferred delivery") {
+  struct LoggingModule : Module<LoggingModule, Event> {
+    LoggingModule() : Module("macro_module") {}
+    int calls = 0;
+    static constexpr auto tasks() {
+      return std::array{
+          TaskDescriptor<LoggingModule>{"emit", &LoggingModule::emit}};
+    }
+    void emit() {
+      CHECK(D_("value=%d", ++calls) == Status::ok);
+      CHECK(I_("info") == Status::ok);
+      CHECK(W_("warning") == Status::ok);
+      CHECK(E_("error") == Status::ok);
+      CHECK(F_("fatal") == Status::ok);
+      CHECK(calls == 1);
+      scheduler().stop();
+    }
+  } module;
+  Fake platform;
+  Sink sink;
+  auto scheduler = make_scheduler<Event>(platform, ModuleList{&module},
+                                         SubscriberList{sink.subscriber()});
+  scheduler.minimum(Level::debug);
+  scheduler.schedule(module, &LoggingModule::emit, 10);
+  CHECK(sink.records.empty());
+  REQUIRE(scheduler.run() == Status::ok);
+  REQUIRE(sink.records.size() == 5);
+  CHECK(sink.records[0].message == "value=1");
+  const auto levels = std::array{Level::debug, Level::info, Level::warning,
+                                 Level::error, Level::fatal};
+  for (std::size_t i = 0; i < levels.size(); ++i) {
+    CHECK(sink.records[i].severity == levels[i]);
+    CHECK(sink.records[i].module == "macro_module");
+    CHECK(sink.records[i].task == "emit");
+    CHECK(sink.records[i].timestamp == 10);
+  }
+}
+
 TEST_CASE(
     "logs retain call time, values and attribution; dispatch follows due "
     "work") {

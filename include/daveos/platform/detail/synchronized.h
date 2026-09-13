@@ -7,8 +7,14 @@
 #include "daveos/core/platform.h"
 
 namespace daveos::platform::detail {
-// Shared host/fake interrupt domain. Application callbacks never hold
-// state_mutex_.
+
+
+// Shared host/fake synchronization and simulated interrupt domain.
+// Interrupt handlers serialize with each other but may run concurrently with
+// module callbacks. Scheduler state uses a recursive mutex; application
+// callbacks run outside that mutex. All external producer threads must finish
+// before the adapter is destroyed. This implementation uses host threads, not
+// MCU masking.
 template <typename Derived>
 class Synchronized : public core::Platform<Derived> {
  public:
@@ -25,13 +31,19 @@ class Synchronized : public core::Platform<Derived> {
   };
 
  public:
+  // Nestable critical sections protecting core state across host threads.
   void enter() { state_mutex_.lock(); }
   void leave() { state_mutex_.unlock(); }
+  // Queue operations share a try-lock mutex distinct from scheduler state.
   QueueMutex* queue_mutex() { return &queue_mutex_; }
+  // Context is thread-local; a concurrent module retains its own attribution.
   bool in_interrupt() const { return interrupt_; }
   core::Context context() const { return context_; }
   void context(core::Context value) { context_ = value; }
+  // Retained generation, sampled before checking work and passed to idle().
   std::uint64_t sequence() const { return sequence_.load(); }
+  // Advance the generation and wake waiters without losing an early
+  // notification.
   void notify() {
     {
       std::lock_guard lock(wait_mutex_);
@@ -40,6 +52,8 @@ class Synchronized : public core::Platform<Derived> {
     wait_cv_.notify_all();
   }
   // Synchronous trigger: handlers from different host threads are serialized.
+  // Null callbacks and nested injection return invalid_argument. Once closed,
+  // injection returns not_running. Callback/context must survive this call.
   core::Status interrupt(Callback callback, void* argument = nullptr) {
     if (!callback || interrupt_) return core::Status::invalid_argument;
     std::lock_guard serial(interrupt_mutex_);
@@ -56,6 +70,8 @@ class Synchronized : public core::Platform<Derived> {
   }
 
  protected:
+  // Wait for the active handler, then reject new injections. Never call in an
+  // ISR.
   void CloseInterrupts() {
     std::lock_guard serial(interrupt_mutex_);
     core::Guard guard(*this);
@@ -73,4 +89,6 @@ class Synchronized : public core::Platform<Derived> {
   inline static thread_local bool interrupt_ = false;
   inline static thread_local core::Context context_{};
 };
+
+
 }  // namespace daveos::platform::detail

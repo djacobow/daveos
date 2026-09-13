@@ -28,7 +28,7 @@ class Producer final : public Module<Producer, Event> {
     return Status::ok;
   }
   void pulse() {
-    scheduler().log(Level::info, "pulse %u", ++count_);
+    I_("pulse %u", ++count_);
     scheduler().post(Event::pulse, this);
     if (count_ == 3) {
       scheduler().cancel(*this, &Producer::pulse);
@@ -54,7 +54,7 @@ class Consumer final : public Module<Consumer, Event> {
     return std::array{TaskDescriptor<Consumer>{"report", &Consumer::report}};
   }
   void on_event(Event) { scheduler().schedule(*this, &Consumer::report, 0); }
-  void report() { scheduler().log(Level::info, "received pulse"); }
+  void report() { I_("received pulse"); }
 };
 void Output(void*, const LogRecord& record) {
   static constexpr const char* levels[] = {"debug", "info", "warning", "error",

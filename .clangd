@@ -1,0 +1,14 @@
+# Core, host/fake adapters, and tests use the native build.
+CompileFlags:
+  CompilationDatabase: build/host
+
+---
+# Use real device headers for STM32 sources, not the host test register model.
+If:
+  PathMatch:
+    - examples/stm32h563_blinky/.*
+    - src/platform/stm32h5/.*
+    - include/daveos/platform/stm32h5/.*
+    - platform/stm32h5/.*
+CompileFlags:
+  CompilationDatabase: build/arm

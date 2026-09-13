@@ -24,7 +24,7 @@ class Hello final : public Module<Hello, Event> {
     return Status::ok;
   }
   void greet() {
-    scheduler().log(Level::info, "Hello, DaveOS!");
+    I_("Hello, DaveOS!");
     scheduler().stop();
   }
 };

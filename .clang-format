@@ -1,1 +1,3 @@
 BasedOnStyle: Google
+KeepEmptyLinesAtTheStartOfBlocks: true
+MaxEmptyLinesToKeep: 2
