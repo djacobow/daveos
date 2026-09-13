@@ -1,4 +1,4 @@
-firmware_deps = [stm32h5_dep, stm32h5_hal_dep]
+firmware_deps = [stm32_console_dep, stm32h5_dep, stm32h5_hal_dep]
 # Keep this selection aligned with CubeMX's enabled peripherals.
 foreach component : ['cortex', 'icache', 'rcc', 'rcc_ex', 'flash', 'flash_ex',
                      'gpio', 'dma', 'dma_ex', 'pwr', 'pwr_ex', 'exti', 'uart', 'uart_ex']
@@ -10,12 +10,12 @@ firmware = executable('stm32h563-blinky',
   'Core/Src/main.c', 'Core/Src/stm32h5xx_it.c',
   'Core/Src/stm32h5xx_hal_msp.c', 'Core/Src/system_stm32h5xx.c',
   'Core/Src/sysmem.c', 'Core/Src/syscalls.c', 'startup_stm32h563xx.s',
-  'blinky.cc',
+  'console.cc',
   dependencies: firmware_deps,
   name_suffix: 'elf',
   # libstdc++ assertion reporting pulls in allocating stdio on this toolchain.
   override_options: ['b_ndebug=true'],
-  include_directories: include_directories('Core/Inc'),
+  include_directories: include_directories('.', 'Core/Inc'),
   # ST's device header includes math.h, which GCC 15 rejects in freestanding C++.
   # Allow those headers; the core compile check remains freestanding.
   cpp_args: ['-D_GLIBCXX_NO_ASSERTIONS',

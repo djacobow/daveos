@@ -1,7 +1,7 @@
 #include <string>
 #include <string_view>
 
-#include "../../examples/stm32h755_console/CM7/input.h"
+#include "../../examples/stm32_console/input.h"
 #include "catch_amalgamated.hpp"
 #include "daveos/platform/fake/platform.h"
 

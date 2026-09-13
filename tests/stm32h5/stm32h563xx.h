@@ -1,5 +1,6 @@
 #pragma once
 
+#include <csetjmp>
 #include <cstdint>
 
 // Minimal register model for exercising the real adapter on the host.
@@ -71,4 +72,12 @@ inline void __ISB() {}
 inline void __WFI() {
   hardware::sleep_mask = hardware::mask;
   ++hardware::sleeps;
+}
+
+// Model the non-returning hardware boundary without enabling exceptions.
+namespace hardware {
+inline std::jmp_buf reset_destination;
+}
+[[noreturn]] inline void NVIC_SystemReset() {
+  std::longjmp(hardware::reset_destination, 1);
 }

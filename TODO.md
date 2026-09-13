@@ -3,7 +3,8 @@
 - [x] Add clang-format configuration consistent with PROJECT.md and a formatting check.
 - [x] Add cppcheck configuration and a lint command; integrate both checks into CI.
 - [x] Implement the STM32H563 platform, CubeMX startup/linker integration, and DaveOS LED example.
-- [ ] Validate STM32H563 blinking, timer timing, and sleep/wake on the NUCLEO-H563ZI hardware.
+- [x] Bring H563 to H755 console parity with shared commands, UART echo, TX DMA, and reset.
+- [ ] Validate H563 HSI boot, LED/button commands, UART RX/error recovery, TX DMA/overflow, reset, timer timing, and sleep/wake on NUCLEO-H563ZI hardware.
 - [ ] Explore a MISRA-friendly alternative to printf-style log formatting.
 - [x] Add STM32 UART command input using application-owned line buffering (H755 M7).
 - [x] Add STM32H755 support with pinned CubeH7 HAL, M7 console, and sleeping M4 image.

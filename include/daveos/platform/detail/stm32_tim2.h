@@ -24,6 +24,9 @@ class Stm32Tim2 : public core::Platform<Derived> {
   // 1 MHz and fit the 16-bit prescaler. Repeated init returns
   // already_initialized.
   core::Status init(std::uint32_t timer_hz);
+  // Request a CMSIS system reset (both cores on H755). Does not return.
+  // No initialization prerequisite or graceful shutdown/log drain.
+  [[noreturn]] core::Status reset();
   // Extended 64-bit microseconds since init. Rollover is serviced by the IRQ or
   // this read; interrupts must not stay masked for a full 32-bit counter
   // period.

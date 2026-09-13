@@ -1,3 +1,6 @@
+if platform in ['stm32h5', 'stm32h7']
+  subdir('stm32_console')
+endif
 if platform == 'stm32h5'
   subdir('stm32h563_blinky')
 elif platform == 'stm32h7'

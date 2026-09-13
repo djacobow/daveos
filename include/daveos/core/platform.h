@@ -31,7 +31,8 @@ inline constexpr Time kForever = std::numeric_limits<Time>::max();
   X(parse_error)                \
   X(ambiguous_match)            \
   X(line_too_long)              \
-  X(too_many_arguments)
+  X(too_many_arguments)         \
+  X(unsupported)
 DAVEOS_ENUM(Status, int, DAVEOS_STATUS_VALUES)
 #undef DAVEOS_STATUS_VALUES
 // All modules finish stage1 before any module begins stage2.
@@ -65,6 +66,10 @@ class Platform {
 
  public:
   using Callback = void (*)(void*);
+  // Application-facing hardware reset, independent of scheduler lifecycle.
+  // Supported targets reset immediately without returning or draining logs.
+  // Host/fake defaults leave all state unchanged.
+  Status reset() { return Status::unsupported; }
   // A false result forces awake waiting. True still requires every module to
   // agree.
   bool can_sleep() const { return true; }

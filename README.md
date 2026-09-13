@@ -112,7 +112,7 @@ Neither static library is a firmware image.
 The cross-file uses the Cortex-M33 FPv5 single-precision hard-float ABI for both
 C and C++, matching the generated CubeMX toolchain.
 
-To also build the DaveOS LED firmware:
+To also build the DaveOS board console firmware:
 
 ```sh
 meson setup build/arm --cross-file meson/stm32h563.ini -Dexamples=true
@@ -121,9 +121,22 @@ meson compile -C build/arm
 
 Use `--wipe` with setup when replacing an existing build configured with the old
 cross-file flags. ELF, HEX, BIN, and map files are written under
-`build/arm/examples/stm32h563_blinky/`. A repeating DaveOS task toggles LD1 (PB0)
-every 500 ms, giving a one-second blink cycle. The firmware has been
-cross-compiled, but not tested on hardware.
+`build/arm/examples/stm32h563_blinky/` (the directory and `stm32h563-blinky`
+artifact names are retained for existing build/programming commands).
+The firmware now runs the same board console as H755: `help`,
+`board led <1|2|3> <on|off|toggle>`, `board button`, `board stats`, and `board reset`.
+LEDs are PB0/PF4/PG4 and the button is PC13. USART3 uses PD8 TX / PD9 RX at
+1,000,000 baud, 8N1, no flow control; disable terminal local echo.
+
+RX uses one-byte interrupts and a bounded line queue. TX uses GPDMA1 Channel 0
+with the USART3 TX request, normal memory-to-peripheral byte transfers, and
+completion/error interrupts. Two 4 KiB ping-pong buffers live in normal SRAM;
+GPDMA and SRAM clocks remain enabled during shallow sleep. Echo, line-oriented
+logs, whole-frame overflow drops, DMA statistics, and immediate reset match H755.
+The internal 64 MHz HSI drives PLL1 (M=16/N=125/P=2), giving nominal 250 MHz CPU,
+62.5 MHz PCLK1, and a 125 MHz TIM2 kernel divided down to 1 MHz. No external
+crystal is required. Both console targets use full newlib for 64-bit formatting.
+The H563 firmware is cross-compiled but has not been tested on hardware.
 
 The CubeMX source project is `examples/stm32h563_blinky/blinky_demo.ioc`, selecting
 STM32H563ZIT6. Keep generated Core sources, the startup assembly, and the FLASH
@@ -133,7 +146,9 @@ selection if enabled peripherals change. Run builds through Meson to keep all ou
 under the repository's `build/` directory.
 
 The generated `main.c` calls `DaveOS_Run()` from a CubeMX USER CODE section after
-peripheral initialization. The application and IRQ bridge live in `blinky.cc`.
+peripheral initialization. Shared commands, logging, input, and IRQ bridges live
+in `examples/stm32_console/`; each target supplies `board_config.h` and `console.cc`
+for its platform, DMA storage/cache handling, and timer clock.
 The scheduler lives on the main stack; the `.ioc` and FLASH linker script reserve
 16 KiB for it and interrupt frames. GCC's `.su` stack reports are emitted beside
 the example's object files. C++ exceptions and RTTI are disabled. The example
@@ -396,15 +411,31 @@ board led 2 toggle
 board led 3 off
 board button
 board stats
+board reset
 ```
+
+`board reset` takes no arguments and immediately resets the MCU (both cores),
+discarding pending logs/output. The board module calls `platform.reset()` directly;
+the scheduler does not manage reset. Host/fake platforms return `Status::unsupported`.
 
 LEDs are LD1/PB0, LD2/PE1, and LD3/PB14; BTN1 is PC13 and reports its raw level.
 UART interrupts collect up to four complete lines; a 1 ms task dispatches them.
 Overlength lines are rejected, full queues drop entire lines, and UART errors
 discard input through the next terminator. Dropped input is reported via logging.
-Log records transmit in scheduler idle time, with timestamps, severity, module,
+Log records are queued in scheduler idle time, with timestamps, severity, module,
 and handler names and automatic CRLF. With `-Dlogging=false`, commands still
 execute but help and log output are silent. There is no exit command on embedded.
+
+USART3 output (logs and echo) uses DMA1 Stream 0, memory-to-peripheral, with
+normal byte transfers and the USART3 TX request. DMA completion enables the
+USART3 transmission-complete interrupt, which releases the transmitted buffer
+and starts pending output. Two 4 KiB ping-pong buffers live in DMA-accessible
+AXI SRAM (`.dma_tx`); the linker section must be retained after CubeMX regeneration.
+The driver cleans transmitted cache lines if D-cache is enabled. DMA and AXI SRAM
+clocks remain enabled during shallow sleep. RX still uses one-byte interrupts.
+Output never waits for space: a complete display/log frame (up to 768 bytes) is
+dropped if it cannot fit. Transfer errors discard queued output with uncertain
+progress. `board stats` reports bytes sent, transfers, dropped frames, and errors.
 
 The M7 uses the shared H5/H7 TIM2 adapter at 1 MHz and shallow sleep. TIM2 belongs
 exclusively to DaveOS. The example uses the internal 64 MHz HSI RC oscillator, with PLL M=4/N=50/P=2
@@ -455,7 +486,7 @@ meson test -C build/tsan --print-errorlogs
 ```
 
 GitHub Actions runs host/fake tests, a host build with logging disabled, sanitizers,
-format/lint checks, and the ARM core, H563 LED, and H755 M7/M4 firmware builds. Allocation tests
+format/lint checks, and the ARM core, H563 console, and H755 M7/M4 firmware builds. Allocation tests
 instrument C++ `new` during representative core operations in ordinary and ASan builds (TSan owns its own allocator interceptors);
 they do not certify allocator behavior inside every platform libc
 formatting implementation. ARM firmware must validate its chosen libc as well.

@@ -2,16 +2,8 @@
 extern "C" UART_HandleTypeDef huart3;
 namespace board {
 // H7 requires AXI SRAM; H5's normal SRAM is GPDMA-accessible (no D-cache).
-alignas(32) std::array<std::uint8_t, 8192> tx_storage
-    __attribute__((section(".dma_tx")));
+alignas(32) std::array<std::uint8_t, 8192> tx_storage{};
 bool StartTransmit(const std::uint8_t* bytes, std::size_t size) {
-  if (SCB->CCR & SCB_CCR_DC_Msk) {
-    auto begin = reinterpret_cast<std::uintptr_t>(bytes) & ~std::uintptr_t{31};
-    auto end = (reinterpret_cast<std::uintptr_t>(bytes) + size + 31) &
-               ~std::uintptr_t{31};
-    SCB_CleanDCache_by_Addr(reinterpret_cast<std::uint32_t*>(begin),
-                            static_cast<std::int32_t>(end - begin));
-  }
   __DSB();
   if (HAL_UART_Transmit_DMA(&huart3, bytes, static_cast<std::uint16_t>(size)) !=
       HAL_OK)
@@ -20,12 +12,12 @@ bool StartTransmit(const std::uint8_t* bytes, std::size_t size) {
   return true;
 }
 std::uint32_t TimerClock() {
-  __HAL_RCC_TIMCLKPRESCALER(RCC_TIMPRES_DESACTIVATED);
+  __HAL_RCC_TIMCLKPRESCALER(RCC_TIMPRES_DEACTIVATED);
   RCC_ClkInitTypeDef clocks{};
   std::uint32_t latency;
   HAL_RCC_GetClockConfig(&clocks, &latency);
   auto hz = HAL_RCC_GetPCLK1Freq();
-  if (clocks.APB1CLKDivider != RCC_APB1_DIV1) hz *= 2;
+  if (clocks.APB1CLKDivider != RCC_HCLK_DIV1) hz *= 2;
   return hz;
 }
 }  // namespace board

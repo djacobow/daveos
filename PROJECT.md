@@ -511,7 +511,7 @@ sleep entry. Initialization failure and shutdown flush remaining records.
 ## Supported platforms
 
 The implementation provides real-time host and fake-time adapters, an STM32H563
-adapter and LED example, and an STM32H755 M7 adapter with a USART3 console.
+adapter and USART3 console, and an STM32H755 M7 adapter with the same console.
 STM32CubeH5 and STM32CubeH7 are pinned as submodules; no board BSP is used.
 The H755 M4 completes CubeMX boot synchronization, disables SysTick, and sleeps
 in a WFI loop. It does not run DaveOS or access M7-owned peripherals.
@@ -580,13 +580,23 @@ H755 includes both core images. Tool paths and ST-LINK serial are configurable.
 
 ## Remaining platform validation
 
-The STM32H563 example selects LD1 (PB0), TIM2 at 1 MHz, and shallow WFI sleep.
-Validate blinking, timer timing, and sleep/wake on the NUCLEO-H563ZI board; these
-hardware checks remain tracked in TODO.md.
-The H755 example also uses a 1 MHz TIM2 counter and shallow WFI on M7. Its
-USART3 console receives complete lines via an interrupt-fed bounded queue, then
-dispatches them in a task. Validate both-core boot, M4 sleep, UART RX/error
-recovery, LED/button commands, timer timing, and sleep/wake on hardware.
+The H563 and H755 M7 examples share the board console implementation: LED
+control, button input, scheduler/DMA statistics, reset, UART echo, and formatted
+logging. USART3 runs at 1 Mb/s on PD8/PD9 with interrupt-fed input and two 4 KiB
+ping-pong TX DMA buffers. H563 uses GPDMA1 Channel 0 and normal SRAM; H755 uses
+DMA1 Stream 0 and AXI SRAM. Full buffers drop whole output frames and expose
+counters. Both use internal HSI, TIM2 at 1 MHz, and shallow WFI sleep.
+H563 LEDs are PB0/PF4/PG4; H755 LEDs are PB0/PE1/PB14. Both read PC13.
+H563's CPU runs at nominal 250 MHz, H755 M7 at 400 MHz. H563 hardware validation
+is pending; validate boot, UART RX/error recovery, TX DMA handoff, LED/button
+commands, reset, timer timing, and sleep/wake. H755 additionally boots M4 into
+sleep. Shared code changes require both targets to build.
+
+The application may call `platform.reset()` directly, independently of the
+scheduler. STM32 H5/H7 request an immediate system reset without returning
+(both cores on H755); no initialization, shutdown, or log drain is required.
+Host/fake return `Status::unsupported` without changing state. Each STM32 board
+module exposes this as `board reset` with no arguments.
 
 ## Implementation review checklist
 

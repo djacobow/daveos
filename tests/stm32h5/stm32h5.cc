@@ -145,3 +145,11 @@ TEST_CASE_METHOD(Fixture,
   REQUIRE(hardware::mask == 0);
   REQUIRE(SCB->SCR == 0);
 }
+
+TEST_CASE("STM32 reset requests a system reset even before initialization") {
+  Platform platform;
+  if (setjmp(hardware::reset_destination) == 0) {
+    platform.reset();
+  }
+  SUCCEED("Reached the system reset primitive");
+}

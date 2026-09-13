@@ -5,6 +5,7 @@ test_support_dep = declare_dependency(include_directories: include_directories('
 subdir('core')
 subdir('commands')
 subdir('console_input')
+subdir('uart_output')
 subdir('timers')
 subdir('logging')
 subdir('stm32h5')

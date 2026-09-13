@@ -63,6 +63,7 @@ UART_HandleTypeDef huart3;
 void SystemClock_Config(void);
 static void MPU_Config(void);
 static void MX_GPIO_Init(void);
+static void MX_DMA_Init(void);
 static void MX_USART3_UART_Init(void);
 /* USER CODE BEGIN PFP */
 void DaveOS_Run(void);
@@ -141,6 +142,7 @@ Error_Handler();
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_USART3_UART_Init();
   /* USER CODE BEGIN 2 */
   DaveOS_Run();
@@ -312,6 +314,18 @@ static void MX_GPIO_Init(void)
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 
   /* USER CODE END MX_GPIO_Init_2 */
+}
+
+/* DMA clock and NVIC must be ready before the UART MSP links its TX stream. */
+static void MX_DMA_Init(void)
+{
+  __HAL_RCC_DMA1_CLK_ENABLE();
+  HAL_NVIC_SetPriority(DMA1_Stream0_IRQn, 5, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Stream0_IRQn);
+  /* USER CODE BEGIN DMA_Init 1 */
+  __HAL_RCC_DMA1_CLK_SLEEP_ENABLE();
+  __HAL_RCC_D1SRAM1_CLK_SLEEP_ENABLE();
+  /* USER CODE END DMA_Init 1 */
 }
 
 /* USER CODE BEGIN 4 */

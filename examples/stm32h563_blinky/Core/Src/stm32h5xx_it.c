@@ -56,6 +56,7 @@
 
 /* External variables --------------------------------------------------------*/
 extern UART_HandleTypeDef huart3;
+extern DMA_HandleTypeDef hdma_usart3_tx;
 /* USER CODE BEGIN EV */
 
 /* USER CODE END EV */
@@ -210,6 +211,10 @@ void USART3_IRQHandler(void)
   /* USER CODE BEGIN USART3_IRQn 1 */
 
   /* USER CODE END USART3_IRQn 1 */
+}
+
+void GPDMA1_Channel0_IRQHandler(void) {
+  HAL_DMA_IRQHandler(&hdma_usart3_tx);
 }
 
 /* USER CODE BEGIN 1 */

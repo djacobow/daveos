@@ -39,6 +39,7 @@ MEMORY
 {
 FLASH (rx)      : ORIGIN = 0x08000000, LENGTH = 1024K
 RAM (xrw)      : ORIGIN = 0x20000000, LENGTH = 128K
+AXIRAM (xrw)   : ORIGIN = 0x24000000, LENGTH = 512K
 ITCMRAM (xrw)      : ORIGIN = 0x00000000, LENGTH = 64K
 }
 /* Highest address of the user mode stack */
@@ -206,6 +207,15 @@ SECTIONS
   PROVIDE( __bss_start = __tbss_start );
   PROVIDE( __bss_size = __bss_end - __bss_start );
 
+
+  /* DMA1 cannot access DTCM. Only explicitly placed DMA buffers go here.
+     NOLOAD is intentional: output copies bytes before DMA can read them. */
+  .dma_tx (NOLOAD) :
+  {
+    . = ALIGN(32);
+    *(.dma_tx)
+    . = ALIGN(32);
+  } >AXIRAM
 
   /* User_heap_stack section, used to check that there is enough RAM left */
   ._user_heap_stack (NOLOAD) :

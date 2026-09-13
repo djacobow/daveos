@@ -39,6 +39,8 @@
 /* USER CODE END Macro */
 
 /* Private variables ---------------------------------------------------------*/
+DMA_HandleTypeDef hdma_usart3_tx;
+
 /* USER CODE BEGIN PV */
 
 /* USER CODE END PV */
@@ -113,6 +115,34 @@ void HAL_UART_MspInit(UART_HandleTypeDef* huart)
     GPIO_InitStruct.Alternate = GPIO_AF7_USART3;
     HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
 
+    /* USART3 DMA Init */
+    /* GPDMA1_REQUEST_USART3_TX Init */
+    hdma_usart3_tx.Instance = GPDMA1_Channel0;
+    hdma_usart3_tx.Init.Request = GPDMA1_REQUEST_USART3_TX;
+    hdma_usart3_tx.Init.BlkHWRequest = DMA_BREQ_SINGLE_BURST;
+    hdma_usart3_tx.Init.Direction = DMA_MEMORY_TO_PERIPH;
+    hdma_usart3_tx.Init.SrcInc = DMA_SINC_INCREMENTED;
+    hdma_usart3_tx.Init.DestInc = DMA_DINC_FIXED;
+    hdma_usart3_tx.Init.SrcDataWidth = DMA_SRC_DATAWIDTH_BYTE;
+    hdma_usart3_tx.Init.DestDataWidth = DMA_DEST_DATAWIDTH_BYTE;
+    hdma_usart3_tx.Init.Priority = DMA_LOW_PRIORITY_LOW_WEIGHT;
+    hdma_usart3_tx.Init.SrcBurstLength = 1;
+    hdma_usart3_tx.Init.DestBurstLength = 1;
+    hdma_usart3_tx.Init.TransferAllocatedPort = DMA_SRC_ALLOCATED_PORT0|DMA_DEST_ALLOCATED_PORT0;
+    hdma_usart3_tx.Init.TransferEventMode = DMA_TCEM_BLOCK_TRANSFER;
+    hdma_usart3_tx.Init.Mode = DMA_NORMAL;
+    if (HAL_DMA_Init(&hdma_usart3_tx) != HAL_OK)
+    {
+      Error_Handler();
+    }
+
+    __HAL_LINKDMA(huart, hdmatx, hdma_usart3_tx);
+
+    if (HAL_DMA_ConfigChannelAttributes(&hdma_usart3_tx, DMA_CHANNEL_NPRIV) != HAL_OK)
+    {
+      Error_Handler();
+    }
+
     /* USART3 interrupt Init */
     HAL_NVIC_SetPriority(USART3_IRQn, 0, 0);
     HAL_NVIC_EnableIRQ(USART3_IRQn);
@@ -145,6 +175,8 @@ void HAL_UART_MspDeInit(UART_HandleTypeDef* huart)
     PD9     ------> USART3_RX
     */
     HAL_GPIO_DeInit(GPIOD, GPIO_PIN_8|GPIO_PIN_9);
+
+    HAL_DMA_DeInit(huart->hdmatx);
 
     /* USART3 interrupt DeInit */
     HAL_NVIC_DisableIRQ(USART3_IRQn);

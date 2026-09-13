@@ -7,6 +7,10 @@
 
 namespace daveos::platform::detail {
 template <typename Derived>
+[[noreturn]] core::Status Stm32Tim2<Derived>::reset() {
+  NVIC_SystemReset();
+}
+template <typename Derived>
 void Stm32Tim2<Derived>::enter() {
   auto mask = __get_PRIMASK();
   __disable_irq();

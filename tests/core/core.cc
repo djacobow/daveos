@@ -266,3 +266,11 @@ TEST_CASE(
   CHECK(std::string_view(enum_name(static_cast<Status>(-1))) == "unknown");
   CHECK(std::string_view(enum_name(static_cast<Status>(999))) == "unknown");
 }
+
+TEST_CASE(
+    "Fake platform reports unsupported hardware reset without changing time") {
+  daveos::platform::fake::Platform platform;
+  platform.advance(123);
+  CHECK(platform.reset() == Status::unsupported);
+  CHECK(platform.now() == 123);
+}

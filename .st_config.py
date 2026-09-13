@@ -26,7 +26,7 @@ CONFIG = {
         "fake": ("fake adapter", ["src", "platform", "fake"]),
         "stm32": ("STM32H5 adapter", ["src", "platform", "stm32h5"]),
         "examples": ("examples", ["examples"]),
-        "blink": ("STM32H563 blinker", ["examples", "stm32h563_blinky"]),
+        "blink": ("STM32H563 console", ["examples", "stm32h563_blinky"]),
         "h755": ("STM32H755 console", ["examples", "stm32h755_console"]),
         "stm32h7": ("STM32H7 adapter", ["src", "platform", "stm32h7"]),
         "tests": ("tests", ["tests"]),
