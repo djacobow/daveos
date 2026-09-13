@@ -4,6 +4,7 @@ test_support_dep = declare_dependency(include_directories: include_directories('
   dependencies: [fake_dep, catch_dep])
 subdir('core')
 subdir('commands')
+subdir('console_input')
 subdir('timers')
 subdir('logging')
 subdir('stm32h5')
@@ -14,3 +15,4 @@ endif
 if platform == 'host'
   subdir('host')
 endif
+subdir('programming')

@@ -7,7 +7,11 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-GENERATED = ("examples/stm32h563_blinky/Core", "examples/stm32h563_blinky/Drivers")
+GENERATED = ("examples/stm32h563_blinky/Core", "examples/stm32h563_blinky/Drivers",
+             "examples/stm32h755_console/CM7/Core",
+             "examples/stm32h755_console/CM4/Core",
+             "examples/stm32h755_console/Common",
+             "examples/stm32h755_console/Drivers")
 
 
 def main():

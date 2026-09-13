@@ -12,3 +12,13 @@ If:
     - platform/stm32h5/.*
 CompileFlags:
   CompilationDatabase: build/arm
+
+---
+If:
+  PathMatch:
+    - examples/stm32h755_console/.*
+    - src/platform/stm32h7/.*
+    - include/daveos/platform/stm32h7/.*
+    - platform/stm32h7/.*
+CompileFlags:
+  CompilationDatabase: build/h755

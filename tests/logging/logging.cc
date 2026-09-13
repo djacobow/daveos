@@ -1,3 +1,4 @@
+#include "daveos/core/log_format.h"
 #include "support.h"
 using namespace testing;
 
@@ -245,4 +246,17 @@ TEST_CASE("logger platform mismatch fails before module initialization") {
   CHECK(scheduler.post(Event::first) == Status::not_running);
   REQUIRE(sink.records.size() == 1);
   CHECK(sink.records[0].message == "before init");
+}
+
+TEST_CASE("log prefixes split elapsed time and align bounded context") {
+  LogRecord record{((Time{12} * 24 + 3) * 3600 + 4 * 60 + 5) * 1000000 + 678999,
+                   Level::info, "board", "Button", "message"};
+  LogPrefix prefix(record);
+  CHECK(prefix.view() == "[012:03:04:05.678] I board.Button          : ");
+  LogPrefix<8> short_prefix(record);
+  CHECK(short_prefix.view() == "[012:03:04:05.678] I board...: ");
+  record.timestamp = Time{1000} * 24 * 3600 * 1000000;
+  CHECK(LogPrefix(record).view().starts_with("[1000:00:00:00.000] I "));
+  record.timestamp = kForever;
+  CHECK(LogPrefix(record).view().starts_with("[213503982:08:01:49.551] I "));
 }

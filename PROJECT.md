@@ -27,6 +27,7 @@ Longer-term applications may include multiple UARTs, CAN buses, and an Ethernet 
 | `daveos::core` | Scheduler, module interface, task descriptors, events, timers, queues, optional logging, command descriptors and dispatch, name matching, status enums, and the platform contract. |
 | `daveos::platform::host` | Real-time host platform and simulated interrupts. |
 | `daveos::platform::stm32h5` | STM32H5 platform implementation. |
+| `daveos::platform::stm32h7` | STM32H7 platform implementation (H755 M7). |
 | `daveos::platform::fake` | Fake clock, timer, and sleep implementation. |
 
 The core platform contract belongs in `daveos::core`; concrete implementations
@@ -510,11 +511,14 @@ sleep entry. Initialization failure and shutdown flush remaining records.
 ## Supported platforms
 
 The implementation provides real-time host and fake-time adapters, an STM32H563
-adapter, and a CubeMX-based LED example. STM32CubeH5 is pinned as a submodule.
+adapter and LED example, and an STM32H755 M7 adapter with a USART3 console.
+STM32CubeH5 and STM32CubeH7 are pinned as submodules; no board BSP is used.
+The H755 M4 completes CubeMX boot synchronization, disables SysTick, and sleeps
+in a WFI loop. It does not run DaveOS or access M7-owned peripherals.
 The core remains hardware-independent; hardware validation is tracked in TODO.md.
 
 * Host: clang++.
-* ARM: arm-none-eabi GCC and the pinned STM32H5 HAL.
+* ARM: arm-none-eabi GCC and the pinned STM32H5/H7 HALs.
   The initial MCU target is STM32H563.
 
 Host support provides both:
@@ -557,10 +561,13 @@ initial host simulation scope.
 Use Meson. Python helpers currently use only the standard library; use uv if
 Python package dependencies are introduced.
 Build configurations live under `build/` (for example `build/host`, `build/fake`,
-`build/asan`, and `build/arm`). All generated intermediates and caches belong under
+`build/asan`, `build/arm`, and `build/h755`). All generated intermediates and caches belong under
 that ignored directory and can be removed and regenerated.
 Provide `format`, `format-check`, and `lint` build targets using clang-format and
 cppcheck.
+STM32 examples provide explicit `flash` (CubeProgrammer), `flash-openocd`, and
+`flash-plan` targets. Programming builds and verifies the firmware before resetting;
+H755 includes both core images. Tool paths and ST-LINK serial are configurable.
 
 ## Style
 
@@ -576,6 +583,10 @@ cppcheck.
 The STM32H563 example selects LD1 (PB0), TIM2 at 1 MHz, and shallow WFI sleep.
 Validate blinking, timer timing, and sleep/wake on the NUCLEO-H563ZI board; these
 hardware checks remain tracked in TODO.md.
+The H755 example also uses a 1 MHz TIM2 counter and shallow WFI on M7. Its
+USART3 console receives complete lines via an interrupt-fed bounded queue, then
+dispatches them in a task. Validate both-core boot, M4 sleep, UART RX/error
+recovery, LED/button commands, timer timing, and sleep/wake on hardware.
 
 ## Implementation review checklist
 
@@ -659,7 +670,7 @@ case is preserved. `help` prints the complete tree, while `<module>` and
 `<module> help` print that module's commands. Extra arguments to these help forms
 are errors. Help includes short command descriptions.
 
-Help and errors use existing buffered logging under `core/command`. Handler logs
+Help and errors use existing buffered logging under `core.command`. Handler logs
 use the target module and its C++ handler function name; the previous logging
 context is restored afterward. Normal filtering, truncation, and overflow apply,
 including best-effort help output as for statistics tables. Logging failure does
@@ -669,8 +680,13 @@ reply callbacks or sessions.
 
 Add an interactive host console example with buffered stdin input and a
 `console exit` command for orderly shutdown and log flushing. EOF has no command
-meaning and must not stop the scheduler or cause a busy loop. STM32 UART input
-integration is deferred. Test parsing, matching, boundaries, help, context
+meaning and must not stop the scheduler or cause a busy loop. The H755 example provides USART3 input with application-owned line buffering. Test parsing, matching, boundaries, help, context
 restoration, nested calls, command-only modules, compile-time validation, and
 allocation-free core operations on the fake platform, alongside existing host,
 sanitizer, ARM compile, formatting, and lint checks.
+
+Example log subscribers display elapsed time as `ddd:hh:mm:ss.mmm`, severity,
+and a left-aligned `module.function` field so message text lines up. The default
+context width is 22 characters, with display-only ellipsis for longer names.
+Days use at least three digits; raw records retain microsecond timestamps and
+complete context names.

@@ -33,3 +33,5 @@ foreach output_format : [['hex', 'ihex'], ['bin', 'binary']]
     build_by_default: true,
   )
 endforeach
+
+firmware_images += [firmware]

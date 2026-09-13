@@ -1,5 +1,6 @@
 #include <cstdio>
 
+#include "daveos/core/log_format.h"
 #include "daveos/core/logger.h"
 #include "daveos/core/scheduler.h"
 #ifdef DAVEOS_FAKE
@@ -59,13 +60,10 @@ class Consumer final : public Module<Consumer, Event> {
   void report() { I_("received pulse"); }
 };
 void Output(void*, const LogRecord& record) {
-  static constexpr const char* levels[] = {"debug", "info", "warning", "error",
-                                           "fatal"};
-  std::printf("[%llu] %-7s %s/%s: %.*s\n",
-              static_cast<unsigned long long>(record.timestamp),
-              levels[static_cast<unsigned>(record.severity)], record.module,
-              record.task, static_cast<int>(record.message.size()),
-              record.message.data());
+  LogPrefix prefix(record);
+  auto text = prefix.view();
+  std::printf("%.*s%.*s\n", static_cast<int>(text.size()), text.data(),
+              static_cast<int>(record.message.size()), record.message.data());
 }
 }  // namespace app
 int main() {

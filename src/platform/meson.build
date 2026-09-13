@@ -1,5 +1,5 @@
-if platform == 'stm32h5'
-  subdir('stm32h5')
+if platform in ['stm32h5', 'stm32h7']
+  subdir(platform)
 else
   threads = dependency('threads')
   subdir('fake')

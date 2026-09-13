@@ -8,7 +8,10 @@ Generated code, vendor sources and build artifacts require an explicit scope.
 EXCLUDE = (
     r"/(?:build|\.git)/"
     r"|/tools/external/"
-    r"|/platform/stm32h5/STM32CubeH5/"
+    r"|/platform/stm32h[57]/STM32CubeH[57]/"
+    r"|/examples/stm32h755_console/(?:Drivers|Common|EWARM)/"
+    r"|/examples/stm32h755_console/CM[47]/Core/"
+    r"|/examples/stm32h755_console/.*\.(?:cmake|ioc|ld)$"
     r"|/examples/stm32h563_blinky/(?:Core|Drivers|cmake)/"
     r"|/examples/stm32h563_blinky/(?:CMakeLists\.txt|CMakePresets\.json|"
     r"startup_stm32h563xx\.s|STM32H563xx_(?:FLASH|RAM)\.ld|blinky_demo\.ioc)$"
@@ -24,6 +27,8 @@ CONFIG = {
         "stm32": ("STM32H5 adapter", ["src", "platform", "stm32h5"]),
         "examples": ("examples", ["examples"]),
         "blink": ("STM32H563 blinker", ["examples", "stm32h563_blinky"]),
+        "h755": ("STM32H755 console", ["examples", "stm32h755_console"]),
+        "stm32h7": ("STM32H7 adapter", ["src", "platform", "stm32h7"]),
         "tests": ("tests", ["tests"]),
         "tools": ("tools", ["tools"]),
         "vendor": ("STM32CubeH5", ["platform", "stm32h5", "STM32CubeH5"]),
@@ -59,6 +64,7 @@ CONFIG = {
                 "include": ["include/daveos/platform/stm32h5", "src/platform/stm32h5", "platform/stm32h5"],
                 "exclude": EXCLUDE,
             },
+            "stm32h7": {"default": False, "include": ["include/daveos/platform/stm32h7", "src/platform/stm32h7", "platform/stm32h7"], "exclude": EXCLUDE},
             "examples": {"default": False, "include": ["examples"], "exclude": EXCLUDE},
             "tests": {"default": False, "include": ["tests"]},
             "tools": {"default": False, "include": ["tools"], "exclude": EXCLUDE},

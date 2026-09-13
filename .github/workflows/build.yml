@@ -47,3 +47,8 @@ jobs:
           git -C platform/stm32h5/STM32CubeH5 submodule update --init --recursive Drivers/CMSIS/Device/ST/STM32H5xx Drivers/STM32H5xx_HAL_Driver
       - run: meson setup build/arm --cross-file meson/stm32h563.ini -Dexamples=true
       - run: meson compile -C build/arm
+      - run: |
+          git submodule update --init platform/stm32h7/STM32CubeH7
+          git -C platform/stm32h7/STM32CubeH7 submodule update --init --recursive Drivers/CMSIS/Device/ST/STM32H7xx Drivers/STM32H7xx_HAL_Driver
+      - run: meson setup build/h755 --cross-file meson/stm32h755.ini -Dexamples=true
+      - run: meson compile -C build/h755

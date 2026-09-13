@@ -1,0 +1,10 @@
+/Drivers/
+/EWARM/
+/.mxproject
+CMakeLists.txt
+CMakePresets.json
+mx-generated.cmake
+/gcc-arm-none-eabi.cmake
+/starm-clang.cmake
+/CM7/stm32h755xx_sram1_CM7.ld
+/CM4/stm32h755xx_sram2_CM4.ld

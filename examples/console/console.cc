@@ -7,6 +7,7 @@
 #include <thread>
 
 #include "daveos/core/command.h"
+#include "daveos/core/log_format.h"
 #include "daveos/core/logger.h"
 #include "daveos/core/scheduler.h"
 #include "daveos/platform/host/platform.h"
@@ -107,10 +108,10 @@ class Console : public Module<Console, Event> {
   Status (*dispatch_)(void*, std::string_view) = nullptr;
 };
 void Output(void*, const LogRecord& record) {
-  std::printf("[%llu] %s/%s: %.*s\n",
-              static_cast<unsigned long long>(record.timestamp), record.module,
-              record.task, static_cast<int>(record.message.size()),
-              record.message.data());
+  LogPrefix prefix(record);
+  auto text = prefix.view();
+  std::printf("%.*s%.*s\n", static_cast<int>(text.size()), text.data(),
+              static_cast<int>(record.message.size()), record.message.data());
   std::fflush(stdout);
 }
 }  // namespace app

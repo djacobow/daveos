@@ -2,7 +2,7 @@
 
 A C++20 cooperative scheduler for embedded applications. [PROJECT.md](PROJECT.md)
 is the behavioral specification. The initial implementation supplies real-time
-Linux host and deterministic fake-time platforms, an STM32H563 adapter and
+Linux host and deterministic fake-time platforms, STM32H563/H755 adapters and
 CubeMX-based LED example, an optional logging service, and command dispatch with
 an interactive host console.
 
@@ -44,10 +44,10 @@ toolchains in `tools/external/` are separately ignored inputs, not build outputs
 Build definitions follow the dependency and target directories:
 
 - `src/core/meson.build`: allocation-free core headers.
-- `src/platform/{host,fake,stm32h5}/meson.build`: reusable adapter libraries.
-- `platform/stm32h5/{cmsis,hal}/meson.build`: vendor headers, device flags,
+- `src/platform/{host,fake,stm32h5,stm32h7}/meson.build`: reusable adapter libraries.
+- `platform/{stm32h5,stm32h7}/{cmsis,hal}/meson.build`: vendor headers, device flags,
   and HAL component source dependencies.
-- `examples/{hello,system,console,stm32h563_blinky}/meson.build`: application targets
+- `examples/{hello,system,console,stm32h563_blinky,stm32h755_console}/meson.build`: application targets
   that select dependencies and supply their own configuration.
 - `tests/catch2/meson.build`: test framework dependency; other test directories
   define their respective test executables.
@@ -55,7 +55,7 @@ Build definitions follow the dependency and target directories:
 
 The root `meson.build` selects the platform and includes these groups. HAL sources
 compile separately for each firmware target, using that target's
-`stm32h5xx_hal_conf.h`. Host/fake configurations do not require ST submodules;
+`stm32h5xx_hal_conf.h` or `stm32h7xx_hal_conf.h`. Host/fake configurations do not require ST submodules;
 STM32 configurations require CMSIS even when examples are disabled.
 
 Example and test binaries live in their corresponding directories under `build/`.
@@ -306,7 +306,7 @@ class Motor : public Module<Motor, Event> {
 ```
 
 `DAVEOS_COMMAND` captures `SetSpeed` as both the member-function pointer and its
-logging name. Logs from this handler identify `motor/SetSpeed`. Task and command
+logging name. Logs from this handler identify `motor.SetSpeed`. Task and command
 arrays default to empty; command-only modules need no task. Module names are now
 static constexpr accessors, not constructor arguments. Modules with different
 instance names must use different template instantiations. Names must be nonempty
@@ -339,7 +339,7 @@ unknown names return `not_found`. Handler results propagate unchanged.
 
 `help` lists the complete tree and short descriptions. `motor` or `motor help`
 lists that module's commands; extra arguments to help are errors. All help and
-errors use ordinary best-effort buffered logging under `core/command`. Output
+errors use ordinary best-effort buffered logging under `core.command`. Output
 buffer overflow and filtering apply just as for statistics tables; increase the
 logger's capacity if the default cannot accommodate a full tree.
 
@@ -355,6 +355,73 @@ Its input thread assembles lines into a bounded queue; a scheduled task dispatch
 them. `console exit` requests shutdown and log flushing. EOF only ends input
 collection and does not stop the scheduler. UART transport integration is left
 to the application and is not part of this example.
+
+## STM32H755 console (M7) and sleeping M4
+
+The CubeMX project in `examples/stm32h755_console/` builds two hard-float images,
+using the pinned STM32CubeH7 **v1.13.0** HAL and CMSIS without a board BSP:
+
+```sh
+git submodule update --init platform/stm32h7/STM32CubeH7
+git -C platform/stm32h7/STM32CubeH7 submodule update --init --recursive \
+  Drivers/CMSIS/Device/ST/STM32H7xx Drivers/STM32H7xx_HAL_Driver
+export PATH="$PWD/tools/external/arm-gnu-toolchain-15.2.rel1-x86_64-arm-none-eabi/bin:$PATH"
+meson setup build/h755 --cross-file meson/stm32h755.ini -Dexamples=true
+meson compile -C build/h755
+```
+
+Outputs under `build/h755/examples/stm32h755_console/`:
+
+| Core | Image | Flash base |
+| --- | --- | --- |
+| M7 | `CM7/stm32h755-console-m7.elf` | `0x08000000` |
+| M4 | `CM4/stm32h755-sleep-m4.elf` | `0x08100000` |
+
+Each image also has `.hex`, `.bin`, and `.map` outputs in its directory. Program
+both images and use the matching flash boot addresses with both cores enabled.
+The M7 waits for the M4 to enter Stop during CubeMX's HSEM boot handshake, then
+releases it after clock setup. The M4 finishes HAL initialization, disables its
+SysTick, and remains in shallow WFI sleep. See ST's
+[dual-core architecture note](https://www.st.com/resource/en/application_note/an5557-stm32h745755-and-stm32h747757-lines-dualcore-architecture-stmicroelectronics.pdf)
+for the separate core power domains. DaveOS runs only on M7; its critical sections
+do not synchronize shared state with M4.
+
+Connect USART3 **PD8 TX / PD9 RX**, **1,000,000 baud, 8N1**, no flow control.
+Enable local echo in the terminal if desired. CR, LF, and CRLF terminate input:
+
+```text
+help
+board led 1 on
+board led 2 toggle
+board led 3 off
+board button
+board stats
+```
+
+LEDs are LD1/PB0, LD2/PE1, and LD3/PB14; BTN1 is PC13 and reports its raw level.
+UART interrupts collect up to four complete lines; a 1 ms task dispatches them.
+Overlength lines are rejected, full queues drop entire lines, and UART errors
+discard input through the next terminator. Dropped input is reported via logging.
+Log records transmit in scheduler idle time, with timestamps, severity, module,
+and handler names and automatic CRLF. With `-Dlogging=false`, commands still
+execute but help and log output are silent. There is no exit command on embedded.
+
+The M7 uses the shared H5/H7 TIM2 adapter at 1 MHz and shallow sleep. TIM2 belongs
+exclusively to DaveOS. The example uses the internal 64 MHz HSI RC oscillator, with PLL M=4/N=50/P=2
+for a nominal 400 MHz M7 and 50 MHz TIM2 kernel clock. UART baud and timer accuracy
+follow HSI accuracy; no external clock or solder-bridge changes are needed. Direct-SMPS
+power configuration is retained. The M7 stack reservation is 16 KiB. M7 logging uses full newlib from the toolchain: newlib-nano misread `%llu`
+arguments and caused a hardware-confirmed HardFault in the log subscriber. The
+M4 retains newlib-nano. Formatting heap use still needs validation.
+Core-specific Meson flags select M7 double-precision and M4 single-precision FPUs,
+and explicitly locate each core's vector table in its own flash bank.
+
+Keep the `.ioc`, `Common/`, both `Core/` trees, and flash linker scripts when
+regenerating. CubeMX CMake/IDE files, copied `Drivers/`, and SRAM linker scripts
+are ignored. Preserve the `USER CODE` hooks and the M7 stack setting. These images
+have been programmed and verified through OpenOCD/GDB. Initial hardware checks
+confirmed dual-core startup, M4 sleep, M7 scheduler idle, and approximate TIM2
+rate; remaining validation is tracked in [TODO.md](TODO.md).
 
 ## Fake time and host interrupts
 
@@ -388,9 +455,75 @@ meson test -C build/tsan --print-errorlogs
 ```
 
 GitHub Actions runs host/fake tests, a host build with logging disabled, sanitizers,
-format/lint checks, and the ARM core and LED firmware builds. Allocation tests
+format/lint checks, and the ARM core, H563 LED, and H755 M7/M4 firmware builds. Allocation tests
 instrument C++ `new` during representative core operations in ordinary and ASan builds (TSan owns its own allocator interceptors);
 they do not certify allocator behavior inside every platform libc
 formatting implementation. ARM firmware must validate its chosen libc as well.
 
 Remaining work is tracked in [TODO.md](TODO.md).
+
+## Programming STM32 targets
+
+With examples enabled, both STM32 build directories provide:
+
+```sh
+meson compile -C build/h755 flash-plan     # Build images and preview commands
+meson compile -C build/h755 flash          # STM32CubeProgrammer: both H755 images
+meson compile -C build/h755 flash-openocd  # OpenOCD: both H755 images
+meson compile -C build/arm flash           # STM32CubeProgrammer: H563 image
+```
+
+Programming uses ST-LINK over SWD, connects under hardware reset, writes and
+verifies the ELF images, then resets to run. Connect the probe's NRST signal.
+For H755, both core images are built and programmed in one invocation before
+resetting. Flash addresses come from the ELFs. These targets do not change boot
+option bytes or request a whole-chip erase; configure both H755 cores' boot
+addresses as described above. Programming targets are explicit actions and never
+run as part of a normal build or test.
+
+Tools are discovered under `~/install/stmicro/openocd/bin`,
+`~/install/stmicro/STM32CubeProgrammer/bin` (also
+`~/install/STM32CubeProgrammer/bin`), then on `PATH`. Override paths or select a
+particular probe when needed:
+
+```sh
+meson configure build/h755 \
+  -Dopenocd=/path/to/openocd \
+  -Dcubeprogrammer=/path/to/STM32_Programmer_CLI \
+  -Dprobe_serial=YOUR_STLINK_SERIAL
+```
+
+OpenOCD needs ST's H5/H7 target scripts and the `stlink-dap` interface; use the
+installed ST distribution for H5 support. `flash-plan` never contacts hardware.
+Command construction is tested automatically; actual programming still needs
+hardware validation.
+
+### Debugging the H755
+
+Start OpenOCD with both cores and hardware reset configured:
+
+```sh
+~/install/stmicro/openocd/bin/openocd \
+  -f interface/stlink-dap.cfg -c 'transport select dapdirect_swd' \
+  -c 'set DUAL_BANK 1; set DUAL_CORE 1' -f target/stm32h7x.cfg \
+  -c 'reset_config srst_only srst_nogate connect_assert_srst'
+arm-none-eabi-gdb build/h755/examples/stm32h755_console/CM7/stm32h755-console-m7.elf
+```
+
+In GDB, use `target extended-remote localhost:3333`, `bt`, and `continue`.
+The M4 is on port 3334 with its own ELF. Stop this OpenOCD instance before using
+programming targets, which need exclusive access to the ST-LINK probe.
+
+Initial hardware debugging found two independent faults: newlib-nano misparsed
+`%llu` in logging, and the original 25 MHz HSE assumption produced approximately
+320 kbaud from the board's default 8 MHz ST-LINK clock. M7 now uses full newlib and
+the clock configuration uses the internal 64 MHz HSI oscillator at the application
+owner’s preference. Selecting the fitted X2 crystal
+instead requires the solder-bridge/capacitor configuration in UM2408 section 7.9.1,
+plus corresponding 25 MHz crystal-mode firmware settings.
+
+Log output in all examples uses `[ddd:hh:mm:ss.mmm] L module.function: message`,
+with the context left aligned in 22 columns. Names longer than that are
+ellipsized for display; records retain their full names. Days expand past three
+digits after 999 days. `daveos::core::LogPrefix<Width>` supplies the shared prefix
+formatter; subscribers still choose the transport and line ending.

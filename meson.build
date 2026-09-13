@@ -3,21 +3,25 @@ project('daveos', 'cpp', version: '0.1.0', meson_version: '>=1.3',
 
 python = import('python').find_installation('python3')
 platform = get_option('platform')
-if platform == 'stm32h5'
+if platform in ['stm32h5', 'stm32h7']
   if not meson.is_cross_build()
-    error('stm32h5 requires --cross-file meson/stm32h563.ini')
+    error('STM32 platforms require a matching Meson cross file')
   endif
   add_languages('c', native: false)
-  subdir('platform/stm32h5')
+  subdir('platform' / platform)
 endif
 
 subdir('tools')
 subdir('src/core')
 subdir('src/platform')
+firmware_images = []
 if get_option('examples')
   subdir('examples')
 endif
-if platform == 'stm32h5'
+if firmware_images.length() > 0
+  subdir('tools/programming')
+endif
+if platform in ['stm32h5', 'stm32h7']
   subdir('tests/arm')
 elif get_option('tests')
   subdir('tests')
