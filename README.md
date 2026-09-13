@@ -2,8 +2,8 @@
 
 A C++20 cooperative scheduler for embedded applications. [PROJECT.md](PROJECT.md)
 is the behavioral specification. The initial implementation supplies real-time
-Linux host and deterministic fake-time platforms; STM32H563 support currently
-cross-compiles the core and public templates only.
+Linux host and deterministic fake-time platforms, plus an STM32H563 adapter and
+a CubeMX-based DaveOS LED example.
 
 ## Build and run
 
@@ -53,8 +53,25 @@ production code and examples, including both platform configurations. The
 `duplInheritedMember` diagnostic is suppressed because CRTP intentionally hides
 inherited defaults; other enabled warning, performance, and portability checks
 remain active. Test and downloaded framework sources are excluded from cppcheck.
+CubeMX-generated `Core/` files and copied `Drivers/` are excluded from both
+formatting and linting; regeneration preserves ST's formatting.
 
 ## ARM compile check
+
+STM32CubeH5 is pinned as a Git submodule at
+`platform/stm32h5/STM32CubeH5`. Initialize its HAL and CMSIS device dependencies
+after cloning DaveOS:
+
+```sh
+git submodule update --init platform/stm32h5/STM32CubeH5
+git -C platform/stm32h5/STM32CubeH5 submodule update --init --recursive \
+  Drivers/CMSIS/Device/ST/STM32H5xx Drivers/STM32H5xx_HAL_Driver
+```
+
+These commands omit the board BSP and middleware submodules. The
+STM32H563 example uses CubeMX-generated application configuration with these
+external HAL/CMSIS sources. Vendor sources live outside the project formatting
+and linting paths.
 
 Put `arm-none-eabi-g++`, `arm-none-eabi-ar`, and the companion tools on `PATH`.
 For the locally installed toolchain:
@@ -66,11 +83,60 @@ meson compile -C build/arm
 ```
 
 This builds a Cortex-M33 static archive that instantiates the scheduler and queue
-APIs without host dependencies. It is **not a firmware image**: HAL, startup code,
-clock configuration, linking, and board execution remain follow-up work. The
-compile-only platform has declarations, not a pretend hardware implementation.
-The cross-file selects a soft-float ABI for this check; final firmware ABI choices
-must be coordinated with its HAL and application libraries.
+APIs without host dependencies. The compile check alone is not a firmware image.
+The cross-file uses the Cortex-M33 FPv5 single-precision hard-float ABI for both
+C and C++, matching the generated CubeMX toolchain.
+
+To also build the DaveOS LED firmware:
+
+```sh
+meson setup build/arm --cross-file meson/stm32h563.ini -Dexamples=true
+meson compile -C build/arm
+```
+
+Use `--wipe` with setup when replacing an existing build configured with the old
+cross-file flags. ELF, HEX, BIN, and map files are written under
+`build/arm/examples/stm32h563_blinky/`. A repeating DaveOS task toggles LD1 (PB0)
+every 500 ms, giving a one-second blink cycle. The firmware has been
+cross-compiled, but not tested on hardware.
+
+The CubeMX source project is `examples/stm32h563_blinky/blinky_demo.ioc`, selecting
+STM32H563ZIT6. Keep generated Core sources, the startup assembly, and the FLASH
+linker script in Git. Copied drivers and generated CMake files are ignored;
+Meson owns the build. After CubeMX regeneration, update the example's HAL source
+list if enabled peripherals change. Run builds through Meson to keep all outputs
+under the repository's `build/` directory.
+
+The generated `main.c` calls `DaveOS_Run()` from a CubeMX USER CODE section after
+peripheral initialization. The application and IRQ bridge live in `blinky.cc`.
+The scheduler lives on the main stack; the `.ioc` and FLASH linker script reserve
+16 KiB for it and interrupt frames. GCC's `.su` stack reports are emitted beside
+the example's object files. C++ exceptions and RTTI are disabled. The example
+allows hosted headers because ST's umbrella header includes `math.h`; the core
+and STM32 adapter remain compiled in freestanding mode. The firmware disables
+standard-library runtime assertions to avoid their allocating stdio error path;
+host tests retain them.
+
+`daveos::platform::stm32h5::Platform` owns TIM2 and compare channel 1. Call
+`init(timer_kernel_hz)` after clock setup, then forward `TIM2_IRQHandler()` to
+`interrupt()`. The frequency must divide exactly to 1 MHz. The example derives
+it from the APB1 configuration with TIMPRE disabled. Reserve TIM2 in future
+CubeMX configurations and leave the clock tree unchanged while DaveOS runs.
+
+The 32-bit hardware count is extended to 64-bit microseconds with the overflow
+interrupt. Long timers use intermediate compare deadlines. Critical sections
+save/restore PRIMASK and can nest; do not mask interrupts for an entire counter
+period (about 71 minutes), or call DaveOS from NMI/HardFault handlers. Logging
+from an ISR receives the `core/interrupt` context automatically.
+
+Idle uses shallow WFI sleep with TIM2's sleep clock enabled, or polls when a
+module declines sleep. Deep sleep/Stop modes are not supported. The final idle
+check and WFI run with interrupts masked to avoid a lost wakeup; pending enabled
+interrupts wake the core before their handlers run, as described in
+[Arm's power-management guidance](https://documentation-service.arm.com/static/5ef9ff27cafe527e86f55b47).
+SysTick remains the HAL timebase and may wake the CPU every millisecond.
+Embedded `stop()` is a no-op. Host register-model tests exercise the adapter's
+timer and interrupt logic; hardware timing and sleep validation remain to do.
 
 ## Application structure
 
@@ -164,7 +230,7 @@ meson test -C build/tsan --print-errorlogs
 ```
 
 GitHub Actions runs host/fake tests, sanitizers, format/lint checks, and the ARM core
-compile check. Allocation tests instrument C++ `new` during representative core
+and LED firmware builds. Allocation tests instrument C++ `new` during representative core
 operations in ordinary and ASan builds (TSan owns its own allocator interceptors);
 they do not certify allocator behavior inside every platform libc
 formatting implementation. ARM firmware must validate its chosen libc as well.

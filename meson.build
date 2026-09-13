@@ -13,8 +13,13 @@ if platform == 'stm32h5'
   if not meson.is_cross_build()
     error('stm32h5 requires --cross-file meson/stm32h563.ini')
   endif
+  add_languages('c', native: false)
   static_library('daveos-arm-core-check', 'tests/arm_compile.cc', dependencies: core_dep)
-  summary('STM32H5 support', 'core compile check only; HAL and firmware linking deferred')
+  if get_option('examples')
+    subdir('src/platform/stm32h5')
+    subdir('examples/stm32h563_blinky')
+  endif
+  summary('STM32H5 support', 'core compile check and optional DaveOS LED firmware')
 else
   threads = dependency('threads')
   fake_lib = static_library('daveos-fake', 'src/platform/fake.cc', dependencies: [core_dep, threads])

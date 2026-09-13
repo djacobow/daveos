@@ -31,7 +31,7 @@ jobs:
         with:
           name: logs-${{ strategy.job-index }}
           path: build/*/meson-logs/
-  arm-core:
+  arm:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -40,5 +40,8 @@ jobs:
           python-version: '3.12'
       - run: python -m pip install meson==1.10.1 ninja==1.13.0
       - run: sudo apt-get update && sudo apt-get install -y gcc-arm-none-eabi libstdc++-arm-none-eabi-dev libstdc++-arm-none-eabi-newlib
-      - run: meson setup build/arm --cross-file meson/stm32h563.ini
+      - run: |
+          git submodule update --init platform/stm32h5/STM32CubeH5
+          git -C platform/stm32h5/STM32CubeH5 submodule update --init --recursive Drivers/CMSIS/Device/ST/STM32H5xx Drivers/STM32H5xx_HAL_Driver
+      - run: meson setup build/arm --cross-file meson/stm32h563.ini -Dexamples=true
       - run: meson compile -C build/arm

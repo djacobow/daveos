@@ -11,6 +11,10 @@ test_names = ['core', 'timers', 'logging']
 if not get_option('b_sanitize').contains('thread')
   test_names += ['allocation']
 endif
+exe = executable('test-stm32h5', 'stm32h5.cc', '../src/platform/stm32h5/platform.cc',
+  include_directories: include_directories('stm32h5'),
+  dependencies: [core_dep, catch_dep])
+test('stm32h5', exe, suite: 'unit', timeout: 20)
 foreach name : test_names
   exe = executable('test-' + name, name + '.cc', dependencies: [fake_dep, catch_dep])
   test(name, exe, suite: 'unit', timeout: 20)

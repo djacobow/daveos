@@ -1,0 +1,8 @@
+# CubeMX copies these; Meson uses the pinned platform submodule instead.
+/Drivers/
+# Meson is the maintained build system.
+/CMakeLists.txt
+/CMakePresets.json
+/cmake/
+/STM32H563xx_RAM.ld
+/.mxproject

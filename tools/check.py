@@ -7,6 +7,7 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
+GENERATED = ("examples/stm32h563_blinky/Core", "examples/stm32h563_blinky/Drivers")
 
 
 def main():
@@ -16,6 +17,7 @@ def main():
     sources = sorted(
         str(path) for directory in ("include", "src", "examples", "tests")
         for path in (ROOT / directory).rglob("*") if path.suffix in (".h", ".cc")
+        and not any(path.is_relative_to(ROOT / folder) for folder in GENERATED)
     )
     if args.check.startswith("format"):
         executable = shutil.which("clang-format-15") or shutil.which("clang-format")
@@ -34,6 +36,7 @@ def main():
             "--error-exitcode=1", "--inline-suppr", "--template=gcc",
             # CRTP deliberately replaces inherited defaults without virtual methods.
             "--suppress=duplInheritedMember",
+            *[f"-i{folder}" for folder in GENERATED],
             f"--cppcheck-build-dir={cache}", "-Iinclude", "src", "examples",
         ], cwd=ROOT, check=True)
 
