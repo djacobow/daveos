@@ -41,10 +41,22 @@ toolchains in `tools/external/` are separately ignored inputs, not build outputs
 
 ## Build structure
 
+Code is organized by component, with headers and implementations together:
+`core/{schedule,command,logging,queue,platform,enum}/` and
+`platform/{host,fake,stm32h5,stm32h7,detail}/`. There is no separate `include/`
+or `src/` tree. Include paths start at the repository root, for example
+`#include "core/schedule/scheduler.hpp"`. Namespaces remain `daveos::core` and
+`daveos::platform::*`.
+
+Headers defining templates use `.hpp`; other headers use `.h`. C++ translation
+units use `.cpp`. Generated and third-party files retain their supplied names.
+The shared STM32 template declarations and CMSIS-dependent definitions live
+side by side in `platform/detail/stm32_tim2.hpp` and `stm32_tim2_impl.hpp`.
+
 Build definitions follow the dependency and target directories:
 
-- `src/core/meson.build`: allocation-free core headers.
-- `src/platform/{host,fake,stm32h5,stm32h7}/meson.build`: reusable adapter libraries.
+- `core/meson.build`: allocation-free core headers.
+- `platform/{host,fake,stm32h5,stm32h7}/meson.build`: reusable adapter libraries.
 - `platform/{stm32h5,stm32h7}/{cmsis,hal}/meson.build`: vendor headers, device flags,
   and HAL component source dependencies.
 - `examples/{hello,system,console,stm32h563_blinky,stm32h755_console}/meson.build`: application targets
@@ -147,7 +159,7 @@ under the repository's `build/` directory.
 
 The generated `main.c` calls `DaveOS_Run()` from a CubeMX USER CODE section after
 peripheral initialization. Shared commands, logging, input, and IRQ bridges live
-in `examples/stm32_console/`; each target supplies `board_config.h` and `console.cc`
+in `examples/stm32_console/`; each target supplies `board_config.h` and `console.cpp`
 for its platform, LED/button access, DMA storage/cache handling, and timer clock.
 The scheduler lives on the main stack; the `.ioc` and FLASH linker script reserve
 16 KiB for it and interrupt frames. GCC's `.su` stack reports are emitted beside
@@ -213,7 +225,7 @@ Construct a platform and modules before the scheduler. Without logging, use
 template arguments now specify only event and timer slots, defaulting to `32, 16`.
 Task storage is inferred from module descriptors.
 
-To attach logging, include `daveos/core/logger.h` and construct an application-owned
+To attach logging, include `core/logging/logger.hpp` and construct an application-owned
 logger before the scheduler:
 
 ```cpp
@@ -235,8 +247,8 @@ attachment, not the buffers. Use `logger.minimum(Level::debug)`,
 `logger.counters()`, and `logger.reset()` for logging configuration and diagnostics.
 Scheduler snapshots/resets cover task, event, and timer statistics separately.
 
-See [hello.cc](examples/hello/hello.cc) for a complete program and
-[system.cc](examples/system/system.cc) for repeating work, events, interrupt timers,
+See [hello.cpp](examples/hello/hello.cpp) for a complete program and
+[system.cpp](examples/system/system.cpp) for repeating work, events, interrupt timers,
 deferred task execution, and statistics output.
 
 Modules, the platform, subscriber contexts, and module/task name strings must
@@ -251,7 +263,7 @@ against their arguments at compile time. Test configuration verifies that valid
 arguments compile and mismatched types fail with `-Werror=format`.
 
 Module member functions can use `D_`, `I_`, `W_`, `E_`, and `F_` from
-`daveos/core/log.h` for debug, info, warning, error, and fatal messages:
+`core/logging/log.hpp` for debug, info, warning, error, and fatal messages:
 
 ```cpp
 I_("started");
@@ -302,7 +314,7 @@ requests return `not_running`; pre-run *task* schedules are retained instead.
 
 ## Commands
 
-Include `daveos/core/command.h` and expose a constexpr descriptor array:
+Include `core/command/command.hpp` and expose a constexpr descriptor array:
 
 ```cpp
 class Motor : public Module<Motor, Event> {
@@ -561,7 +573,7 @@ formatter; subscribers still choose the transport and line ending.
 
 ### Named enums
 
-`daveos/core/enum.h` generates scoped enums and `constexpr enum_name()` overloads
+`core/enum/enum.h` generates scoped enums and `constexpr enum_name()` overloads
 from a single list, with no allocation or separate string table to maintain:
 
 ```cpp

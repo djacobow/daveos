@@ -8,12 +8,11 @@ if platform in ['stm32h5', 'stm32h7']
     error('STM32 platforms require a matching Meson cross file')
   endif
   add_languages('c', native: false)
-  subdir('platform' / platform)
 endif
 
 subdir('tools')
-subdir('src/core')
-subdir('src/platform')
+subdir('core')
+subdir('platform')
 firmware_images = []
 if get_option('examples')
   subdir('examples')

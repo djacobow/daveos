@@ -7,7 +7,8 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-GENERATED = ("examples/stm32h563_blinky/Core", "examples/stm32h563_blinky/Drivers",
+GENERATED = ("platform/stm32h5/STM32CubeH5", "platform/stm32h7/STM32CubeH7",
+             "examples/stm32h563_blinky/Core", "examples/stm32h563_blinky/Drivers",
              "examples/stm32h755_console/CM7/Core",
              "examples/stm32h755_console/CM4/Core",
              "examples/stm32h755_console/Common",
@@ -19,8 +20,8 @@ def main():
     parser.add_argument("check", choices=("format", "format-check", "lint"))
     args = parser.parse_args()
     sources = sorted(
-        str(path) for directory in ("include", "src", "examples", "tests")
-        for path in (ROOT / directory).rglob("*") if path.suffix in (".h", ".cc")
+        str(path) for directory in ("core", "platform", "examples", "tests")
+        for path in (ROOT / directory).rglob("*") if path.suffix in (".h", ".hpp", ".cpp")
         and not any(path.is_relative_to(ROOT / folder) for folder in GENERATED)
     )
     if args.check.startswith("format"):
@@ -41,7 +42,7 @@ def main():
             # CRTP deliberately replaces inherited defaults without virtual methods.
             "--suppress=duplInheritedMember",
             *[f"-i{folder}" for folder in GENERATED],
-            f"--cppcheck-build-dir={cache}", "-Iinclude", "src", "examples",
+            f"--cppcheck-build-dir={cache}", "-I.", "core", "platform", "examples",
         ], cwd=ROOT, check=True)
 
 

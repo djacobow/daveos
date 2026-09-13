@@ -264,7 +264,7 @@ Use explicit status returns rather than exceptions, with a success value for
 operations that complete normally. Distinguish error conditions such as repeated
 initialization, module initialization failure, invalid repeat interval, event
 queue overflow, timer overflow, and `not_running`. The shared type is
-`daveos::core::Status`, declared in `core/platform.h`; commands use it too.
+`daveos::core::Status`, declared in `core/platform/platform.hpp`; commands use it too.
 `not_running` consistently reports that an operation requires an active scheduler
 run. It is an explicit error for both a pre-run `stop()` call and a timer request
 during initialization, rather than a silently accepted operation.
@@ -712,3 +712,14 @@ Return, and logs the submitted command before dispatch. UART interrupts do not
 transmit or log synchronously. Backspace/Delete support basic line editing, and
 log output preserves unfinished input by erasing and redrawing it. Terminal-local
 echo should be disabled; wrapped-line editing is outside the initial scope.
+
+## Source organization
+
+Colocate headers and implementations by component: core facilities live under
+`core/{schedule,command,logging,queue,platform,enum}/`, and adapters under
+`platform/{host,fake,stm32h5,stm32h7}/`, with shared adapter details in
+`platform/detail/`. Include paths are relative to the repository root; C++
+namespaces remain `daveos::core` and `daveos::platform::*`. No separate include
+and source trees are needed. Headers defining templates use `.hpp`, other
+headers use `.h`, and C++ translation units use `.cpp`. Vendor and generated
+file naming is retained. Meson definitions live with their components/targets.

@@ -1,4 +1,4 @@
-logging_source = get_option('logging') ? 'logging.cc' : 'disabled.cc'
+logging_source = get_option('logging') ? 'logging.cpp' : 'disabled.cpp'
 exe = executable('test-logging', logging_source, dependencies: test_support_dep)
 test('logging', exe, suite: 'unit', timeout: 20)
 
@@ -6,7 +6,7 @@ test('logging', exe, suite: 'unit', timeout: 20)
 cpp = meson.get_compiler('cpp')
 if cpp.get_id() in ['gcc', 'clang', 'apple-clang']
   format_check = '''
-    #include "daveos/core/module.h"
+    #include "core/schedule/module.hpp"
     enum class Event { sample };
     template <typename E>
     struct Example : daveos::core::Module<Example<E>, E> {
@@ -34,7 +34,7 @@ endif
 
 if get_option('logging')
   platform_check = '''
-    #include "daveos/core/logger.h"
+    #include "core/logging/logger.hpp"
     using namespace daveos::core;
     struct TestPlatform {};
     struct Other {};

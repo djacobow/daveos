@@ -1,11 +1,11 @@
-exe = executable('test-commands', 'commands.cc', dependencies: test_support_dep)
+exe = executable('test-commands', 'commands.cpp', dependencies: test_support_dep)
 test('commands', exe, suite: 'unit', timeout: 20)
 
 # Positive control prevents an unrelated compile failure from hiding invalid
 # metadata checks. Each variant instantiates the actual registration boundary.
 cpp = meson.get_compiler('cpp')
 registration_check = '''
-  #include "daveos/core/command.h"
+  #include "core/command/command.hpp"
   enum class Event {};
   using namespace daveos::core;
   struct Example : Module<Example, Event> {
@@ -33,7 +33,7 @@ foreach descriptor, expected : {
   endif
 endforeach
 names_check = '''
-  #include "daveos/core/command.h"
+  #include "core/command/command.hpp"
   enum class Event {};
   using namespace daveos::core;
   template <int N> struct Example : Module<Example<N>, Event> {

@@ -10,7 +10,7 @@ firmware = executable('stm32h563-blinky',
   'Core/Src/main.c', 'Core/Src/stm32h5xx_it.c',
   'Core/Src/stm32h5xx_hal_msp.c', 'Core/Src/system_stm32h5xx.c',
   'Core/Src/sysmem.c', 'Core/Src/syscalls.c', 'startup_stm32h563xx.s',
-  'console.cc',
+  'console.cpp',
   dependencies: firmware_deps,
   name_suffix: 'elf',
   # libstdc++ assertion reporting pulls in allocating stdio on this toolchain.
