@@ -206,7 +206,13 @@ auto logger = make_logger(platform, SubscriberList{Subscriber{nullptr, Output}})
 auto scheduler = make_scheduler<Event>(platform, modules, logger);
 ```
 
-The logger and scheduler must use the same platform. `make_logger<32, 128>` controls
+The logger and scheduler must use the same platform.
+Different platform types are rejected at compile time; different instances of the same type make scheduler `init()` return
+`Status::invalid_argument` before any module initialization callback. This failure
+is terminal and follows the normal initialization-failure cleanup and log flush.
+There is no platform check when logging is compiled out.
+
+`make_logger<32, 128>` controls
 record capacity and message bytes (including the terminating NUL); subscriber
 storage is inferred from the list. The logger and subscriber contexts must outlive
 the scheduler. Do not move an attached logger. The scheduler stores only a borrowed

@@ -217,3 +217,32 @@ TEST_CASE("interrupt enqueue retains a notification for idle dispatch") {
   CHECK(logger.dispatch());
   CHECK(logger.empty());
 }
+
+TEST_CASE("logger platform mismatch fails before module initialization") {
+  Fake platform, other;
+  TestModule module;
+  Sink sink;
+  auto logger = make_logger(other, SubscriberList{sink.subscriber()});
+  auto scheduler = make_scheduler<Event>(platform, ModuleList{&module}, logger);
+  bool initialized = false, ran = false;
+  module.initializer = [&](InitStage) {
+    initialized = true;
+    return Status::ok;
+  };
+  module.first_action = [&] { ran = true; };
+  module.receiver = [&](Event) { ran = true; };
+  CHECK(scheduler.schedule(module, &TestModule::first, 0) == Status::ok);
+  CHECK(scheduler.post(Event::first) == Status::ok);
+  CHECK(scheduler.log(Level::info, "before init") == Status::ok);
+  SECTION("explicit init") {
+    CHECK(scheduler.init() == Status::invalid_argument);
+  }
+  SECTION("automatic init") {}
+  CHECK(scheduler.run() == Status::invalid_argument);
+  CHECK(scheduler.init() == Status::invalid_argument);
+  CHECK_FALSE(initialized);
+  CHECK_FALSE(ran);
+  CHECK(scheduler.post(Event::first) == Status::not_running);
+  REQUIRE(sink.records.size() == 1);
+  CHECK(sink.records[0].message == "before init");
+}

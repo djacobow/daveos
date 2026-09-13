@@ -31,3 +31,21 @@ if cpp.get_id() in ['gcc', 'clang', 'apple-clang']
     endif
   endforeach
 endif
+
+if get_option('logging')
+  platform_check = '''
+    #include "daveos/core/logger.h"
+    using namespace daveos::core;
+    struct TestPlatform {};
+    struct Other {};
+    void check(Logger<32, 128, 0, TestPlatform>& logger, @0@& platform) {
+      logger.uses_platform(platform);
+    }
+  '''
+  foreach platform_type, expected : {'TestPlatform': true, 'Other': false}
+    if cpp.compiles(platform_check.format(platform_type), dependencies: core_dep,
+        name: 'logger platform type ' + platform_type) != expected
+      error('Logger platform type validation did not behave as expected')
+    endif
+  endforeach
+endif

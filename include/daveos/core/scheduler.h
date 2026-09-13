@@ -433,6 +433,8 @@ class Scheduler<Event, ModuleList<Modules...>, Logging, P, EventCapacity,
     }
   }
   Status Validate() {
+    if constexpr (!std::is_same_v<Logging, NoLogging>)
+      if (!logging_.uses_platform(platform_)) return Status::invalid_argument;
     if (registration_error_) return Status::invalid_argument;
     for (std::size_t index = 0; index < kTasks; ++index) {
       if (!tasks_[index].name || !*tasks_[index].name)

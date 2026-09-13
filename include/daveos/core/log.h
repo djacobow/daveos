@@ -84,6 +84,10 @@ template <typename L>
 class LogService {
  public:
   explicit LogService(L& logger) : logger_(logger) {}
+  template <typename P>
+  bool uses_platform(const P& platform) const {
+    return logger_.uses_platform(platform);
+  }
   Status write(Level level, const char* format, std::va_list args) {
     return logger_.write(level, format, args);
   }

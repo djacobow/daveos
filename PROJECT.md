@@ -437,6 +437,10 @@ outside `ModuleList`. Construct the logger before the scheduler and pass it by
 reference when attaching it; it and its subscribers must outlive the scheduler.
 `make_logger<Records, MessageBytes>(platform, subscribers)` deduces the platform
 and subscriber types. The logger and scheduler must use the same platform.
+Different platform types are rejected at compile time; different instances of the same type make scheduler `init()` return
+`Status::invalid_argument` before any module initialization callback. This failure
+is terminal and follows the normal initialization-failure cleanup and log flush.
+There is no platform check when logging is compiled out.
 The scheduler owns no logging buffers, subscriber storage, filtering state, or
 logging counters. Logger construction makes logging available before module
 initialization. Calls through `scheduler().log(...)` remain forwarding conveniences.

@@ -19,11 +19,11 @@ TEST_CASE("disabled macros do not evaluate or require their arguments") {
 }
 
 TEST_CASE("disabled logging owns no storage and attaches no service") {
-  Fake platform;
+  Fake platform, unused_logger_platform;
   TestModule module;
   Sink sink;
-  auto logger =
-      make_logger<4096, 1024>(platform, SubscriberList{sink.subscriber()});
+  auto logger = make_logger<4096, 1024>(unused_logger_platform,
+                                        SubscriberList{sink.subscriber()});
   STATIC_REQUIRE(std::is_empty_v<decltype(logger)>);
   auto scheduler = make_scheduler<Event>(platform, ModuleList{&module}, logger);
   using WithoutLogger =
