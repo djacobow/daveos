@@ -18,6 +18,7 @@ Longer-term applications may include multiple UARTs, CAN buses, and an Ethernet 
   when necessary. Test infrastructure may allocate freely.
 * Standard library facilities are allowed subject to these allocation rules.
 * Use `constexpr` where possible.
+* Prefer CRTP and static dispatch to virtual methods for modules and platforms.
 
 ## Namespaces
 
@@ -100,12 +101,18 @@ The list preserves each module's concrete type so module counts and task descrip
 array sizes can be derived at compile time. It holds pointers rather than owning
 the modules; module instances must remain alive for the scheduler's lifetime.
 
-The scheduler implements `SchedulerInterface<Event>`, a small module-facing
+Modules use the CRTP base `Module<Derived, Event>`. Platforms similarly use a
+CRTP base and are statically bound to the concrete scheduler.
+
+The scheduler provides `SchedulerInterface<Event>`, a small module-facing
 interface parameterized only by the application's event enum. It exposes
 scheduling and cancellation, event posting,
 timers, and logging without exposing the concrete scheduler's module-list types or
 storage capacities. Modules depend on this interface rather than the full scheduler
 template specialization, so they can be reused across scheduler configurations.
+This interface is an allocation-free reference with a function-pointer operation
+table, not a virtual base. Heterogeneous task and subscriber callbacks likewise
+use stored function pointers where indirect dispatch is required.
 
 During construction, the scheduler automatically binds a reference or pointer to
 this interface into each registered module. This binding is available after
@@ -502,6 +509,11 @@ initial host simulation scope.
 ## Build system
 
 Use Meson. Add Python build helpers as needed, with dependencies managed by uv.
+Build configurations live under `build/` (for example `build/host`, `build/fake`,
+`build/asan`, and `build/arm`). All generated intermediates and caches belong under
+that ignored directory and can be removed and regenerated.
+Provide `format`, `format-check`, and `lint` build targets using clang-format and
+cppcheck.
 
 ## Style
 

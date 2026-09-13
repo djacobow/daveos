@@ -1,0 +1,172 @@
+# DaveOS
+
+A C++20 cooperative scheduler for embedded applications. [PROJECT.md](PROJECT.md)
+is the behavioral specification. The initial implementation supplies real-time
+Linux host and deterministic fake-time platforms; STM32H563 support currently
+cross-compiles the core and public templates only.
+
+## Build and run
+
+Install Meson (1.3 or newer), Ninja, clang++, Python 3, clang-format 15, and
+cppcheck. The first test-enabled setup downloads Catch2 3.16.0 and verifies its
+SHA-256. It is a test-only dependency. Python helpers use only the standard library;
+there are no Python package dependencies yet.
+
+```sh
+meson setup build/host --native-file meson/clang.ini
+meson compile -C build/host
+meson test -C build/host --print-errorlogs
+./build/host/hello-host
+./build/host/system-host
+```
+
+The host configuration also builds fake-time tests and examples. To build only the
+fake adapter:
+
+```sh
+meson setup build/fake --native-file meson/clang.ini -Dplatform=fake
+meson compile -C build/fake
+meson test -C build/fake --print-errorlogs
+./build/fake/system-fake
+```
+
+`-Dtests=false` omits Catch2 and unit/integration test executables.
+`-Dexamples=false` omits example executables. Meson suites are `smoke`, `unit`, and
+`integration`; use `meson test -C build/host --suite unit` to select one.
+
+All generated files, downloaded test sources, and analysis caches live under the
+ignored `build/` directory. It can be removed entirely and regenerated. Installed
+toolchains in `tools/external/` are separately ignored inputs, not build outputs.
+
+## Formatting and linting
+
+```sh
+meson compile -C build/host format       # Rewrite project C++ using Google style.
+meson compile -C build/host format-check # Check without editing.
+meson compile -C build/host lint         # cppcheck; diagnostics fail the target.
+```
+
+These targets are available in every configuration. They also work without Meson:
+`python3 tools/check.py format-check` and `python3 tools/check.py lint`.
+The helper prefers `clang-format-15`, falling back to `clang-format`. Lint checks
+production code and examples, including both platform configurations. The
+`duplInheritedMember` diagnostic is suppressed because CRTP intentionally hides
+inherited defaults; other enabled warning, performance, and portability checks
+remain active. Test and downloaded framework sources are excluded from cppcheck.
+
+## ARM compile check
+
+Put `arm-none-eabi-g++`, `arm-none-eabi-ar`, and the companion tools on `PATH`.
+For the locally installed toolchain:
+
+```sh
+export PATH="$PWD/tools/external/arm-gnu-toolchain-15.2.rel1-x86_64-arm-none-eabi/bin:$PATH"
+meson setup build/arm --cross-file meson/stm32h563.ini
+meson compile -C build/arm
+```
+
+This builds a Cortex-M33 static archive that instantiates the scheduler and queue
+APIs without host dependencies. It is **not a firmware image**: HAL, startup code,
+clock configuration, linking, and board execution remain follow-up work. The
+compile-only platform has declarations, not a pretend hardware implementation.
+The cross-file selects a soft-float ABI for this check; final firmware ABI choices
+must be coordinated with its HAL and application libraries.
+
+## Application structure
+
+Modules use `daveos::core::Module<Derived, Event>`; platforms are statically bound.
+There are no virtual methods in DaveOS. Modules receive a non-owning
+`SchedulerInterface<Event>` reference backed by a fixed function-pointer table,
+so module types do not depend on all other modules or scheduler capacities.
+
+```cpp
+using namespace daveos::core;
+enum class Event { ready };
+
+class Blinker : public Module<Blinker, Event> {
+ public:
+  Blinker() : Module("blinker") {}
+  static constexpr auto tasks() {
+    return std::array{TaskDescriptor<Blinker>{"tick", &Blinker::tick}};
+  }
+  Status init(InitStage stage) {
+    if (stage == InitStage::stage1)
+      return scheduler().schedule(*this, &Blinker::tick, 1000, Mode::repeat);
+    return Status::ok;
+  }
+  void tick() {
+    scheduler().log(Level::info, "tick");
+    scheduler().cancel(*this, &Blinker::tick);
+    scheduler().stop();
+  }
+};
+```
+
+Construct a platform, modules, and subscriber objects before the scheduler. Use
+`make_scheduler<Event>(platform, ModuleList{&one, &two}, SubscriberList{...})`.
+The optional numeric template arguments are event slots, application timer slots,
+log records, and message bytes, defaulting to `32, 16, 32, 128`. Subscriber storage
+is inferred from the list, and task storage from the descriptor arrays.
+
+See [hello.cc](examples/hello.cc) for a complete program and
+[system.cc](examples/system.cc) for repeating work, events, interrupt timers,
+deferred task execution, and statistics output.
+
+Modules, the platform, subscriber contexts, and module/task name strings must
+outlive the scheduler. Do not move a bound module or scheduler. Each platform
+instance serves one scheduler run; shutdown closes its interrupt domain and timer.
+Run returns only after timer activity has stopped and queued logs have been flushed.
+External producer threads must finish before destroying the platform. Log record
+views are valid during the subscriber call; copy data needed for later output.
+Subscribers append line endings themselves, as shown in the examples.
+
+`Queue<T, N>` provides ordinary fixed storage. `ThreadSafeQueue<T, N, Platform>`
+uses a suitable platform mutex or falls back to critical sections. All of its
+operations are nonblocking. Mutations and `peek(out)` return `Status`; state
+queries return `Result<T>` so a busy lock cannot be mistaken for an empty queue.
+Elements must support default construction and assignment without allocation or
+exceptions; interrupt callers must also keep element operations bounded.
+
+`timer(delay, callback)` and `cancel_timer(callback)` use `void (*)()` callbacks.
+Callbacks are identified by pointer equality and execute in interrupt context;
+use wrapper functions for separate timers. Zero delays are rejected. Pre-run timer
+requests return `not_running`; pre-run *task* schedules are retained instead.
+
+## Fake time and host interrupts
+
+The fake platform defaults to automatic advancement. When idle it advances to the
+next task or timer deadline. `Fake::Advancement::manual` lets a test advance time
+with `advance(microseconds)` or inject an interrupt explicitly. Due timer callbacks
+run synchronously in simulated interrupt context before advancement returns.
+An indefinite wait requires an external simulated interrupt in either mode.
+
+Both platforms expose `interrupt(callback, context)` to test/application adapter
+threads. It executes the handler synchronously, serialized with other handlers.
+Callbacks can schedule tasks, post events, operate timers, and log. They must not
+call `run()` or directly dispatch module callbacks. Nested interrupt injection is
+rejected. Host timer expiry uses a dedicated thread and the same interrupt domain.
+
+The internal idle/notification hooks use a retained generation counter. They are
+platform implementation details, not an application wake API. Real-time host
+blocking is not an MCU power state: both sleep and awake-wait use host notifications.
+Fake-time tests distinguish and exercise both scheduler paths.
+
+## Sanitizers and CI
+
+```sh
+meson setup build/asan --native-file meson/clang.ini -Db_sanitize=address,undefined -Db_lundef=false
+meson compile -C build/asan -j 4
+meson test -C build/asan --print-errorlogs
+
+meson setup build/tsan --native-file meson/clang.ini -Db_sanitize=thread -Db_lundef=false
+meson compile -C build/tsan -j 4
+meson test -C build/tsan --print-errorlogs
+```
+
+GitHub Actions runs host/fake tests, sanitizers, format/lint checks, and the ARM core
+compile check. Allocation tests instrument C++ `new` during representative core
+operations in ordinary and ASan builds (TSan owns its own allocator interceptors);
+they do not certify allocator behavior inside every platform libc
+formatting implementation. ARM firmware must validate its chosen libc as well.
+
+Remaining work is tracked in [TODO.md](TODO.md).

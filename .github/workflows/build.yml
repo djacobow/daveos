@@ -1,0 +1,44 @@
+name: Build and test
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  host:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizer: [none, 'address,undefined', thread]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install meson==1.10.1 ninja==1.13.0
+      - run: sudo apt-get update && sudo apt-get install -y clang-format-15 cppcheck
+      - run: meson setup build/host --native-file meson/clang.ini -Db_sanitize=${{ matrix.sanitizer }} -Db_lundef=false
+      - run: meson compile -C build/host -j 2
+      - run: meson test -C build/host --print-errorlogs
+      - if: matrix.sanitizer == 'none'
+        run: meson compile -C build/host format-check lint
+      - if: matrix.sanitizer == 'none'
+        run: |
+          meson setup build/fake --native-file meson/clang.ini -Dplatform=fake
+          meson compile -C build/fake -j 2
+          meson test -C build/fake --print-errorlogs
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: logs-${{ strategy.job-index }}
+          path: build/*/meson-logs/
+  arm-core:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install meson==1.10.1 ninja==1.13.0
+      - run: sudo apt-get update && sudo apt-get install -y gcc-arm-none-eabi libstdc++-arm-none-eabi-dev libstdc++-arm-none-eabi-newlib
+      - run: meson setup build/arm --cross-file meson/stm32h563.ini
+      - run: meson compile -C build/arm
