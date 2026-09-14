@@ -586,6 +586,10 @@ logging. USART3 runs at 1 Mb/s on PD8/PD9 with interrupt-fed input and two 4 KiB
 ping-pong TX DMA buffers. H563 uses GPDMA1 Channel 0 and normal SRAM; H755 uses
 DMA1 Stream 0 and AXI SRAM. Full buffers drop whole output frames and expose
 counters. Both use internal HSI, TIM2 at 1 MHz, and shallow WFI sleep.
+The shared STM32 board console includes `board timer <microseconds>`: a positive
+unsigned decimal delay starts a one-shot DaveOS timer; its interrupt-time callback
+logs `Timer fired` for deferred delivery. Reissuing replaces the pending timer.
+
 H563 LEDs are PB0/PF4/PG4; H755 LEDs are PB0/PE1/PB14. Both read PC13.
 H563's CPU runs at nominal 250 MHz, H755 M7 at 400 MHz. H563 hardware validation
 is pending; validate boot, UART RX/error recovery, TX DMA handoff, LED/button
@@ -690,8 +694,16 @@ reply callbacks or sessions.
 
 Add an interactive host console example with buffered stdin input and a
 `console exit` command for orderly shutdown and log flushing. EOF has no command
-meaning and must not stop the scheduler or cause a busy loop. The H563 and H755 examples share USART3 input with application-owned line buffering. Test parsing, matching, boundaries, help, context
-restoration, nested calls, command-only modules, compile-time validation, and
+meaning and must not stop the scheduler or cause a busy loop. The H563 and H755
+examples share USART3 input with application-owned line buffering.
+The H755 additionally provides an application-owned USB CDC ACM console on CN13,
+using the pinned CubeH7 USB device middleware. UART and USB retain separate
+partial lines and echo while sharing command dispatch and log output. USB uses
+fixed ping-pong output buffers with interrupt-driven FIFO transfers; disconnected
+output is discarded and full buffers drop whole frames. DTR deassertion, USB
+reset, and disconnect discard queued USB output and unfinished input.
+
+Test parsing, matching, boundaries, help, context restoration, nested calls, command-only modules, compile-time validation, and
 allocation-free core operations on the fake platform, alongside existing host,
 sanitizer, ARM compile, formatting, and lint checks.
 

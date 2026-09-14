@@ -100,3 +100,28 @@ TEST_CASE(
   f.output.complete();
   CHECK(f.output.counters().sent_bytes == 8);
 }
+
+TEST_CASE(
+    "Transport teardown discards all output and permits a fresh session") {
+  Fixture f;
+  f.output.write("active");
+  REQUIRE(f.output.flush() == Status::ok);
+  f.output.write("pending");
+  REQUIRE(f.output.flush() == Status::ok);
+  f.output.write("staged");
+  // Simulate the driver releasing its active buffer before teardown.
+  f.driver.bytes = nullptr;
+  f.driver.size = 0;
+  f.output.discard();
+  CHECK(f.output.queued() == 0);
+  f.output.complete();
+  CHECK(f.output.counters().transfers == 0);
+  REQUIRE(f.output.flush() == Status::ok);
+  CHECK(f.driver.bytes == nullptr);
+  f.output.write("fresh");
+  REQUIRE(f.output.flush() == Status::ok);
+  CHECK(f.driver.sent() == "fresh");
+  f.output.complete();
+  CHECK(f.output.counters().sent_bytes == 5);
+  CHECK(f.output.counters().errors == 0);
+}

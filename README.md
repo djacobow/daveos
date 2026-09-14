@@ -393,7 +393,8 @@ using the pinned STM32CubeH7 **v1.13.0** HAL and CMSIS without a board BSP:
 ```sh
 git submodule update --init platform/stm32h7/STM32CubeH7
 git -C platform/stm32h7/STM32CubeH7 submodule update --init --recursive \
-  Drivers/CMSIS/Device/ST/STM32H7xx Drivers/STM32H7xx_HAL_Driver
+  Drivers/CMSIS/Device/ST/STM32H7xx Drivers/STM32H7xx_HAL_Driver \
+  Middlewares/ST/STM32_USB_Device_Library
 export PATH="$PWD/tools/external/arm-gnu-toolchain-15.2.rel1-x86_64-arm-none-eabi/bin:$PATH"
 meson setup build/h755 --cross-file meson/stm32h755.ini -Dexamples=true
 meson compile -C build/h755
@@ -425,8 +426,15 @@ board led 2 toggle
 board led 3 off
 board button
 board stats
+board timer 1000000
 board reset
 ```
+
+`board timer <microseconds>` starts a one-shot DaveOS timer with a positive
+unsigned decimal delay. Its interrupt-time callback queues a `Timer fired` log;
+normal idle-time logging delivers it to the console outputs. Issuing the command
+again replaces the pending timer. Invalid, zero, or overflowing arguments are
+rejected. This command is shared by the H755 and H563 board consoles.
 
 `board reset` takes no arguments and immediately resets the MCU (both cores),
 discarding pending logs/output. The board module calls `platform.reset()` directly;
@@ -450,6 +458,30 @@ clocks remain enabled during shallow sleep. RX still uses one-byte interrupts.
 Output never waits for space: a complete display/log frame (up to 768 bytes) is
 dropped if it cannot fit. Transfer errors discard queued output with uncertain
 progress. `board stats` reports bytes sent, transfers, dropped frames, and errors.
+
+The H755 also exposes a USB CDC ACM console on **CN13 (Micro-AB)**. Connect a
+USB data cable there and keep ST-LINK connected for power/debugging. On Linux,
+select `/dev/serial/by-id/usb-DaveOS_DaveOS_H755_console_*-if00` (typically a
+second `/dev/ttyACM*`). Open it with a serial terminal that asserts DTR; its baud
+setting is ignored. Disable local echo. Commands and log records are shared
+with USART3, but each transport keeps its own partial-line buffer and echo.
+Avoid opening multiple readers on the same port: they compete for received bytes.
+
+USB output reuses the bounded ping-pong buffer helper with two 4 KiB buffers.
+The USB peripheral moves data through its FIFO in interrupts, without DMA or
+heap allocation. `board stats` includes USB transfer/drop counters. Output while
+unconfigured or DTR-low is discarded; backpressure drops whole new frames when
+buffers fill. DTR deassertion, bus reset, and disconnect clear unfinished input
+and queued USB output. UART remains available independently.
+
+`CM7/usb/` owns the USB device glue and descriptors, using the pinned CubeH7
+USB Device Library CDC class. It configures USB2 OTG FS, PA9 VBUS sensing,
+PA11/PA12 data pins, IRQ priority 6, and HSI48 with USB2 SOF synchronization via
+CRS. These pins must remain reserved. This setup is application-owned rather
+than CubeMX-generated: do not generate a second USB stack or duplicate IRQ/
+callbacks. Meson enables the HAL PCD component, so CubeMX regeneration does not
+need to enable it in the generated HAL configuration. The demo uses ST's
+example VID/PID `0483:5740` and a per-chip serial number.
 
 The M7 uses the shared H5/H7 TIM2 adapter at 1 MHz and shallow sleep. TIM2 belongs
 exclusively to DaveOS. The example uses the internal 64 MHz HSI RC oscillator, with PLL M=4/N=50/P=2

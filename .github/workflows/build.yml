@@ -63,6 +63,6 @@ jobs:
       - run: meson compile -C build/arm
       - run: |
           git submodule update --init platform/stm32h7/STM32CubeH7
-          git -C platform/stm32h7/STM32CubeH7 submodule update --init --recursive Drivers/CMSIS/Device/ST/STM32H7xx Drivers/STM32H7xx_HAL_Driver
+          git -C platform/stm32h7/STM32CubeH7 submodule update --init --recursive Drivers/CMSIS/Device/ST/STM32H7xx Drivers/STM32H7xx_HAL_Driver Middlewares/ST/STM32_USB_Device_Library
       - run: meson setup build/h755 --cross-file meson/stm32h755.ini -Dexamples=true
       - run: meson compile -C build/h755

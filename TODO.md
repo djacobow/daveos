@@ -13,3 +13,7 @@
 - [x] Diagnose H755 newlib-nano `%llu` log-formatting HardFault; use toolchain full newlib for M7.
 - [ ] Validate embedded formatting heap use with full newlib.
 - [x] Diagnose H755 clock mismatch (25 MHz assumed, 8 MHz measured); confirm 8 MHz ST-LINK rate, then select internal HSI and correct PLL settings as requested.
+- [x] Add H755 USB CDC command/log console; verify enumeration, commands, and DTR session reset on hardware.
+- [x] Validate H755 USB cable unplug/replug and command recovery (user hardware check).
+- [ ] Validate H755 USB sustained backpressure recovery on hardware.
+- [x] Add shared board timer command and verify 200 ms completion on H755 hardware.

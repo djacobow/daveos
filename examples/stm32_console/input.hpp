@@ -44,6 +44,13 @@ class Input {
     if (!discard_) ++dropped_;
     discard_ = true;
   }
+  // A transport session ended: do not combine old input with a new connection.
+  void reset() {
+    daveos::core::Guard guard(platform_);
+    lines_.clear();
+    line_ = {};
+    previous_cr_ = discard_ = false;
+  }
   bool pop(Line& line) {
     daveos::core::Guard guard(platform_);
     return lines_.pop(line) == daveos::core::Status::ok;

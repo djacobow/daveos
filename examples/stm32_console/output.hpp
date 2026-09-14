@@ -18,13 +18,14 @@ struct TxCounters {
   std::uint32_t transfers = 0;
 };
 // Task-side write()/flush() collect a complete display/log frame, then copy it
-// atomically into the filling half of caller-owned DMA-accessible storage.
-// The other half belongs exclusively to DMA until completion. Never wait for
-// space. Driver::start(bytes, size) starts one asynchronous transfer and
-// returns bool. Its completion/error handlers call complete()/error() after
-// hardware releases the buffer. P serializes task and IRQ access; neither
-// callback may run inline from start(). All objects/storage must outlive
-// outstanding transfers.
+// atomically into the filling half of caller-owned storage (DMA-accessible
+// when required by the driver). The other half belongs exclusively to the
+// asynchronous driver until completion; USB FIFO transfers can use it too.
+// Never wait for space. Driver::start(bytes, size) starts one asynchronous
+// transfer and returns bool. Its completion/error handlers call
+// complete()/error() after hardware releases the buffer. P serializes task and
+// IRQ access; neither callback may run inline from start(). All objects/storage
+// must outlive outstanding transfers.
 template <typename P, typename Driver, std::size_t Capacity,
           std::size_t FrameCapacity = 768>
 class DmaOutput {
@@ -71,6 +72,13 @@ class DmaOutput {
     daveos::core::Guard guard(platform_);
     ++counters_.errors;
     pending_ = active_ = 0;
+  }
+  // Transport teardown must release hardware ownership and suppress stale
+  // completion callbacks before this call. Serialize against write() too.
+  void discard() {
+    daveos::core::Guard guard(platform_);
+    frame_size_ = pending_ = active_ = 0;
+    overflow_ = false;
   }
   TxCounters counters() {
     daveos::core::Guard guard(platform_);

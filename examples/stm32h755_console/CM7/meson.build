@@ -1,6 +1,7 @@
-firmware_deps = [stm32_console_dep, stm32h7_dep, stm32h7_hal_dep]
+subdir('usb')
+firmware_deps = [h755_usb_dep, stm32_console_dep, stm32h7_dep, stm32h7_hal_dep]
 foreach component : ['cortex', 'hsem', 'rcc', 'rcc_ex', 'flash', 'flash_ex',
-                     'gpio', 'dma', 'dma_ex', 'pwr', 'pwr_ex', 'exti', 'uart', 'uart_ex']
+                     'pcd', 'pcd_ex', 'll_usb', 'gpio', 'dma', 'dma_ex', 'pwr', 'pwr_ex', 'exti', 'uart', 'uart_ex']
   firmware_deps += stm32h7_hal_components[component]
 endforeach
 linker_script = files('stm32h755xx_flash_CM7.ld')

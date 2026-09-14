@@ -115,3 +115,33 @@ TEST_CASE("UART echo clears on submit and preserves input around log output") {
   display.after_log();
   CHECK(terminal_output == "\r\x1b[2K");
 }
+
+TEST_CASE(
+    "Transport reset discards queued and partial input and parser state") {
+  Platform platform;
+  app::Input input(platform);
+  Feed(input, "queued\npartial");
+  input.error();
+  input.reset();
+  app::Line line;
+  CHECK_FALSE(input.pop(line));
+  CHECK(input.preview().view().empty());
+  CHECK(input.take_dropped() == 1);
+  Feed(input, "fresh\r");
+  input.reset();
+  Feed(input, "\n");
+  REQUIRE(input.pop(line));
+  CHECK(line.view().empty());
+}
+TEST_CASE("Console transports keep interleaved commands independent") {
+  Platform platform;
+  app::Input uart(platform), usb(platform);
+  Feed(uart, "board ");
+  Feed(usb, "help\n");
+  Feed(uart, "stats\n");
+  app::Line line;
+  REQUIRE(usb.pop(line));
+  CHECK(line.view() == "help");
+  REQUIRE(uart.pop(line));
+  CHECK(line.view() == "board stats");
+}

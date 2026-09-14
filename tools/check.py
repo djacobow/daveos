@@ -21,7 +21,7 @@ def main():
     args = parser.parse_args()
     sources = sorted(
         str(path) for directory in ("core", "platform", "examples", "tests")
-        for path in (ROOT / directory).rglob("*") if path.suffix in (".h", ".hpp", ".cpp")
+        for path in (ROOT / directory).rglob("*") if path.suffix in (".h", ".hpp", ".c", ".cpp")
         and not any(path.is_relative_to(ROOT / folder) for folder in GENERATED)
     )
     if args.check.startswith("format"):

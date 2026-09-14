@@ -1,5 +1,6 @@
 #include <inttypes.h>
 
+#include <charconv>
 #include <cstdio>
 
 #include "board_config.h"
@@ -10,6 +11,10 @@
 #include "input.hpp"
 #include "main.h"
 #include "output.hpp"
+
+#if DAVEOS_USB_CDC
+#include "usb.h"
+#endif
 
 extern "C" UART_HandleTypeDef huart3;
 
@@ -42,6 +47,7 @@ class Board final : public Module<Board, Event> {
         DAVEOS_COMMAND(Board, "led", Led, "led <1|2|3> <on|off|toggle>"),
         DAVEOS_COMMAND(Board, "button", Button, "Read button level"),
         DAVEOS_COMMAND(Board, "stats", Stats, "Log scheduler statistics"),
+        DAVEOS_COMMAND(Board, "timer", Timer, "timer <microseconds>"),
         DAVEOS_COMMAND(Board, "reset", Reset, "Reset the MCU immediately")};
   }
   template <typename Dispatcher>
@@ -65,6 +71,9 @@ class Board final : public Module<Board, Event> {
     Write("\r\n");
     display_.after_log();
     active_tx->flush();
+#if DAVEOS_USB_CDC
+    board::OutputUsb(record);
+#endif
   }
 
  private:
@@ -74,14 +83,35 @@ class Board final : public Module<Board, Event> {
     Line line;
     if (input_.pop(line)) {
       display_.clear();
-      if (line.size)
-        I_("> %.*s", static_cast<int>(line.size), line.bytes.data());
-      dispatch_(dispatcher_, line.view());
+      Dispatch(line);
     } else {
       display_.show(input_.preview());
     }
     active_tx->flush();
+#if DAVEOS_USB_CDC
+    [[maybe_unused]] auto usb_dropped = board::UsbDroppedInput();
+    if (usb_dropped)
+      W_("Dropped %" PRIu32 " USB input lines/errors", usb_dropped);
+    if (board::PollUsb(line)) Dispatch(line);
+#endif
   }
+  void Dispatch(const Line& line) {
+    if (line.size) I_("> %.*s", static_cast<int>(line.size), line.bytes.data());
+    dispatch_(dispatcher_, line.view());
+  }
+  Status Timer(CommandArguments args) {
+    if (args.size() != 1 || args[0].empty()) return Status::invalid_argument;
+    Time delay = 0;
+    const auto text = args[0];
+    const auto end = text.data() + text.size();
+    const auto parsed = std::from_chars(text.data(), end, delay);
+    if (parsed.ec != std::errc{} || parsed.ptr != end || !delay)
+      return Status::invalid_argument;
+    // The board console is a singleton; DaveOS timers take plain callbacks.
+    timer_owner_ = this;
+    return scheduler().timer(delay, [] { timer_owner_->TimerFired(); });
+  }
+  void TimerFired() { I_("Timer fired"); }
   Status Reset(CommandArguments args) {
     if (!args.empty()) return Status::invalid_argument;
     return platform_.reset();
@@ -115,8 +145,16 @@ class Board final : public Module<Board, Event> {
        " dropped frames, %" PRIu32 " errors",
        LogUnsigned(tx.sent_bytes).c_str(), tx.transfers, tx.dropped_frames,
        tx.errors);
+#if DAVEOS_USB_CDC
+    [[maybe_unused]] auto usb = board::UsbCounters();
+    I_("USB TX: %s bytes, %" PRIu32 " transfers, %" PRIu32
+       " dropped frames, %" PRIu32 " errors",
+       LogUnsigned(usb.sent_bytes).c_str(), usb.transfers, usb.dropped_frames,
+       usb.errors);
+#endif
     return Status::ok;
   }
+  inline static Board* timer_owner_ = nullptr;
   Platform& platform_;
   Input<Platform>& input_;
   LineDisplay display_{Write};
@@ -173,7 +211,13 @@ extern "C" void DaveOS_Run() {
   console.dispatcher(dispatcher);
   app::active_input = &input;
   app::Receive();
+#if DAVEOS_USB_CDC
+  if (!board::InitUsb(platform)) Error_Handler();
+#endif
   scheduler.run();
+#if DAVEOS_USB_CDC
+  board::StopUsb();
+#endif
   // Initialization failure is terminal; detach ISR state before unwinding.
   HAL_NVIC_DisableIRQ(USART3_IRQn);
   HAL_NVIC_DisableIRQ(board::kDmaIrq);
