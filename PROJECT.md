@@ -698,7 +698,15 @@ meaning and must not stop the scheduler or cause a busy loop. The H563 and H755
 examples share USART3 input with application-owned line buffering.
 The H755 additionally provides an application-owned USB CDC ACM console on CN13,
 using the pinned CubeH7 USB device middleware. UART and USB retain separate
-partial lines and echo while sharing command dispatch and log output. USB uses
+partial lines and echo while sharing command dispatch and log output. Each
+transport is an independent scheduled module, registers a `CommandSource` with
+the dispatcher through `CommandSourceList`,
+and registers its own logger subscriber. `uart_console` and `usb_console` Meson
+options select either, both, or neither on H755, independently of logging.
+Sources submit complete lines from scheduler callbacks; all registered sources
+share one tokenizer and dispatcher. Unregistered sources return `not_running`.
+The dispatcher must outlive submissions; an empty source list is supported.
+The board module only provides hardware commands. USB uses
 fixed ping-pong output buffers with interrupt-driven FIFO transfers; disconnected
 output is discarded and full buffers drop whole frames. DTR deassertion, USB
 reset, and disconnect discard queued USB output and unfinished input.

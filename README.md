@@ -467,6 +467,43 @@ setting is ignored. Disable local echo. Commands and log records are shared
 with USART3, but each transport keeps its own partial-line buffer and echo.
 Avoid opening multiple readers on the same port: they compete for received bytes.
 
+UART and USB are independent modules (`uart` and `usb`). Each registers its own
+logger subscriber and registers its command source with the shared dispatcher;
+each enabled source polls its line buffer in its own scheduled task. The `board`
+module provides hardware commands and does not forward transport input/output.
+
+Select transports independently (both default to enabled on H755):
+
+| Configuration | Meson options |
+| --- | --- |
+| UART and USB | `-Duart_console=true -Dusb_console=true` |
+| UART only | `-Duart_console=true -Dusb_console=false` |
+| USB only | `-Duart_console=false -Dusb_console=true` |
+| Neither | `-Duart_console=false -Dusb_console=false` |
+
+Application wiring uses parallel lists:
+
+```cpp
+auto subscribers = SubscriberList{uart.subscriber(), usb.subscriber()};
+auto logger = make_logger(platform, subscribers);
+auto scheduler = make_scheduler<Event>(platform, modules, logger);
+CommandDispatcher dispatcher(modules, scheduler,
+    CommandSourceList{uart.command_source(), usb.command_source()});
+```
+
+`CommandSource` submits complete lines through `dispatch()`; the dispatcher owns
+the only tokenizer. An unregistered source returns `Status::not_running`.
+Registration borrows the dispatcher, which must outlive all submissions. Sources
+submit from scheduled callbacks, never interrupts. An empty `CommandSourceList{}`
+is valid; the existing direct `dispatcher.dispatch(line)` API remains available.
+
+For example, `meson configure build/h755 -Duart_console=false`, then rebuild.
+Disabled transports have no console module, input polling, or logger subscription.
+USB middleware is omitted when USB is disabled. CubeMX's existing USART3/DMA
+peripheral initialization remains, but no UART console RX/TX is started when UART
+is disabled. H563 supports the UART option; the USB option applies only to H755.
+These options are independent of `-Dlogging=false`.
+
 USB output reuses the bounded ping-pong buffer helper with two 4 KiB buffers.
 The USB peripheral moves data through its FIFO in interrupts, without DMA or
 heap allocation. `board stats` includes USB transfer/drop counters. Output while

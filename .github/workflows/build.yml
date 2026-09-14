@@ -66,3 +66,10 @@ jobs:
           git -C platform/stm32h7/STM32CubeH7 submodule update --init --recursive Drivers/CMSIS/Device/ST/STM32H7xx Drivers/STM32H7xx_HAL_Driver Middlewares/ST/STM32_USB_Device_Library
       - run: meson setup build/h755 --cross-file meson/stm32h755.ini -Dexamples=true
       - run: meson compile -C build/h755
+      - name: Build independent console combinations
+        run: |
+          for options in 'true false' 'false true' 'false false'; do
+            set -- $options
+            meson configure build/h755 -Duart_console="$1" -Dusb_console="$2"
+            meson compile -C build/h755
+          done

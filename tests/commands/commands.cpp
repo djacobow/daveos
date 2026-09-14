@@ -234,3 +234,29 @@ TEST_CASE("logging overflow does not replace command results") {
   });
   CHECK((f.logger.counters().dropped > 0) == bool(DAVEOS_LOGGING));
 }
+
+TEST_CASE("Independent console sources share parsing and command dispatch") {
+  Fixture f;
+  CommandSource uart, usb;
+  CHECK(uart.dispatch("motor speed 0") == Status::not_running);
+  CommandDispatcher dispatcher(f.modules, f.scheduler,
+                               CommandSourceList{uart, usb});
+  std::vector<std::string> received;
+  f.motor.action = [&](CommandArguments args) {
+    for (auto arg : args) received.emplace_back(arg);
+    return Status::ok;
+  };
+  f.Run([&] {
+    CHECK(uart.dispatch("motor speed 10") == Status::ok);
+    CHECK(usb.dispatch(R"(motor speed "two words")") == Status::ok);
+    CHECK(usb.dispatch("motor speed \"bad") == Status::parse_error);
+    CHECK(uart.dispatch("motor speed 30") == Status::ok);
+  });
+  CHECK(received == std::vector<std::string>{"10", "two words", "30"});
+}
+
+TEST_CASE("A dispatcher can register no command sources") {
+  Fixture f;
+  CommandDispatcher dispatcher(f.modules, f.scheduler, CommandSourceList{});
+  f.Run([&] { CHECK(dispatcher.dispatch("motor speed 1") == Status::ok); });
+}

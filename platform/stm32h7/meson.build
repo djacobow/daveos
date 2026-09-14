@@ -1,7 +1,9 @@
 subdir('cmsis')
 if get_option('examples')
   subdir('hal')
-  subdir('usb_device')
+  if get_option('usb_console')
+    subdir('usb_device')
+  endif
 endif
 
 stm32h7_lib = static_library('daveos-stm32h7', 'platform.cpp',

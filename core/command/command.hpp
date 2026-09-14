@@ -4,6 +4,7 @@
 #include <limits>
 
 #include "core/schedule/module.hpp"
+#include "source.hpp"
 
 namespace daveos::core {
 
@@ -57,6 +58,13 @@ class CommandDispatcher<Event, ModuleList<Modules...>, LineCapacity,
       : scheduler_(scheduler) {
     std::apply([&](auto*... module) { (Register(module), ...); },
                modules.items);
+  }
+  template <std::size_t Sources>
+  CommandDispatcher(ModuleList<Modules...> modules,
+                    SchedulerInterface<Event>& scheduler,
+                    CommandSourceList<Sources> sources)
+      : CommandDispatcher(modules, scheduler) {
+    for (auto* source : sources.items) source->Bind(*this);
   }
   CommandDispatcher(const CommandDispatcher&) = delete;
   CommandDispatcher& operator=(const CommandDispatcher&) = delete;
@@ -243,6 +251,11 @@ class CommandDispatcher<Event, ModuleList<Modules...>, LineCapacity,
 
 template <typename... Modules, typename Event>
 CommandDispatcher(ModuleList<Modules...>, SchedulerInterface<Event>&)
+    -> CommandDispatcher<Event, ModuleList<Modules...>>;
+
+template <typename... Modules, typename Event, std::size_t Sources>
+CommandDispatcher(ModuleList<Modules...>, SchedulerInterface<Event>&,
+                  CommandSourceList<Sources>)
     -> CommandDispatcher<Event, ModuleList<Modules...>>;
 
 
