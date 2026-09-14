@@ -12,6 +12,9 @@ endif
 
 subdir('tools')
 subdir('core')
+if get_option('networking')
+  subdir('net')
+endif
 subdir('platform')
 firmware_images = []
 if get_option('examples')

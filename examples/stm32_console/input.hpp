@@ -7,7 +7,8 @@
 namespace app {
 
 
-// ISR-side line collection only; tokenization and dispatch run as a task.
+// Transport-side line collection, callable from an ISR or task; tokenization
+// and dispatch run as a task.
 // Keep an extra byte so the dispatcher can diagnose an overlength line.
 struct Line {
   std::array<char, 257> bytes{};

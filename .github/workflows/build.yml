@@ -30,7 +30,8 @@ jobs:
           cmake --install build/ci-tools/cppcheck-build
           build/ci-tools/cppcheck/bin/cppcheck --version
           echo "$PWD/build/ci-tools/cppcheck/bin" >> "$GITHUB_PATH"
-      - run: meson setup build/host --native-file meson/clang.ini -Db_sanitize=${{ matrix.sanitizer }} -Db_lundef=false
+      - run: git submodule update --init net/lwip
+      - run: meson setup build/host --native-file meson/clang.ini -Db_sanitize=${{ matrix.sanitizer }} -Db_lundef=false -Dnetworking=true
       - run: meson compile -C build/host -j 2
       - run: meson test -C build/host --print-errorlogs
       - if: matrix.sanitizer == 'none'
@@ -74,4 +75,15 @@ jobs:
               meson configure build/$target -Duart_console="$1" -Dusb_console="$2"
               meson compile -C build/$target
             done
+          done
+      - name: Build optional networking on both STM32 families
+        run: |
+          git submodule update --init net/lwip platform/stm32/lan8742
+          for target in arm h755; do
+            meson configure build/$target -Dnetworking=true -Duart_console=true -Dusb_console=true
+            meson compile -C build/$target
+            meson configure build/$target -Duart_console=false -Dusb_console=false -Dlogging=false
+            meson compile -C build/$target
+            meson configure build/$target -Duart_console=true -Dusb_console=true -Dlogging=true -Dtcp_console=false
+            meson compile -C build/$target
           done

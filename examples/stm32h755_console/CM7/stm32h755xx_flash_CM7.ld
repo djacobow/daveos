@@ -39,7 +39,8 @@ MEMORY
 {
 FLASH (rx)      : ORIGIN = 0x08000000, LENGTH = 1024K
 RAM (xrw)      : ORIGIN = 0x20000000, LENGTH = 128K
-AXIRAM (xrw)   : ORIGIN = 0x24000000, LENGTH = 512K
+AXIRAM (xrw)   : ORIGIN = 0x24000000, LENGTH = 448K
+ETHRAM (xrw) : ORIGIN = 0x24070000, LENGTH = 64K
 ITCMRAM (xrw)      : ORIGIN = 0x00000000, LENGTH = 64K
 }
 /* Highest address of the user mode stack */
@@ -51,6 +52,8 @@ _Min_Stack_Size = 0x4000; /* required amount of stack */
 /* Define output sections */
 SECTIONS
 {
+  .eth_dma (NOLOAD) : { . = ALIGN(32); *(.eth_dma) . = ALIGN(32); } >ETHRAM
+
   /* The startup code goes first into FLASH */
   .isr_vector :
   {

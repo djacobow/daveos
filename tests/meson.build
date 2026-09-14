@@ -17,3 +17,6 @@ if platform == 'host'
   subdir('host')
 endif
 subdir('programming')
+if get_option('networking')
+  subdir('network')
+endif

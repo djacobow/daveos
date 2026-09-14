@@ -7,7 +7,7 @@ stm32h7_hal_dep = declare_dependency(
   dependencies: stm32h7_cmsis_dep,
 )
 stm32h7_hal_components = {}
-foreach component : ['cortex', 'hsem', 'rcc', 'rcc_ex', 'flash', 'flash_ex',
+foreach component : ['eth', 'eth_ex', 'cortex', 'hsem', 'rcc', 'rcc_ex', 'flash', 'flash_ex',
                      'pcd', 'pcd_ex', 'll_usb', 'gpio', 'dma', 'dma_ex', 'pwr', 'pwr_ex', 'exti', 'uart', 'uart_ex']
   stm32h7_hal_components += {component: declare_dependency(
     sources: files(hal_root / 'Src/stm32h7xx_' + (component == 'll_usb' ? '' : 'hal_') + component + '.c'))}

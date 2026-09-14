@@ -6,6 +6,10 @@ if get_option('usb_console')
     firmware_deps += stm32h7_hal_components[component]
   endforeach
 endif
+if get_option('networking')
+  subdir('ethernet')
+  firmware_deps += [stm32h7_hal_components['eth'], stm32h7_hal_components['eth_ex']]
+endif
 foreach component : ['cortex', 'hsem', 'rcc', 'rcc_ex', 'flash', 'flash_ex',
                      'gpio', 'dma', 'dma_ex', 'pwr', 'pwr_ex', 'exti', 'uart', 'uart_ex']
   firmware_deps += stm32h7_hal_components[component]

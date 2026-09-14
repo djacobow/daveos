@@ -7,3 +7,9 @@
 [submodule "platform/stm32/STM32_USB_Device_Library"]
 	path = platform/stm32/STM32_USB_Device_Library
 	url = https://github.com/STMicroelectronics/stm32-mw-usb-device.git
+[submodule "net/lwip"]
+	path = net/lwip
+	url = https://github.com/lwip-tcpip/lwip.git
+[submodule "platform/stm32/lan8742"]
+	path = platform/stm32/lan8742
+	url = https://github.com/STMicroelectronics/stm32-lan8742.git

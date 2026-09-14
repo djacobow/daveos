@@ -7,3 +7,5 @@ option('cubeprogrammer', type: 'string', value: '', description: 'STM32_Programm
 option('probe_serial', type: 'string', value: '', description: 'ST-LINK serial number for programming targets')
 option('uart_console', type: 'boolean', value: true, description: 'Enable the STM32 USART3 command/log transport')
 option('usb_console', type: 'boolean', value: true, description: 'Enable the STM32 USB CDC command/log transport')
+option('networking', type: 'boolean', value: false, description: 'Enable optional lwIP IPv4 Ethernet support')
+option('tcp_console', type: 'boolean', value: true, description: 'Enable the single-client TCP console on port 1000 when networking is enabled')

@@ -52,6 +52,8 @@ _Min_Stack_Size = 0x4000; /* required amount of stack */
 /* Sections */
 SECTIONS
 {
+  .eth_dma (NOLOAD) : { . = ALIGN(32); *(.eth_dma) . = ALIGN(32); } >RAM
+
   /* The startup code into "FLASH" Rom type memory */
   .isr_vector :
   {

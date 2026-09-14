@@ -16,6 +16,14 @@
 #include "usb.hpp"
 #endif
 
+#if DAVEOS_NETWORKING
+#include "net/module.hpp"
+#include "platform/stm32/ethernet/driver.h"
+#if DAVEOS_TCP_CONSOLE
+#include "tcp_console.hpp"
+#endif
+#endif
+
 extern "C" UART_HandleTypeDef huart3;
 
 namespace app {
@@ -214,8 +222,29 @@ extern "C" void DaveOS_Run() {
 #if DAVEOS_USB_CDC
   board::UsbConsole<app::Event> usb;
 #endif
+#if DAVEOS_NETWORKING
+  auto network_config = daveos::net::stm32::board_network_config();
+  // To use a static address, set dhcp=false and address/netmask/gateway here.
+  daveos::net::Service network(daveos::net::stm32::ethernet_driver(),
+                               {&platform,
+                                [](void* p) -> std::uint32_t {
+                                  return static_cast<app::Platform*>(p)->now() /
+                                         1000;
+                                }},
+                               network_config);
+  daveos::net::Module<app::Event> network_module(network);
+#if DAVEOS_TCP_CONSOLE
+  app::TcpConsole<app::Event, app::Platform> tcp(platform, network);
+#endif
+#endif
   auto modules = ModuleList {
     &board_module,
+#if DAVEOS_NETWORKING
+        &network_module,
+#if DAVEOS_TCP_CONSOLE
+        &tcp,
+#endif
+#endif
 #if DAVEOS_UART_CONSOLE
         &uart,
 #endif
@@ -224,8 +253,11 @@ extern "C" void DaveOS_Run() {
 #endif
   };
   auto subscribers = SubscriberList {
+#if DAVEOS_NETWORKING && DAVEOS_TCP_CONSOLE
+    tcp.subscriber(),
+#endif
 #if DAVEOS_UART_CONSOLE
-    uart.subscriber(),
+        uart.subscriber(),
 #endif
 #if DAVEOS_USB_CDC
         usb.subscriber(),
@@ -234,8 +266,11 @@ extern "C" void DaveOS_Run() {
   auto logger = make_logger(platform, subscribers);
   auto scheduler = make_scheduler<app::Event>(platform, modules, logger);
   auto sources = CommandSourceList {
+#if DAVEOS_NETWORKING && DAVEOS_TCP_CONSOLE
+    tcp.command_source(),
+#endif
 #if DAVEOS_UART_CONSOLE
-    uart.command_source(),
+        uart.command_source(),
 #endif
 #if DAVEOS_USB_CDC
         usb.command_source(),
@@ -250,6 +285,12 @@ extern "C" void DaveOS_Run() {
   if (!board::InitUsb(platform)) Error_Handler();
 #endif
   scheduler.run();
+#if DAVEOS_NETWORKING
+#if DAVEOS_TCP_CONSOLE
+  tcp.stop();
+#endif
+  network.stop();
+#endif
 #if DAVEOS_USB_CDC
   board::StopUsb();
 #endif

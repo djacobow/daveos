@@ -6,6 +6,10 @@ if get_option('usb_console')
     firmware_deps += stm32h5_hal_components[component]
   endforeach
 endif
+if get_option('networking')
+  subdir('ethernet')
+  firmware_deps += [stm32h5_hal_components['eth'], stm32h5_hal_components['eth_ex']]
+endif
 # Keep this selection aligned with CubeMX's enabled peripherals.
 foreach component : ['cortex', 'icache', 'rcc', 'rcc_ex', 'flash', 'flash_ex',
                      'gpio', 'dma', 'dma_ex', 'pwr', 'pwr_ex', 'exti', 'uart', 'uart_ex']

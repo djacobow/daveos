@@ -1,0 +1,6 @@
+/* Fixed buckets used by lwIP mem_malloc; deliberately no runtime heap. */
+LWIP_MALLOC_MEMPOOL_START
+LWIP_MALLOC_MEMPOOL(8, 256)
+LWIP_MALLOC_MEMPOOL(4, 768)
+LWIP_MALLOC_MEMPOOL(8, 1600)
+LWIP_MALLOC_MEMPOOL_END

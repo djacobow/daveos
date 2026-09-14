@@ -13,7 +13,8 @@ Longer-term applications may include multiple UARTs, CAN buses, and an Ethernet 
 
 * Implement in C++20.
 * No exceptions.
-* No dynamic memory allocation in the core or embedded code.
+* No dynamic memory allocation in the core or embedded code, except allocation
+  from fixed preallocated pools inside optional networking; no runtime heap.
 * The basic host platform should avoid allocation where practical, but may allocate
   when necessary. Test infrastructure may allocate freely.
 * Standard library facilities are allowed subject to these allocation rules.
@@ -29,6 +30,8 @@ Longer-term applications may include multiple UARTs, CAN buses, and an Ethernet 
 | `daveos::platform::stm32h5` | STM32H5 platform implementation. |
 | `daveos::platform::stm32h7` | STM32H7 platform implementation (H755 M7). |
 | `daveos::platform::fake` | Fake clock, timer, and sleep implementation. |
+| `daveos::net` | Optional standalone lwIP service, TCP server, and thin module adapter. |
+| `daveos::net::stm32` | Shared H5/H7 Ethernet driver and board network configuration. |
 
 The core platform contract belongs in `daveos::core`; concrete implementations
 belong under `daveos::platform`. Application modules and event enums use
@@ -742,8 +745,10 @@ echo should be disabled; wrapped-line editing is outside the initial scope.
 Colocate headers and implementations by component: core facilities live under
 `core/{schedule,command,logging,queue,platform,enum}/`, and adapters under
 `platform/{host,fake,stm32h5,stm32h7}/`, with shared adapter details in
-`platform/detail/`. Include paths are relative to the repository root; C++
-namespaces remain `daveos::core` and `daveos::platform::*`. No separate include
+`platform/detail/`. Optional networking lives in `net/` (`daveos::net`), with
+shared STM32 Ethernet support in `platform/stm32/ethernet/`
+(`daveos::net::stm32`). Include paths are relative to the repository root.
+Core/platform namespaces remain `daveos::core` and `daveos::platform::*`. No separate include
 and source trees are needed. Headers defining templates use `.hpp`, other
 headers use `.h`, and C++ translation units use `.cpp`. Vendor and generated
 file naming is retained. Meson definitions live with their components/targets.
@@ -764,3 +769,35 @@ checks event-type compatibility at scheduling, cancellation, registration, and
 command-dispatch boundaries after the concrete module is complete. Keep
 value/metadata validation in constexpr checks. Prefer concrete parameter types
 when no template deduction is needed, and name repeated policy predicates.
+
+## Optional networking
+
+Networking lives outside core in `daveos::net`, with pinned lwIP 2.2.1 in
+NO_SYS mode. An application-owned service takes a driver and monotonic clock;
+a thin CRTP module polls every 1 ms, processing at most four received frames
+and servicing stack timeouts. PHY link polling occurs every 250 ms. Interrupts
+never call lwIP. All packet and stack allocation uses fixed preallocated pools.
+The first milestone supports Ethernet/ARP, IPv4, ICMP ping, UDP for DHCP, and
+DHCP or application-configured static addressing. TCP provides a single-client
+nonblocking byte-stream server for the console. IPv6, DNS, fragmentation, TLS,
+and a general multi-listener/connection API are deferred. Future application
+networking uses this separate library rather than extending SchedulerInterface.
+Hardware-init failure leaves the remaining application operational and requires
+reset to retry. Cable and DHCP recovery are automatic. `net status` reports link,
+addressing, and counters. Meson `networking` defaults to false and disabled builds
+need no networking submodules. Both STM32 demos use ST HAL and LAN8742, with
+fixed DMA buffers and board-specific RMII wiring. H755 hardware validation
+passed for DHCP/static IPv4, ping, cable reconnection, and USB console
+responsiveness. H563 hardware validation is pending.
+
+
+The optional TCP console is an independent log subscriber and command source,
+like UART and USB, and listens on port 1000 by default. A second connection is
+reset while the first remains active. All commands use the existing dispatcher;
+TCP callbacks only buffer bytes. Disconnect, peer FIN, or link loss discards
+partial input and queued output; half-close is not supported. The next client
+starts a fresh session. Fixed 4 KiB RX and 8 KiB TX buffers bound storage. RX uses
+TCP flow control; output overflow drops a complete record without blocking.
+Disconnected output is not retained. The protocol is plain TCP, without Telnet
+negotiation, authentication, or encryption, and relies on local terminal echo.
+`tcp_console=false` omits the console without disabling networking, UART, or USB.

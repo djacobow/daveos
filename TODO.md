@@ -19,3 +19,8 @@
 - [x] Add shared board timer command and verify 200 ms completion on H755 hardware.
 - [x] Bring H563 USB console to H755 feature parity using shared CDC middleware and transport code.
 - [ ] Validate H563 USB-C attachment in both orientations, enumeration, commands, logs, suspend/resume, and reconnect on hardware.
+- [x] Add standalone lwIP IPv4 service, STM32 Ethernet drivers, and optional net module.
+- [x] Validate H755 DHCP/static addressing, ping, cable reconnect, and USB console responsiveness on hardware.
+- [ ] Validate H563 Ethernet on hardware.
+- [x] Add a single-client TCP console on port 1000 with independent command/log registration.
+- [ ] Generalize the standalone TCP API for multiple application listeners/connections.

@@ -45,10 +45,12 @@ toolchains in `tools/external/` are separately ignored inputs, not build outputs
 
 Code is organized by component, with headers and implementations together:
 `core/{schedule,command,logging,queue,platform,enum}/` and
-`platform/{host,fake,stm32h5,stm32h7,detail}/`. There is no separate `include/`
+`platform/{host,fake,stm32h5,stm32h7,detail}/`. Optional networking lives in
+`net/`, with shared hardware support in `platform/stm32/ethernet/`.
+There is no separate `include/`
 or `src/` tree. Include paths start at the repository root, for example
-`#include "core/schedule/scheduler.hpp"`. Namespaces remain `daveos::core` and
-`daveos::platform::*`.
+`#include "core/schedule/scheduler.hpp"`. Namespaces are `daveos::core`,
+`daveos::platform::*`, and `daveos::net` (including `daveos::net::stm32`).
 
 Headers defining templates use `.hpp`; other headers use `.h`. C++ translation
 units use `.cpp`. Generated and third-party files retain their supplied names.
@@ -697,3 +699,121 @@ values through `PRIu32`, showing `4294967295+` above that limit. Statistics
 snapshots retain their full 64-bit values. Timestamp fields fit in 32 bits.
 If 64-bit hex output is needed, format its upper and lower 32-bit halves
 separately (padding the lower half to eight hex digits).
+
+## Optional Ethernet networking
+
+`-Dnetworking=true` adds a separate lwIP-based network service and the `net`
+module to either STM32 demo. It is off by default and independent of logging,
+UART, and USB. No networking methods are added to the scheduler/platform API.
+Networking supports IPv4 ARP, ping, DHCP/static addressing, and a single-client
+TCP console. IPv6, DNS, TLS, fragmentation/reassembly, and a general connection
+API are not implemented yet. UDP is enabled for DHCP, without an application UDP API.
+
+Initialize the additional pinned submodules and build:
+
+```sh
+git submodule update --init net/lwip platform/stm32/lan8742
+meson setup build/net-h755 --cross-file meson/stm32h755.ini -Dexamples=true -Dnetworking=true
+meson compile -C build/net-h755
+# H563: use build/net-h563 and meson/stm32h563.ini instead.
+```
+
+Keep the regular HAL/CMSIS/USB dependency setup from the board sections above.
+Use the chosen build directory's `flash`/`flash-openocd` target for programming.
+Connect RJ45 CN14 to a LAN with DHCP and issue `net status` through UART or USB.
+Link/address changes are also logged. If logging is disabled, the network still
+works but status output is silent. H755 needs Ethernet jumpers JP6 and JP7 fitted;
+H563 needs JP6. Retain stock RMII solder bridges. The PHY supplies the 50 MHz RMII
+reference, independently of the internal HSI CPU clock.
+
+The demo's configuration is passed to `net::Service` in
+`examples/stm32_console/console.cpp`. It defaults to DHCP and a locally
+administered MAC derived from the MCU UID. Set `network_config.dhcp = false` and
+set its `address`, `netmask`, and `gateway` arrays for static addressing; the
+configuration defaults for static mode are 192.168.50.2/24 with no gateway.
+Override `mac` if the deployment assigns MAC addresses; the UID hash is a demo
+convention, not an assigned globally unique address. Hardware-init faults are
+reported without preventing other modules from running; reset retries hardware
+initialization. Cable/DHCP recovery is automatic.
+
+`net/service.h` is independent of DaveOS and lwIP headers. The application owns
+its borrowed driver and clock and calls `init()`, `poll()`, and `snapshot()`.
+One service may be active per process because NO_SYS lwIP has global state.
+Initialization is single-use; destruction stops the interface. All service
+access is serialized in one caller context, never from interrupts.
+`net/module.hpp` provides the thin DaveOS adapter and `net status` command.
+The module polls every 1 ms, consumes at most four frames per invocation, runs
+lwIP timeouts even without traffic, and samples link status every 250 ms.
+
+lwIP 2.2.1 and LAN8742 are pinned submodules; the MAC drivers come from the
+existing H5/H7 HAL. lwIP uses fixed static pools, including sixteen 1536-byte
+RX pbufs and fixed 256/768/1600-byte allocation buckets, never libc allocation.
+The driver uses eight RX descriptors, sixteen RX buffers for replacement, four
+TX descriptors, and four TX buffers. Frames are copied between these DMA
+buffers and lwIP; TX ownership lasts through completion. RX processing,
+backpressure drops, reconnect teardown, and malformed packets cannot borrow
+application storage. Interrupt handlers never call lwIP.
+
+The H755 linker reserves 0x24070000–0x2407ffff for `.eth_dma`, avoiding DTCM,
+UART DMA storage, and M4 memory. MPU region 7 marks it noncacheable, including
+when D-cache is enabled. H563 uses ordinary SRAM with its current cache setup.
+Keep these linker sections, H755's eight RX descriptors in the HAL config, and
+board Ethernet setup after CubeMX regeneration. Pin/clock setup remains owned
+by the example, not a board BSP. H755 RMII TXD1 is PB13; H563's is PB15.
+
+Host tests use the real lwIP stack with fake Ethernet frames and a fake clock:
+
+```sh
+meson setup build/net --native-file meson/clang.ini -Dnetworking=true
+meson test -C build/net --print-errorlogs
+```
+
+They cover ARP, ICMP echo, DHCP acquisition/retry and clock wrap, link changes,
+RX budget, exhausted packet pools, bad frames, and unrelated-module operation
+after hardware initialization failure. Allocator interception checks that stack
+initialization, packet processing, and shutdown do not use the runtime heap.
+
+On NUCLEO-H755ZI-Q, hardware checks passed for 100 Mbit full-duplex link,
+DHCP, static IPv4, ping (including 1,400-byte payloads), cable reconnection,
+and USB console responsiveness. Static addressing was tested by overriding
+the configuration in RAM before service initialization, using the board's
+current DHCP lease address; a reset restored the default DHCP configuration.
+The RX adapter treats a null chain head as a new packet: ST's HAL retains the
+previous tail after delivery, so testing that tail would leak receive buffers.
+H563 Ethernet builds successfully; its hardware validation remains pending.
+
+
+With networking enabled, both STM32 demos also register an independent TCP log
+subscriber and command source on port **1000**. Connect using the address from
+`net status`, for example:
+
+```sh
+nc 192.168.1.147 1000
+# Then type help, net status, board timer 100000, etc.
+```
+
+Only one active client is accepted; additional clients are reset. Closing the
+connection discards partial input and queued output. The next connection starts
+fresh. Logs are shared across all subscribers, including commands entered on
+UART or USB. Input uses the common line collector and dispatcher; the local
+terminal supplies echo. This is plain TCP, not Telnet or TLS, and has no
+authentication. Peer half-close also ends the session, so keep the connection
+open while waiting for command output.
+
+`-Dtcp_console=false` removes this transport while retaining networking. UART,
+USB, and logging remain independently selectable. To change the port, pass it
+to the application's `TcpConsole` constructor. `net/tcp_server.h` exposes the
+DaveOS-independent, nonblocking `TcpServer` used by this adapter. Its service
+must outlive it; stop the server before stopping the service. Call both from the
+same serialized context. It uses fixed 4 KiB input and 8 KiB output buffers;
+TCP receive-window flow control handles full input buffers, and slow-client
+output overflow drops whole records (`dropped_output()` counts these drops).
+No logs are saved for disconnected clients. lwIP has fixed pools for one
+listener, four TCP PCBs (including handshakes), and 24 segments.
+
+H755 hardware checks passed for TCP `help`, `net status`, asynchronous timer
+logs, rejection of a second client, and reconnect after an unfinished command.
+Packet tests also cover a full receive window, complete-record output overflow,
+peer FIN/reset, and link-loss recovery. H563 has build coverage, including TCP
+without UART/USB/logging and networking without the TCP console; hardware
+validation remains pending.
