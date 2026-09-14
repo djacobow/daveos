@@ -57,19 +57,21 @@ jobs:
       - run: python -m pip install meson==1.10.1 ninja==1.13.0
       - run: sudo apt-get update && sudo apt-get install -y gcc-arm-none-eabi libstdc++-arm-none-eabi-dev libstdc++-arm-none-eabi-newlib
       - run: |
-          git submodule update --init platform/stm32h5/STM32CubeH5
+          git submodule update --init platform/stm32h5/STM32CubeH5 platform/stm32/STM32_USB_Device_Library
           git -C platform/stm32h5/STM32CubeH5 submodule update --init --recursive Drivers/CMSIS/Device/ST/STM32H5xx Drivers/STM32H5xx_HAL_Driver
       - run: meson setup build/arm --cross-file meson/stm32h563.ini -Dexamples=true
       - run: meson compile -C build/arm
       - run: |
           git submodule update --init platform/stm32h7/STM32CubeH7
-          git -C platform/stm32h7/STM32CubeH7 submodule update --init --recursive Drivers/CMSIS/Device/ST/STM32H7xx Drivers/STM32H7xx_HAL_Driver Middlewares/ST/STM32_USB_Device_Library
+          git -C platform/stm32h7/STM32CubeH7 submodule update --init --recursive Drivers/CMSIS/Device/ST/STM32H7xx Drivers/STM32H7xx_HAL_Driver
       - run: meson setup build/h755 --cross-file meson/stm32h755.ini -Dexamples=true
       - run: meson compile -C build/h755
       - name: Build independent console combinations
         run: |
           for options in 'true false' 'false true' 'false false'; do
             set -- $options
-            meson configure build/h755 -Duart_console="$1" -Dusb_console="$2"
-            meson compile -C build/h755
+            for target in arm h755; do
+              meson configure build/$target -Duart_console="$1" -Dusb_console="$2"
+              meson compile -C build/$target
+            done
           done

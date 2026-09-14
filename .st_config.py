@@ -9,6 +9,7 @@ EXCLUDE = (
     r"/(?:build|\.git)/"
     r"|/tools/external/"
     r"|/platform/stm32h[57]/STM32CubeH[57]/"
+    r"|/platform/stm32/STM32_USB_Device_Library/"
     r"|/examples/stm32h755_console/(?:Drivers|Common|EWARM)/"
     r"|/examples/stm32h755_console/CM[47]/Core/"
     r"|/examples/stm32h755_console/.*\.(?:cmake|ioc|ld)$"

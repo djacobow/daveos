@@ -1,4 +1,11 @@
 firmware_deps = [stm32_console_dep, stm32h5_dep, stm32h5_hal_dep]
+if get_option('usb_console')
+  subdir('usb')
+  firmware_deps += h563_usb_dep
+  foreach component : ['pcd', 'pcd_ex', 'll_usb']
+    firmware_deps += stm32h5_hal_components[component]
+  endforeach
+endif
 # Keep this selection aligned with CubeMX's enabled peripherals.
 foreach component : ['cortex', 'icache', 'rcc', 'rcc_ex', 'flash', 'flash_ex',
                      'gpio', 'dma', 'dma_ex', 'pwr', 'pwr_ex', 'exti', 'uart', 'uart_ex']

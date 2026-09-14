@@ -2,8 +2,8 @@
 
 #include <inttypes.h>
 
-#include "../../../stm32_console/input.hpp"
-#include "../../../stm32_console/output.hpp"
+#include "../input.hpp"
+#include "../output.hpp"
 #include "board_config.h"
 #include "core/command/source.hpp"
 #include "core/logging/log.hpp"
@@ -12,7 +12,7 @@
 namespace board {
 
 
-// H755-only second console. All entry points except middleware callbacks run
+// Shared STM32 USB console. All entry points except middleware callbacks run
 // on the scheduler thread. No output is retained while unconfigured/DTR-low.
 bool InitUsb(Platform& platform);
 void StopUsb();

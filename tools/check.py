@@ -7,7 +7,7 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-GENERATED = ("platform/stm32h5/STM32CubeH5", "platform/stm32h7/STM32CubeH7",
+GENERATED = ("platform/stm32/STM32_USB_Device_Library", "platform/stm32h5/STM32CubeH5", "platform/stm32h7/STM32CubeH7",
              "examples/stm32h563_blinky/Core", "examples/stm32h563_blinky/Drivers",
              "examples/stm32h755_console/CM7/Core",
              "examples/stm32h755_console/CM4/Core",

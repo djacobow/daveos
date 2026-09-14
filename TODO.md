@@ -17,3 +17,5 @@
 - [x] Validate H755 USB cable unplug/replug and command recovery (user hardware check).
 - [ ] Validate H755 USB sustained backpressure recovery on hardware.
 - [x] Add shared board timer command and verify 200 ms completion on H755 hardware.
+- [x] Bring H563 USB console to H755 feature parity using shared CDC middleware and transport code.
+- [ ] Validate H563 USB-C attachment in both orientations, enumeration, commands, logs, suspend/resume, and reconnect on hardware.

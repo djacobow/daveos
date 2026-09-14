@@ -6,4 +6,4 @@ option('openocd', type: 'string', value: '', description: 'OpenOCD executable; e
 option('cubeprogrammer', type: 'string', value: '', description: 'STM32_Programmer_CLI executable; empty discovers the local install or PATH')
 option('probe_serial', type: 'string', value: '', description: 'ST-LINK serial number for programming targets')
 option('uart_console', type: 'boolean', value: true, description: 'Enable the STM32 USART3 command/log transport')
-option('usb_console', type: 'boolean', value: true, description: 'Enable the H755 USB CDC command/log transport')
+option('usb_console', type: 'boolean', value: true, description: 'Enable the STM32 USB CDC command/log transport')

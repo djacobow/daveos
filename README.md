@@ -129,6 +129,7 @@ C and C++, matching the generated CubeMX toolchain.
 To also build the DaveOS board console firmware:
 
 ```sh
+git submodule update --init platform/stm32/STM32_USB_Device_Library
 meson setup build/arm --cross-file meson/stm32h563.ini -Dexamples=true
 meson compile -C build/arm
 ```
@@ -138,7 +139,8 @@ cross-file flags. ELF, HEX, BIN, and map files are written under
 `build/arm/examples/stm32h563_blinky/` (the directory and `stm32h563-blinky`
 artifact names are retained for existing build/programming commands).
 The firmware now runs the same board console as H755: `help`,
-`board led <1|2|3> <on|off|toggle>`, `board button`, `board stats`, and `board reset`.
+`board led <1|2|3> <on|off|toggle>`, `board button`, `board stats`,
+`board timer <microseconds>`, and `board reset`.
 LEDs are PB0/PF4/PG4 and the button is PC13. USART3 uses PD8 TX / PD9 RX at
 1,000,000 baud, 8N1, no flow control; disable terminal local echo.
 
@@ -150,6 +152,26 @@ logs, whole-frame overflow drops, DMA statistics, and immediate reset match H755
 The internal 64 MHz HSI drives PLL1 (M=16/N=125/P=2), giving nominal 250 MHz CPU,
 62.5 MHz PCLK1, and a 125 MHz TIM2 kernel divided down to 1 MHz. No external
 crystal is required. Both console targets retain full newlib (including floating-point statistics).
+H563 also provides the same independent USB CDC command/log transport on
+**CN13 (USB Type-C)**, using PA11/PA12 and the USB DRD FS controller. Keep ST-LINK
+connected for power/debugging and connect CN13 to a USB host with a data cable.
+The Linux device identifies as `usb-DaveOS_DaveOS_H563_console_*-if00`.
+Open with DTR asserted and terminal local echo disabled; USB baud settings are
+ignored. Both `uart_console` and `usb_console` options apply, allowing either,
+both, or neither transport, independently of logging.
+
+USB uses HSI48 with CRS synchronized to USB SOF, IRQ priority 6, and five
+single-buffer endpoint allocations in packet memory (PMA). Transfers are
+interrupt-driven, without DMA. The board glue retains the reset-state USB-C
+sink terminations through UCPD dead-battery mode; no Power Delivery stack or
+source power switch is enabled. Keep PA9/PA10 and PB13/PB14 reserved for the
+board's Type-C attachment circuitry. See ST's
+[NUCLEO-H563ZI manual](https://www.st.com/resource/en/user_manual/dm00936683.pdf).
+
+Unlike H755 OTG FS, H563 DRD FS has no VBUS disconnect interrupt. Suspend clears
+unfinished input and queued output; DTR is retained for normal host resume.
+Bus reset and DTR deassertion also clear session buffers. Reconnect and USB-C
+attachment in both cable orientations still need hardware validation.
 The H563 firmware is cross-compiled but has not been tested on hardware.
 
 The CubeMX source project is `examples/stm32h563_blinky/blinky_demo.ioc`, selecting
@@ -393,8 +415,8 @@ using the pinned STM32CubeH7 **v1.13.0** HAL and CMSIS without a board BSP:
 ```sh
 git submodule update --init platform/stm32h7/STM32CubeH7
 git -C platform/stm32h7/STM32CubeH7 submodule update --init --recursive \
-  Drivers/CMSIS/Device/ST/STM32H7xx Drivers/STM32H7xx_HAL_Driver \
-  Middlewares/ST/STM32_USB_Device_Library
+  Drivers/CMSIS/Device/ST/STM32H7xx Drivers/STM32H7xx_HAL_Driver
+git submodule update --init platform/stm32/STM32_USB_Device_Library
 export PATH="$PWD/tools/external/arm-gnu-toolchain-15.2.rel1-x86_64-arm-none-eabi/bin:$PATH"
 meson setup build/h755 --cross-file meson/stm32h755.ini -Dexamples=true
 meson compile -C build/h755
@@ -472,7 +494,7 @@ logger subscriber and registers its command source with the shared dispatcher;
 each enabled source polls its line buffer in its own scheduled task. The `board`
 module provides hardware commands and does not forward transport input/output.
 
-Select transports independently (both default to enabled on H755):
+Select transports independently (both default to enabled on H563 and H755):
 
 | Configuration | Meson options |
 | --- | --- |
@@ -501,7 +523,7 @@ For example, `meson configure build/h755 -Duart_console=false`, then rebuild.
 Disabled transports have no console module, input polling, or logger subscription.
 USB middleware is omitted when USB is disabled. CubeMX's existing USART3/DMA
 peripheral initialization remains, but no UART console RX/TX is started when UART
-is disabled. H563 supports the UART option; the USB option applies only to H755.
+is disabled. The same options apply to H563 using `build/arm`.
 These options are independent of `-Dlogging=false`.
 
 USB output reuses the bounded ping-pong buffer helper with two 4 KiB buffers.
@@ -511,8 +533,11 @@ unconfigured or DTR-low is discarded; backpressure drops whole new frames when
 buffers fill. DTR deassertion, bus reset, and disconnect clear unfinished input
 and queued USB output. UART remains available independently.
 
-`CM7/usb/` owns the USB device glue and descriptors, using the pinned CubeH7
-USB Device Library CDC class. It configures USB2 OTG FS, PA9 VBUS sensing,
+`examples/stm32_console/usb/` owns the shared console, CDC glue, and descriptors.
+Both boards use ST's USB Device Library **v2.11.3**, pinned as a shared submodule
+under `platform/stm32/STM32_USB_Device_Library` rather than depending on CubeH7.
+Each example's `usb/` directory supplies its controller-specific setup.
+H755 configures USB2 OTG FS, PA9 VBUS sensing,
 PA11/PA12 data pins, IRQ priority 6, and HSI48 with USB2 SOF synchronization via
 CRS. These pins must remain reserved. This setup is application-owned rather
 than CubeMX-generated: do not generate a second USB stack or duplicate IRQ/

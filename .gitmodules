@@ -4,3 +4,6 @@
 [submodule "platform/stm32h7/STM32CubeH7"]
 	path = platform/stm32h7/STM32CubeH7
 	url = https://github.com/STMicroelectronics/STM32CubeH7.git
+[submodule "platform/stm32/STM32_USB_Device_Library"]
+	path = platform/stm32/STM32_USB_Device_Library
+	url = https://github.com/STMicroelectronics/stm32-mw-usb-device.git

@@ -3,7 +3,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "stm32h7xx_hal.h"
+#include "usb_board.h"
 
 #define USBD_MAX_NUM_INTERFACES 2U
 #define USBD_MAX_NUM_CONFIGURATION 1U

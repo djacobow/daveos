@@ -696,20 +696,24 @@ Add an interactive host console example with buffered stdin input and a
 `console exit` command for orderly shutdown and log flushing. EOF has no command
 meaning and must not stop the scheduler or cause a busy loop. The H563 and H755
 examples share USART3 input with application-owned line buffering.
-The H755 additionally provides an application-owned USB CDC ACM console on CN13,
-using the pinned CubeH7 USB device middleware. UART and USB retain separate
+Both examples provide an application-owned USB CDC ACM console on CN13 (Type-C
+on H563, Micro-AB on H755), using a shared pinned ST USB Device Library submodule. UART and USB retain separate
 partial lines and echo while sharing command dispatch and log output. Each
 transport is an independent scheduled module, registers a `CommandSource` with
 the dispatcher through `CommandSourceList`,
 and registers its own logger subscriber. `uart_console` and `usb_console` Meson
-options select either, both, or neither on H755, independently of logging.
+options select either, both, or neither on both boards, independently of logging.
 Sources submit complete lines from scheduler callbacks; all registered sources
 share one tokenizer and dispatcher. Unregistered sources return `not_running`.
 The dispatcher must outlive submissions; an empty source list is supported.
 The board module only provides hardware commands. USB uses
-fixed ping-pong output buffers with interrupt-driven FIFO transfers; disconnected
+fixed ping-pong output buffers with interrupt-driven transfers (PMA on H563,
+FIFO on H755); disconnected
 output is discarded and full buffers drop whole frames. DTR deassertion, USB
-reset, and disconnect discard queued USB output and unfinished input.
+reset, and disconnect discard queued USB output and unfinished input. H563 has
+no VBUS disconnect interrupt: suspend clears these buffers while retaining DTR
+for normal resume. H563 USB attachment, enumeration, and reconnect require
+hardware validation.
 
 Test parsing, matching, boundaries, help, context restoration, nested calls, command-only modules, compile-time validation, and
 allocation-free core operations on the fake platform, alongside existing host,

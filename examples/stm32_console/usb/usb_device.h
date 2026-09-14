@@ -6,6 +6,7 @@
 extern "C" {
 #endif
 bool UsbDeviceInit(void);
+void UsbDeviceInterrupt(void);
 void UsbDeviceStop(void);
 bool UsbDeviceReady(void);
 // Call with interrupts masked; storage survives through UsbTransmitComplete.
