@@ -8,7 +8,7 @@
 
 #include "core/platform/platform.hpp"
 
-namespace app {
+namespace daveos::console {
 
 
 struct TxCounters {
@@ -28,12 +28,12 @@ struct TxCounters {
 // must outlive outstanding transfers.
 template <typename P, typename Driver, std::size_t Capacity,
           std::size_t FrameCapacity = 768>
-class DmaOutput {
+class BufferedOutput {
   static_assert(Capacity > 0 && Capacity <= 65535 && FrameCapacity > 0);
 
  public:
-  DmaOutput(P& platform, Driver& driver,
-            std::array<std::uint8_t, 2 * Capacity>& storage)
+  BufferedOutput(P& platform, Driver& driver,
+                 std::array<std::uint8_t, 2 * Capacity>& storage)
       : platform_(platform), driver_(driver), storage_(storage) {}
   void write(std::string_view text) {
     if (overflow_) return;
@@ -111,4 +111,4 @@ class DmaOutput {
 };
 
 
-}  // namespace app
+}  // namespace daveos::console

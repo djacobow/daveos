@@ -161,8 +161,11 @@ bool UsbDeviceInit(void) {
   return USBD_Start(&device) == USBD_OK;
 }
 void UsbDeviceStop(void) {
+  // Clock setup can fail before the middleware has a low-level handle.
+  if (device.pData == NULL) return;
   USBD_Stop(&device);
   USBD_DeInit(&device);
+  device.pData = NULL;
 }
 void UsbDeviceInterrupt(void) { HAL_PCD_IRQHandler(&pcd); }
 USBD_StatusTypeDef USBD_LL_Init(USBD_HandleTypeDef* dev) {

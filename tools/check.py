@@ -20,7 +20,7 @@ def main():
     parser.add_argument("check", choices=("format", "format-check", "lint"))
     args = parser.parse_args()
     sources = sorted(
-        str(path) for directory in ("core", "net", "platform", "examples", "tests")
+        str(path) for directory in ("core", "console", "net", "platform", "examples", "tests")
         for path in (ROOT / directory).rglob("*") if path.suffix in (".h", ".hpp", ".c", ".cpp")
         and not any(path.is_relative_to(ROOT / folder) for folder in GENERATED)
     )
@@ -42,7 +42,7 @@ def main():
             # CRTP deliberately replaces inherited defaults without virtual methods.
             "--suppress=duplInheritedMember",
             *[f"-i{folder}" for folder in GENERATED],
-            f"--cppcheck-build-dir={cache}", "-I.", "core", "net", "platform", "examples",
+            f"--cppcheck-build-dir={cache}", "-I.", "core", "console", "net", "platform", "examples",
         ], cwd=ROOT, check=True)
 
 

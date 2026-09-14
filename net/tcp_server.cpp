@@ -32,8 +32,14 @@ struct TcpCallbacks {
       return ERR_ABRT;
     }
     if (packet->tot_len > self.rx_.size() - self.received_) return ERR_MEM;
-    self.received_ += pbuf_copy_partial(
-        packet, self.rx_.data() + self.received_, packet->tot_len, 0);
+    const auto tail = (self.head_ + self.received_) % self.rx_.size();
+    const auto first =
+        std::min<std::size_t>(packet->tot_len, self.rx_.size() - tail);
+    pbuf_copy_partial(packet, self.rx_.data() + tail, static_cast<u16_t>(first),
+                      0);
+    pbuf_copy_partial(packet, self.rx_.data(), packet->tot_len - first,
+                      static_cast<u16_t>(first));
+    self.received_ += packet->tot_len;
     pbuf_free(packet);
     return ERR_OK;
   }
@@ -53,7 +59,7 @@ void TcpServer::Disconnect(bool abort) {
     }
     ++session_;
   }
-  received_ = queued_ = 0;
+  head_ = received_ = queued_ = 0;
 }
 void TcpServer::stop() {
   Disconnect(true);
@@ -92,12 +98,24 @@ void TcpServer::poll() {
   std::memmove(tx_.data(), tx_.data() + size, queued_);
   tcp_output(client_);
 }
+std::span<const char> TcpServer::peek() const {
+  return {rx_.data() + head_, std::min(received_, rx_.size() - head_)};
+}
+void TcpServer::consume(std::size_t size) {
+  size = std::min(size, received_);
+  head_ = (head_ + size) % rx_.size();
+  received_ -= size;
+  if (client_ && size) tcp_recved(client_, static_cast<u16_t>(size));
+}
 std::size_t TcpServer::read(std::span<char> bytes) {
   const auto size = std::min(bytes.size(), received_);
-  std::copy_n(rx_.begin(), size, bytes.begin());
-  received_ -= size;
-  std::memmove(rx_.data(), rx_.data() + size, received_);
-  if (client_ && size) tcp_recved(client_, static_cast<u16_t>(size));
+  std::size_t copied = 0;
+  while (copied < size) {
+    const auto chunk = peek().first(std::min(peek().size(), size - copied));
+    std::copy(chunk.begin(), chunk.end(), bytes.begin() + copied);
+    copied += chunk.size();
+    consume(chunk.size());
+  }
   return size;
 }
 bool TcpServer::write(std::span<const std::string_view> pieces) {

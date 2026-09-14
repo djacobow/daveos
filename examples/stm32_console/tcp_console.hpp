@@ -1,9 +1,7 @@
 #pragma once
 
-#include "core/command/source.hpp"
+#include "console/module.hpp"
 #include "core/logging/log_format.hpp"
-#include "core/schedule/module.hpp"
-#include "input.hpp"
 #include "net/tcp_server.h"
 
 namespace app {
@@ -14,58 +12,43 @@ namespace app {
 // Register this module's source/subscriber independently of UART and USB.
 template <typename Event, typename Platform>
 class TcpConsole final
-    : public daveos::core::Module<TcpConsole<Event, Platform>, Event> {
+    : public daveos::console::Module<TcpConsole<Event, Platform>, Event> {
  public:
   TcpConsole(Platform& platform, daveos::net::Service& service,
              std::uint16_t port = 1000)
       : server_(service, port), input_(platform) {}
   static constexpr const char* name() { return "tcp"; }
-  static constexpr auto tasks() {
-    return std::array{
-        daveos::core::TaskDescriptor<TcpConsole>{"input", &TcpConsole::Poll}};
+  void output(const daveos::core::LogRecord& record) {
+    daveos::core::LogPrefix prefix(record);
+    const std::array<std::string_view, 3> pieces{prefix.view(), record.message,
+                                                 "\r\n"};
+    server_.write(pieces);
   }
-  daveos::core::Status init(daveos::core::InitStage stage) {
-    if (stage != daveos::core::InitStage::stage1)
-      return daveos::core::Status::ok;
-    return this->scheduler().schedule(*this, &TcpConsole::Poll, 1000,
-                                      daveos::core::Mode::repeat);
-  }
-  daveos::core::CommandSource& command_source() { return source_; }
-  daveos::core::Subscriber subscriber() {
-    return {this, [](void* context, const daveos::core::LogRecord& record) {
-              auto& self = *static_cast<TcpConsole*>(context);
-              daveos::core::LogPrefix prefix(record);
-              const std::array<std::string_view, 3> pieces{
-                  prefix.view(), record.message, "\r\n"};
-              self.server_.write(pieces);
-            }};
-  }
+  std::uint32_t take_dropped() { return input_.take_dropped(); }
   void stop() { server_.stop(); }
 
- private:
-  void Poll() {
+  bool poll_line(daveos::console::Line& line) {
     server_.poll();
     if (session_ != server_.session()) {
       session_ = server_.session();
       input_.reset();
     }
-    // Bound work and stop after one complete line so a burst cannot fill the
-    // line queue before dispatch gets a chance to consume it.
-    Line line;
-    for (std::size_t i = 0; i < 256; ++i) {
-      std::array<char, 1> byte;
-      if (!server_.read(byte)) break;
-      input_.receive(byte[0]);
-      if (!input_.pop(line)) continue;
-      if (line.size)
-        I_("> %.*s", static_cast<int>(line.size), line.bytes.data());
-      source_.dispatch(line.view());
-      break;
+    std::size_t budget = 256;
+    while (budget) {
+      const auto bytes = server_.peek();
+      if (bytes.empty()) break;
+      const auto consumed =
+          input_.consume(bytes.first(std::min(bytes.size(), budget)), line);
+      server_.consume(consumed.bytes);
+      budget -= consumed.bytes;
+      if (consumed.complete) return true;
     }
+    return false;
   }
+
+ private:
   daveos::net::TcpServer server_;
-  Input<Platform> input_;
-  daveos::core::CommandSource source_;
+  daveos::console::Input<Platform> input_;
   std::uint32_t session_ = 0;
 };
 

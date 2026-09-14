@@ -1,24 +1,24 @@
 #include <string>
 #include <string_view>
 
-#include "../../examples/stm32_console/input.hpp"
 #include "catch_amalgamated.hpp"
+#include "console/input.hpp"
 #include "platform/fake/platform.h"
 
 namespace {
 using Platform = daveos::platform::fake::Platform;
-void Feed(app::Input<Platform>& input, std::string_view bytes) {
+void Feed(daveos::console::Input<Platform>& input, std::string_view bytes) {
   for (auto byte : bytes) input.receive(byte);
 }
-std::string_view View(const app::Line& line) {
+std::string_view View(const daveos::console::Line& line) {
   return {line.bytes.data(), line.size};
 }
 }  // namespace
 TEST_CASE("UART lines accept CR, LF and CRLF without duplicate commands") {
   Platform platform;
-  app::Input input(platform);
+  daveos::console::Input input(platform);
   Feed(input, "one\rtwo\nthree\r\nfour");
-  app::Line line;
+  daveos::console::Line line;
   for (auto expected : {"one", "two", "three"}) {
     REQUIRE(input.pop(line));
     CHECK(View(line) == expected);
@@ -30,10 +30,10 @@ TEST_CASE("UART lines accept CR, LF and CRLF without duplicate commands") {
 }
 TEST_CASE("UART overlength input remains one rejected line") {
   Platform platform;
-  app::Input input(platform);
+  daveos::console::Input input(platform);
   for (int i = 0; i < 400; ++i) input.receive('x');
   Feed(input, "\nhelp\n");
-  app::Line line;
+  daveos::console::Line line;
   REQUIRE(input.pop(line));
   CHECK(line.size == 257);
   REQUIRE(input.pop(line));
@@ -42,11 +42,11 @@ TEST_CASE("UART overlength input remains one rejected line") {
 }
 TEST_CASE("UART queue overflow drops whole lines and recovers") {
   Platform platform;
-  app::Input input(platform);
+  daveos::console::Input input(platform);
   Feed(input, "a\nb\nc\nd\nbad\n");
   CHECK(input.take_dropped() == 1);
   CHECK(input.take_dropped() == 0);
-  app::Line line;
+  daveos::console::Line line;
   for (auto expected : {"a", "b", "c", "d"}) {
     REQUIRE(input.pop(line));
     CHECK(View(line) == expected);
@@ -57,12 +57,12 @@ TEST_CASE("UART queue overflow drops whole lines and recovers") {
 }
 TEST_CASE("UART errors discard the damaged line through its terminator") {
   Platform platform;
-  app::Input input(platform);
+  daveos::console::Input input(platform);
   Feed(input, "board led ");
   input.error();
   input.error();
   Feed(input, "1 on\r\nhelp\n");
-  app::Line line;
+  daveos::console::Line line;
   REQUIRE(input.pop(line));
   CHECK(View(line) == "help");
   CHECK_FALSE(input.pop(line));
@@ -71,14 +71,14 @@ TEST_CASE("UART errors discard the damaged line through its terminator") {
 
 TEST_CASE("UART preview tracks editing and clears after Return or error") {
   Platform platform;
-  app::Input input(platform);
+  daveos::console::Input input(platform);
   Feed(input,
        "helx\bp\x7f"
        "p");
   CHECK(input.preview().view() == "help");
   Feed(input, "\r\n");
   CHECK(input.preview().view().empty());
-  app::Line line;
+  daveos::console::Line line;
   REQUIRE(input.pop(line));
   CHECK(line.view() == "help");
   Feed(input, "bad");
@@ -92,8 +92,9 @@ void TerminalWrite(std::string_view text) { terminal_output += text; }
 }  // namespace
 TEST_CASE("UART echo clears on submit and preserves input around log output") {
   terminal_output.clear();
-  app::LineDisplay display(TerminalWrite);
-  app::Line line;
+  daveos::console::LineDisplay display(
+      nullptr, [](void*, std::string_view text) { TerminalWrite(text); });
+  daveos::console::Line line;
   line.bytes[0] = 'h';
   line.size = 1;
   display.show(line);
@@ -119,11 +120,11 @@ TEST_CASE("UART echo clears on submit and preserves input around log output") {
 TEST_CASE(
     "Transport reset discards queued and partial input and parser state") {
   Platform platform;
-  app::Input input(platform);
+  daveos::console::Input input(platform);
   Feed(input, "queued\npartial");
   input.error();
   input.reset();
-  app::Line line;
+  daveos::console::Line line;
   CHECK_FALSE(input.pop(line));
   CHECK(input.preview().view().empty());
   CHECK(input.take_dropped() == 1);
@@ -135,13 +136,37 @@ TEST_CASE(
 }
 TEST_CASE("Console transports keep interleaved commands independent") {
   Platform platform;
-  app::Input uart(platform), usb(platform);
+  daveos::console::Input uart(platform), usb(platform);
   Feed(uart, "board ");
   Feed(usb, "help\n");
   Feed(uart, "stats\n");
-  app::Line line;
+  daveos::console::Line line;
   REQUIRE(usb.pop(line));
   CHECK(line.view() == "help");
   REQUIRE(uart.pop(line));
   CHECK(line.view() == "board stats");
+}
+
+TEST_CASE(
+    "Chunk consumption stops at one line and retains partial CRLF state") {
+  Platform platform;
+  daveos::console::Input input(platform);
+  daveos::console::Line line;
+  std::string_view bytes = "one\r\ntwo\nthree\rfour";
+  for (auto expected : {"one", "two", "three"}) {
+    const auto result = input.consume(bytes, line);
+    REQUIRE(result.complete);
+    CHECK(line.view() == expected);
+    bytes.remove_prefix(result.bytes);
+  }
+  auto result = input.consume(bytes, line);
+  CHECK_FALSE(result.complete);
+  CHECK(result.bytes == 4);
+  result = input.consume(std::string_view(" more\r"), line);
+  REQUIRE(result.complete);
+  CHECK(line.view() == "four more");
+  result = input.consume(std::string_view("\nfive\n"), line);
+  REQUIRE(result.complete);
+  CHECK(line.view() == "five");
+  CHECK(result.bytes == 6);
 }

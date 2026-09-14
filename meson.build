@@ -12,6 +12,7 @@ endif
 
 subdir('tools')
 subdir('core')
+subdir('console')
 if get_option('networking')
   subdir('net')
 endif

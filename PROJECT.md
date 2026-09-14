@@ -30,6 +30,7 @@ Longer-term applications may include multiple UARTs, CAN buses, and an Ethernet 
 | `daveos::platform::stm32h5` | STM32H5 platform implementation. |
 | `daveos::platform::stm32h7` | STM32H7 platform implementation (H755 M7). |
 | `daveos::platform::fake` | Fake clock, timer, and sleep implementation. |
+| `daveos::console` | Shared line collection, display, buffered output, and CRTP console module. |
 | `daveos::net` | Optional standalone lwIP service, TCP server, and thin module adapter. |
 | `daveos::net::stm32` | Shared H5/H7 Ethernet driver and board network configuration. |
 
@@ -742,7 +743,8 @@ echo should be disabled; wrapped-line editing is outside the initial scope.
 
 ## Source organization
 
-Colocate headers and implementations by component: core facilities live under
+Colocate headers and implementations by component: shared console helpers live
+under `console/`, core facilities live under
 `core/{schedule,command,logging,queue,platform,enum}/`, and adapters under
 `platform/{host,fake,stm32h5,stm32h7}/`, with shared adapter details in
 `platform/detail/`. Optional networking lives in `net/` (`daveos::net`), with
@@ -801,3 +803,19 @@ TCP flow control; output overflow drops a complete record without blocking.
 Disconnected output is not retained. The protocol is plain TCP, without Telnet
 negotiation, authentication, or encryption, and relies on local terminal echo.
 `tcp_console=false` omits the console without disabling networking, UART, or USB.
+
+
+Shared transport-agnostic console helpers belong in `console/`, namespace
+`daveos::console`, with an explicit Meson dependency. `BufferedOutput` serves
+asynchronous UART/USB transmission. A common CRTP console module handles task
+scheduling, dropped-line reporting, command logging/dispatch, and independent
+source/subscriber registration; transports retain session, echo, and I/O rules.
+Prefer application ownership and borrowed callback contexts over singleton
+objects. HAL/middleware APIs without user context may use a minimal callback
+routing pointer, with teardown quiescing hardware before detaching it. lwIP's
+global stack constraint does not justify a generic singleton guard.
+TCP processes at most one completed line and 256 input bytes per invocation.
+It consumes spans from a ring buffer without shifting remaining bytes. Bytes
+after a newline remain for subsequent commands, partial lines persist between
+invocations, and CRLF may cross chunk boundaries. No additional TCP command
+queue is required.

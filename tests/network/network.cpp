@@ -4,7 +4,9 @@
 #include <cstring>
 
 #include "catch_amalgamated.hpp"
+#include "core/command/command.hpp"
 #include "core/schedule/scheduler.hpp"
+#include "examples/stm32_console/tcp_console.hpp"
 #include "net/module.hpp"
 #include "net/service.h"
 #include "net/tcp_server.h"
@@ -418,11 +420,67 @@ TEST_CASE("TCP server isolates clients and bounds session buffers") {
   f.queue(Tcp(40003, 1561, ack, 0x18, chunk));
   f.queue(Tcp(40003, 3021, ack, 0x18, chunk.substr(0, 1176)));
   service.poll();
-  std::array<char, 4096> received;
+  server.consume(3000);
+  f.queue(Tcp(40003, 4197, ack, 0x18, chunk.substr(0, 1000)));
+  service.poll();
+  REQUIRE(server.peek().size() == 1096);
+  std::array<char, 2096> received;
   REQUIRE(server.read(received) == received.size());
   REQUIRE(std::all_of(received.begin(), received.end(),
                       [](char c) { return c == 'x'; }));
-  f.queue(Tcp(40003, 4197, ack, 0x11));  // FIN, rather than RST.
+  f.queue(Tcp(40003, 5197, ack, 0x11));  // FIN, rather than RST.
   service.poll();
   REQUIRE_FALSE(server.connected());
+}
+
+namespace {
+enum class ConsoleEvent {};
+using TestPlatform = daveos::platform::fake::Platform;
+struct Receiver : daveos::core::Module<Receiver, ConsoleEvent> {
+  explicit Receiver(TestPlatform& p) : platform(p) {}
+  static constexpr const char* name() { return "sink"; }
+  static constexpr auto commands() {
+    return std::array{
+        DAVEOS_COMMAND(Receiver, "add", Add, "Record invocation")};
+  }
+  daveos::core::Status Add(daveos::core::CommandArguments) {
+    times.at(count++) = platform.now();
+    if (count == times.size()) scheduler().stop();
+    return daveos::core::Status::ok;
+  }
+  TestPlatform& platform;
+  std::array<daveos::core::Time, 3> times{};
+  std::size_t count = 0;
+};
+}  // namespace
+TEST_CASE(
+    "TCP console dispatches one command per tick and preserves burst tails") {
+  Fake f;
+  Service service(f.driver(), f.clock(), Static());
+  REQUIRE(service.init());
+  service.poll();
+  TestPlatform platform;
+  app::TcpConsole<ConsoleEvent, TestPlatform> console(platform, service);
+  daveos::console::Line line;
+  REQUIRE_FALSE(console.poll_line(line));  // Open listener.
+  f.queue(Arp());
+  service.poll();
+  const auto ack = Connect(f, service, 40000);
+  const std::string_view burst = "sink add\r\nsink add\nsink add\nsink ";
+  f.queue(Tcp(40000, 101, ack, 0x18, burst));
+  service.poll();
+  Receiver receiver(platform);
+  using namespace daveos::core;
+  auto modules = ModuleList{&console, &receiver};
+  auto scheduler = make_scheduler<ConsoleEvent>(platform, modules);
+  CommandDispatcher dispatcher(modules, scheduler,
+                               CommandSourceList{console.command_source()});
+  REQUIRE(scheduler.run() == Status::ok);
+  REQUIRE(receiver.count == 3);
+  CHECK(receiver.times == std::array<Time, 3>{1000, 2000, 3000});
+  REQUIRE_FALSE(console.poll_line(line));  // Collect unfinished fourth command.
+  f.queue(Tcp(40000, 101 + burst.size(), ack, 0x18, "add\n"));
+  service.poll();
+  REQUIRE(console.poll_line(line));
+  CHECK(line.view() == "sink add");
 }

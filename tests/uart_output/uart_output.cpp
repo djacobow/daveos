@@ -1,7 +1,7 @@
 #include <string>
 
-#include "../../examples/stm32_console/output.hpp"
 #include "catch_amalgamated.hpp"
+#include "console/output.hpp"
 #include "platform/fake/platform.h"
 
 namespace {
@@ -23,8 +23,8 @@ struct Fixture {
   daveos::platform::fake::Platform platform;
   Driver driver;
   std::array<std::uint8_t, 16> storage{};
-  app::DmaOutput<decltype(platform), Driver, 8, 12> output{platform, driver,
-                                                           storage};
+  daveos::console::BufferedOutput<decltype(platform), Driver, 8, 12> output{
+      platform, driver, storage};
 };
 using daveos::core::Status;
 }  // namespace

@@ -1,10 +1,11 @@
 #pragma once
 
+#include <span>
 #include <string_view>
 
 #include "core/queue/queue.hpp"
 
-namespace app {
+namespace daveos::console {
 
 
 // Transport-side line collection, callable from an ISR or task; tokenization
@@ -21,23 +22,22 @@ class Input {
   explicit Input(P& platform) : platform_(platform) {}
   void receive(char byte) {
     daveos::core::Guard guard(platform_);
-    if (byte == '\n' && previous_cr_) {
-      previous_cr_ = false;
-      return;
+    Receive(byte);
+  }
+  struct Consumed {
+    std::size_t bytes;
+    bool complete;
+  };
+  // Consume at most one line, leaving bytes after its terminator to the caller.
+  // Partial lines persist across calls, including a CRLF split between chunks.
+  Consumed consume(std::span<const char> bytes, Line& line) {
+    daveos::core::Guard guard(platform_);
+    if (lines_.pop(line) == daveos::core::Status::ok) return {0, true};
+    for (std::size_t i = 0; i < bytes.size(); ++i) {
+      Receive(bytes[i]);
+      if (lines_.pop(line) == daveos::core::Status::ok) return {i + 1, true};
     }
-    previous_cr_ = byte == '\r';
-    if (byte == '\r' || byte == '\n') {
-      if (!discard_ && lines_.push(line_) != daveos::core::Status::ok)
-        ++dropped_;
-      line_.size = 0;
-      discard_ = false;
-    } else if (byte == '\b' || byte == '\x7f') {
-      // Once overlength, retain the rejection marker through Return.
-      if (!discard_ && line_.size && line_.size < line_.bytes.size())
-        --line_.size;
-    } else if (!discard_ && line_.size < line_.bytes.size()) {
-      line_.bytes[line_.size++] = byte;
-    }
+    return {bytes.size(), false};
   }
   // A UART error invalidates the entire current line, through its terminator.
   void error() {
@@ -67,6 +67,25 @@ class Input {
   }
 
  private:
+  void Receive(char byte) {
+    if (byte == '\n' && previous_cr_) {
+      previous_cr_ = false;
+      return;
+    }
+    previous_cr_ = byte == '\r';
+    if (byte == '\r' || byte == '\n') {
+      if (!discard_ && lines_.push(line_) != daveos::core::Status::ok)
+        ++dropped_;
+      line_.size = 0;
+      discard_ = false;
+    } else if (byte == '\b' || byte == '\x7f') {
+      // Once overlength, retain the rejection marker through Return.
+      if (!discard_ && line_.size && line_.size < line_.bytes.size())
+        --line_.size;
+    } else if (!discard_ && line_.size < line_.bytes.size()) {
+      line_.bytes[line_.size++] = byte;
+    }
+  }
   P& platform_;
   daveos::core::Queue<Line, 4> lines_;
   Line line_;
@@ -81,7 +100,8 @@ class Input {
 // editor).
 class LineDisplay {
  public:
-  explicit LineDisplay(void (*write)(std::string_view)) : write_(write) {}
+  LineDisplay(void* context, void (*write)(void*, std::string_view))
+      : context_(context), write_(write) {}
   void show(const Line& line) {
     if (shown_.view() == line.view()) return;
     before_log();
@@ -89,8 +109,10 @@ class LineDisplay {
     after_log();
   }
   void clear() { show(Line{}); }
+  // Forget presentation from a disconnected session without writing output.
+  void reset() { shown_ = {}; }
   void before_log() {
-    if (shown_.size) write_("\r\x1b[2K");
+    if (shown_.size) write_(context_, "\r\x1b[2K");
   }
   void after_log() {
     // Echo printable ASCII only; typed terminal escapes must not move the
@@ -101,13 +123,14 @@ class LineDisplay {
       auto& byte = visible.bytes[i];
       if (byte < ' ' || byte > '~') byte = '?';
     }
-    write_(visible.view());
+    write_(context_, visible.view());
   }
 
  private:
-  void (*write_)(std::string_view);
+  void* context_;
+  void (*write_)(void*, std::string_view);
   Line shown_;
 };
 
 
-}  // namespace app
+}  // namespace daveos::console

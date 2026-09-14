@@ -1,59 +1,64 @@
 #pragma once
 
-#include <inttypes.h>
-
-#include "../input.hpp"
-#include "../output.hpp"
 #include "board_config.h"
-#include "core/command/source.hpp"
-#include "core/logging/log.hpp"
-#include "core/schedule/module.hpp"
+#include "console/module.hpp"
+#include "console/output.hpp"
 
 namespace board {
 
 
-// Shared STM32 USB console. All entry points except middleware callbacks run
-// on the scheduler thread. No output is retained while unconfigured/DTR-low.
-bool InitUsb(Platform& platform);
-void StopUsb();
-bool PollUsb(app::Line& line);
-void OutputUsb(const daveos::core::LogRecord& record);
-app::TxCounters UsbCounters();
-std::uint32_t UsbDroppedInput();
-
-// Independent USB command source and log subscriber. The application registers
-// command_source() and subscriber(), and includes this module in ModuleList.
-template <typename Event>
-class UsbConsole final : public daveos::core::Module<UsbConsole<Event>, Event> {
+// Application-owned USB transport. Only the C middleware callback route is
+// global: one hardware USB device may be active at a time. All entry points
+// except receive/complete/reset run on the scheduler thread. Stop quiesces
+// callbacks before destruction; platform and DMA storage outlive transfers.
+class UsbTransport {
  public:
+  explicit UsbTransport(Platform& platform);
+  ~UsbTransport();
+  UsbTransport(const UsbTransport&) = delete;
+  UsbTransport& operator=(const UsbTransport&) = delete;
+  bool init();
+  void stop();
+  bool poll_line(daveos::console::Line& line);
+  void output(const daveos::core::LogRecord& record);
+  daveos::console::TxCounters counters() { return output_.counters(); }
+  std::uint32_t take_dropped() { return input_.take_dropped(); }
+  void receive(const std::uint8_t* bytes, std::uint32_t size);
+  void complete() { output_.complete(); }
+  void reset();
+
+ private:
+  struct Driver {
+    bool start(const std::uint8_t* bytes, std::size_t size);
+  };
+  void ResetDisplay();
+  void Write(std::string_view text) { output_.write(text); }
+  Platform& platform_;
+  daveos::console::Input<Platform> input_;
+  Driver driver_;
+  std::array<std::uint8_t, 8192> storage_{};
+  daveos::console::BufferedOutput<Platform, Driver, 4096> output_;
+  daveos::console::LineDisplay display_;
+  bool reset_display_ = false, attempted_ = false;
+};
+
+// Independent USB module, borrowing the application's transport.
+template <typename Event>
+class UsbConsole final
+    : public daveos::console::Module<UsbConsole<Event>, Event> {
+ public:
+  explicit UsbConsole(UsbTransport& transport) : transport_(transport) {}
   static constexpr const char* name() { return "usb"; }
-  static constexpr auto tasks() {
-    return std::array{
-        daveos::core::TaskDescriptor<UsbConsole>{"input", &UsbConsole::Poll}};
+  bool poll_line(daveos::console::Line& line) {
+    return transport_.poll_line(line);
   }
-  daveos::core::CommandSource& command_source() { return source_; }
-  daveos::core::Status init(daveos::core::InitStage stage) {
-    if (stage != daveos::core::InitStage::stage1)
-      return daveos::core::Status::ok;
-    return this->scheduler().schedule(*this, &UsbConsole::Poll, 1000,
-                                      daveos::core::Mode::repeat);
-  }
-  daveos::core::Subscriber subscriber() {
-    return {this, [](void*, const daveos::core::LogRecord& record) {
-              OutputUsb(record);
-            }};
+  std::uint32_t take_dropped() { return transport_.take_dropped(); }
+  void output(const daveos::core::LogRecord& record) {
+    transport_.output(record);
   }
 
  private:
-  void Poll() {
-    [[maybe_unused]] auto dropped = UsbDroppedInput();
-    if (dropped) W_("Dropped %" PRIu32 " USB input lines/errors", dropped);
-    app::Line line;
-    if (!PollUsb(line)) return;
-    if (line.size) I_("> %.*s", static_cast<int>(line.size), line.bytes.data());
-    source_.dispatch(line.view());
-  }
-  daveos::core::CommandSource source_;
+  UsbTransport& transport_;
 };
 
 

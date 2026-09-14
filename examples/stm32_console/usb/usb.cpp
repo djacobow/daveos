@@ -1,92 +1,88 @@
 #include "usb.hpp"
 
-#include <optional>
-
 #include "core/logging/log_format.hpp"
 #include "usb_device.h"
 
 namespace {
-using board::Platform;
-struct Driver {
-  bool start(const std::uint8_t* bytes, std::size_t size) {
-    return UsbDeviceTransmit(bytes, static_cast<std::uint32_t>(size));
-  }
-};
-using Output = app::DmaOutput<Platform, Driver, 4096>;
-void Write(std::string_view text);
-struct Console {
-  Platform& platform;
-  app::Input<Platform> input;
-  Driver driver;
-  std::array<std::uint8_t, 8192> storage{};
-  Output output;
-  app::LineDisplay display{Write};
-  bool reset_display = false;
-  explicit Console(Platform& p)
-      : platform(p), input(p), output(p, driver, storage) {}
-};
-// Fixed storage, constructed before USB IRQs are enabled. No heap allocation.
-std::optional<Console> console;
-void Write(std::string_view text) { console->output.write(text); }
-void ResetDisplay() {
-  if (console->reset_display) {
-    console->display = app::LineDisplay{Write};
-    console->reset_display = false;
-  }
-}
+// The STM32 C middleware offers no user-context parameter for these callbacks.
+// This pointer routes them to an application-owned transport; it owns no state.
+board::UsbTransport* active_usb = nullptr;
 }  // namespace
 namespace board {
 
 
-bool InitUsb(Platform& platform) {
-  console.emplace(platform);
-  return UsbDeviceInit();
+UsbTransport::UsbTransport(Platform& platform)
+    : platform_(platform),
+      input_(platform),
+      output_(platform, driver_, storage_),
+      display_(this, [](void* context, std::string_view text) {
+        static_cast<UsbTransport*>(context)->Write(text);
+      }) {}
+UsbTransport::~UsbTransport() { stop(); }
+bool UsbTransport::Driver::start(const std::uint8_t* bytes, std::size_t size) {
+  return UsbDeviceTransmit(bytes, static_cast<std::uint32_t>(size));
 }
-void StopUsb() {
+bool UsbTransport::init() {
+  if (active_usb || attempted_) return false;
+  attempted_ = true;
+  active_usb = this;
+  if (UsbDeviceInit()) return true;
+  stop();
+  return false;
+}
+void UsbTransport::stop() {
+  if (active_usb != this) return;
   UsbDeviceStop();
-  console.reset();
+  active_usb = nullptr;
 }
-bool PollUsb(app::Line& line) {
-  daveos::core::Guard guard(console->platform);
+void UsbTransport::ResetDisplay() {
+  if (!reset_display_) return;
+  display_.reset();
+  reset_display_ = false;
+}
+bool UsbTransport::poll_line(daveos::console::Line& line) {
+  daveos::core::Guard guard(platform_);
+  if (active_usb != this || !UsbDeviceReady()) return false;
   ResetDisplay();
-  if (!UsbDeviceReady()) return false;
-  const bool pending = console->input.pop(line);
+  const bool pending = input_.pop(line);
   if (pending)
-    console->display.clear();
+    display_.clear();
   else
-    console->display.show(console->input.preview());
-  console->output.flush();
+    display_.show(input_.preview());
+  output_.flush();
   return pending;
 }
-void OutputUsb(const daveos::core::LogRecord& record) {
-  daveos::core::Guard guard(console->platform);
+void UsbTransport::output(const daveos::core::LogRecord& record) {
+  daveos::core::Guard guard(platform_);
+  if (active_usb != this || !UsbDeviceReady()) return;
   ResetDisplay();
-  if (!UsbDeviceReady()) return;
-  console->display.before_log();
+  display_.before_log();
   daveos::core::LogPrefix prefix(record);
   Write(prefix.view());
   Write(record.message);
   Write("\r\n");
-  console->display.after_log();
-  console->output.flush();
+  display_.after_log();
+  output_.flush();
 }
-app::TxCounters UsbCounters() { return console->output.counters(); }
-std::uint32_t UsbDroppedInput() { return console->input.take_dropped(); }
+void UsbTransport::receive(const std::uint8_t* bytes, std::uint32_t size) {
+  for (std::uint32_t i = 0; i < size; ++i)
+    input_.receive(static_cast<char>(bytes[i]));
+}
+void UsbTransport::reset() {
+  daveos::core::Guard guard(platform_);
+  input_.reset();
+  output_.discard();
+  reset_display_ = true;
+}
 
 
 }  // namespace board
 extern "C" void UsbReceive(const std::uint8_t* bytes, std::uint32_t size) {
-  if (!console) return;
-  for (std::uint32_t i = 0; i < size; ++i)
-    console->input.receive(static_cast<char>(bytes[i]));
+  if (active_usb) active_usb->receive(bytes, size);
 }
 extern "C" void UsbTransmitComplete() {
-  if (console) console->output.complete();
+  if (active_usb) active_usb->complete();
 }
 extern "C" void UsbSessionReset() {
-  if (!console) return;
-  daveos::core::Guard guard(console->platform);
-  console->input.reset();
-  console->output.discard();
-  console->reset_display = true;
+  if (active_usb) active_usb->reset();
 }

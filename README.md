@@ -46,11 +46,11 @@ toolchains in `tools/external/` are separately ignored inputs, not build outputs
 Code is organized by component, with headers and implementations together:
 `core/{schedule,command,logging,queue,platform,enum}/` and
 `platform/{host,fake,stm32h5,stm32h7,detail}/`. Optional networking lives in
-`net/`, with shared hardware support in `platform/stm32/ethernet/`.
+`net/` and console helpers in `console/`, with shared hardware support in `platform/stm32/ethernet/`.
 There is no separate `include/`
 or `src/` tree. Include paths start at the repository root, for example
 `#include "core/schedule/scheduler.hpp"`. Namespaces are `daveos::core`,
-`daveos::platform::*`, and `daveos::net` (including `daveos::net::stm32`).
+`daveos::platform::*`, `daveos::console`, and `daveos::net` (including `daveos::net::stm32`).
 
 Headers defining templates use `.hpp`; other headers use `.h`. C++ translation
 units use `.cpp`. Generated and third-party files retain their supplied names.
@@ -817,3 +817,30 @@ Packet tests also cover a full receive window, complete-record output overflow,
 peer FIN/reset, and link-loss recovery. H563 has build coverage, including TCP
 without UART/USB/logging and networking without the TCP console; hardware
 validation remains pending.
+
+
+Shared console helpers live in `console/` under `daveos::console`, with an
+explicit `console_dep` Meson dependency for transports and their tests.
+`Input` collects lines; `LineDisplay` handles terminal presentation through a
+borrowed callback context; `BufferedOutput` manages bounded asynchronous output
+for UART DMA and USB. `Module<Derived, Event>` supplies the common 1 ms task,
+dropped-input reporting, command logging/dispatch, and source/subscriber
+registration. Transports retain their own session, echo, and transfer behavior.
+
+The application owns the USB transport as well as the UART and TCP objects.
+UART/USB C callbacks keep only routing pointers, detached after hardware is
+quiesced. USB rejects concurrent activation and repeated initialization; failed
+initialization releases the route. lwIP's process-wide stack remains a library
+constraint, not a shared singleton abstraction for the transports.
+
+TCP input is a ring buffer. The console inspects a contiguous span and consumes
+only through the first completed line, with a 256-byte budget per invocation.
+Remaining commands stay in the ring for later invocations; a partial line stays
+in `Input`. CRLF works across chunk and ring boundaries. Receive-window credit
+is returned only for consumed bytes, and consumption no longer shifts the
+remaining buffer. Tests cover command bursts, partial tails, ring wrap, and USB
+callback ownership across failed initialization, stop, and a new instance.
+
+After the console refactor, H755 hardware checks passed for USB commands,
+multiple TCP commands in one burst, completion of a partial command in a later
+packet, and delivery of USB-originated command logs to the TCP subscriber.

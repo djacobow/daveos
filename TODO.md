@@ -24,3 +24,5 @@
 - [ ] Validate H563 Ethernet on hardware.
 - [x] Add a single-client TCP console on port 1000 with independent command/log registration.
 - [ ] Generalize the standalone TCP API for multiple application listeners/connections.
+
+- [x] Extract shared console helpers and CRTP module; make USB application-owned and consume TCP input in bounded chunks.
