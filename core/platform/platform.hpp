@@ -33,7 +33,7 @@ inline constexpr Time kForever = std::numeric_limits<Time>::max();
   X(line_too_long)              \
   X(too_many_arguments)         \
   X(unsupported)
-DAVEOS_ENUM(Status, int, DAVEOS_STATUS_VALUES)
+DAVEOS_ENUM(Status, std::int32_t, DAVEOS_STATUS_VALUES)
 #undef DAVEOS_STATUS_VALUES
 // All modules finish stage1 before any module begins stage2.
 enum class InitStage { stage1, stage2 };

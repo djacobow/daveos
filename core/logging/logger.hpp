@@ -3,7 +3,6 @@
 #include "core/logging/log.hpp"
 #if DAVEOS_LOGGING
 #include <cstdio>
-#include <type_traits>
 
 #include "core/queue/queue.hpp"
 #endif
@@ -39,12 +38,8 @@ class Logger {
   Logger& operator=(const Logger&) = delete;
   // Checked by scheduler init before module callbacks. Types must match at
   // compile time; distinct instances of that type are rejected at runtime.
-  template <typename Platform>
-  bool uses_platform(const Platform& platform) const {
-    static_assert(std::is_same_v<P, Platform>,
-                  "logger and scheduler platform types must match");
-    return static_cast<const void*>(&platform_) ==
-           static_cast<const void*>(&platform);
+  bool uses_platform(const P& platform) const {
+    return &platform_ == &platform;
   }
   // Filtered/no-subscriber calls return ok without queuing. full drops the new
   // record; truncated queues shortened text. Invalid formatting returns an

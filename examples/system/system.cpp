@@ -1,3 +1,4 @@
+#include <cstdint>
 #include <cstdio>
 
 #include "core/logging/log_format.hpp"
@@ -48,7 +49,7 @@ class Producer final : public Module<Producer, Event> {
     active_->scheduler().schedule(*active_, &Producer::complete, 0);
   }
   inline static Producer* active_ = nullptr;
-  unsigned count_ = 0;
+  std::uint32_t count_ = 0;
 };
 class Consumer final : public Module<Consumer, Event> {
  public:

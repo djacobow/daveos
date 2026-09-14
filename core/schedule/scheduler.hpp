@@ -2,8 +2,10 @@
 
 #include <array>
 #include <cstring>
+#include <type_traits>
 #include <utility>
 
+#include "core/logging/log_format.hpp"
 #include "core/queue/queue.hpp"
 #include "core/schedule/module.hpp"
 
@@ -51,6 +53,7 @@ template <typename Event, typename P, typename... Modules, typename Logging,
 class Scheduler<Event, ModuleList<Modules...>, Logging, P, EventCapacity,
                 TimerCapacity>
     final : public SchedulerInterface<Event> {
+  static constexpr bool kHasLogging = !std::is_same_v<Logging, NoLogging>;
   static constexpr std::size_t kTasks =
       (std::tuple_size_v<decltype(Modules::tasks())> + ... + 0);
   static_assert(sizeof...(Modules) > 0);
@@ -139,7 +142,7 @@ class Scheduler<Event, ModuleList<Modules...>, Logging, P, EventCapacity,
         event_count_ = 0;
       }
     }
-    if constexpr (!std::is_same_v<Logging, NoLogging>)
+    if constexpr (kHasLogging)
       if (status != Status::ok) logging_.flush();
     return status;
   }
@@ -243,7 +246,7 @@ class Scheduler<Event, ModuleList<Modules...>, Logging, P, EventCapacity,
         }
         continue;
       }
-      if constexpr (!std::is_same_v<Logging, NoLogging>)
+      if constexpr (kHasLogging)
         if (logging_.dispatch()) continue;
       bool sleep = platform_.can_sleep();
       for (const auto& module : modules_) {
@@ -254,7 +257,7 @@ class Scheduler<Event, ModuleList<Modules...>, Logging, P, EventCapacity,
       {
         Guard guard(platform_);
         if (stop_requested_) continue;
-        if constexpr (!std::is_same_v<Logging, NoLogging>)
+        if constexpr (kHasLogging)
           if (!logging_.empty()) continue;
         for (const auto& task : tasks_)
           if (task.active && task.due < deadline) deadline = task.due;
@@ -274,7 +277,7 @@ class Scheduler<Event, ModuleList<Modules...>, Logging, P, EventCapacity,
       event_count_ = 0;
     }
     platform_.quiesce();
-    if constexpr (!std::is_same_v<Logging, NoLogging>) logging_.flush();
+    if constexpr (kHasLogging) logging_.flush();
     {
       Guard guard(platform_);
       state_ = State::stopped;
@@ -371,17 +374,16 @@ class Scheduler<Event, ModuleList<Modules...>, Logging, P, EventCapacity,
     this->log(Level::info,
               "Module/task | calls late | lateness min max avg (us)");
     for (const auto& task : stats.tasks) {
-      this->log(
-          Level::info, "%s/%s | %llu %llu | %llu %llu %llu %.1f", task.module,
-          task.task, static_cast<unsigned long long>(task.executions),
-          static_cast<unsigned long long>(task.late_starts),
-          static_cast<unsigned long long>(task.max_lateness),
-          static_cast<unsigned long long>(task.min_duration),
-          static_cast<unsigned long long>(task.max_duration), task.average());
+      this->log(Level::info, "%s/%s | %s %s | %s %s %s %.1f", task.module,
+                task.task, LogUnsigned(task.executions).c_str(),
+                LogUnsigned(task.late_starts).c_str(),
+                LogUnsigned(task.max_lateness).c_str(),
+                LogUnsigned(task.min_duration).c_str(),
+                LogUnsigned(task.max_duration).c_str(), task.average());
     }
-    this->log(Level::info, "Overflow events=%llu timers=%llu",
-              static_cast<unsigned long long>(stats.event_overflows),
-              static_cast<unsigned long long>(stats.timer_overflows));
+    this->log(Level::info, "Overflow events=%s timers=%s",
+              LogUnsigned(stats.event_overflows).c_str(),
+              LogUnsigned(stats.timer_overflows).c_str());
 #endif
   }
 
@@ -397,8 +399,8 @@ class Scheduler<Event, ModuleList<Modules...>, Logging, P, EventCapacity,
     return false;
   }
   template <typename M>
+    requires ModuleFor<M, Event>
   void Register(M* module) {
-    static_assert(std::is_same_v<typename M::EventType, Event>);
     if (!module) {
       registration_error_ = true;
       return;
@@ -433,7 +435,7 @@ class Scheduler<Event, ModuleList<Modules...>, Logging, P, EventCapacity,
     }
   }
   Status Validate() {
-    if constexpr (!std::is_same_v<Logging, NoLogging>)
+    if constexpr (kHasLogging)
       if (!logging_.uses_platform(platform_)) return Status::invalid_argument;
     if (registration_error_) return Status::invalid_argument;
     for (std::size_t index = 0; index < kTasks; ++index) {

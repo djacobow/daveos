@@ -61,3 +61,37 @@ foreach variant : [
     error('Module name/prefix validation did not behave as expected')
   endif
 endforeach
+
+# Exercise the real API boundaries, including a matching positive control.
+event_check = '''
+  #include "core/command/command.hpp"
+  #include "core/schedule/scheduler.hpp"
+  #include "platform/fake/platform.h"
+  using namespace daveos::core;
+  enum class Event {};
+  enum class Other {};
+  struct Example : Module<Example, @0@> {
+    static constexpr const char* name() { return "example"; }
+    void Task() {}
+    static constexpr auto tasks() {
+      return std::array{TaskDescriptor<Example>{"task", &Example::Task}};
+    }
+  };
+  static_assert(!ModuleFor<int, Event>);
+  void check(SchedulerInterface<Event>& interface, Example& module,
+             daveos::platform::fake::Platform& platform) {
+    @1@;
+  }
+'''
+foreach operation : [
+    'interface.schedule(module, &Example::Task, 1)',
+    'interface.cancel(module, &Example::Task)',
+    'auto scheduler = make_scheduler<Event>(platform, ModuleList{&module})',
+    'CommandDispatcher<Event, ModuleList<Example>> dispatcher(ModuleList{&module}, interface)']
+  foreach event_type, expected : {'Event': true, 'Other': false}
+    if cpp.compiles(event_check.format(event_type, operation), dependencies: core_dep,
+        name: 'module event ' + event_type + ': ' + operation) != expected
+      error('Module event compatibility did not behave as expected')
+    endif
+  endforeach
+endforeach

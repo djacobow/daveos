@@ -1,3 +1,5 @@
+#include <inttypes.h>
+
 #include <cstdio>
 
 #include "board_config.h"
@@ -68,8 +70,7 @@ class Board final : public Module<Board, Event> {
  private:
   void Poll() {
     [[maybe_unused]] auto dropped = input_.take_dropped();
-    if (dropped)
-      W_("Dropped %lu input lines/errors", static_cast<unsigned long>(dropped));
+    if (dropped) W_("Dropped %" PRIu32 " input lines/errors", dropped);
     Line line;
     if (input_.pop(line)) {
       display_.clear();
@@ -110,11 +111,10 @@ class Board final : public Module<Board, Event> {
     if (!args.empty()) return Status::invalid_argument;
     scheduler().log_statistics();
     [[maybe_unused]] auto tx = active_tx->counters();
-    I_("TX DMA: %llu bytes, %lu transfers, %lu dropped frames, %lu errors",
-       static_cast<unsigned long long>(tx.sent_bytes),
-       static_cast<unsigned long>(tx.transfers),
-       static_cast<unsigned long>(tx.dropped_frames),
-       static_cast<unsigned long>(tx.errors));
+    I_("TX DMA: %s bytes, %" PRIu32 " transfers, %" PRIu32
+       " dropped frames, %" PRIu32 " errors",
+       LogUnsigned(tx.sent_bytes).c_str(), tx.transfers, tx.dropped_frames,
+       tx.errors);
     return Status::ok;
   }
   Platform& platform_;

@@ -723,3 +723,20 @@ namespaces remain `daveos::core` and `daveos::platform::*`. No separate include
 and source trees are needed. Headers defining templates use `.hpp`, other
 headers use `.h`, and C++ translation units use `.cpp`. Vendor and generated
 file naming is retained. Meson definitions live with their components/targets.
+
+Use fixed-width integers from `<cstdint>` for stored numeric values and explicit
+enum underlying types. Use `PRI*` macros from `<inttypes.h>` for printf-style formatting of those values, rather than
+casting to `long` or `long long`. Retain API-required types such as `int` for
+`main`, printf width/precision, and C/POSIX return values, and `std::size_t` for
+sizes and indices.
+
+Do not rely on embedded libc to format 64-bit integers. Statistics retain their
+full-width stored values but use a bounded 32-bit decimal display, appending
+`+` above UINT32_MAX. Format any future 64-bit hexadecimal output as separate
+32-bit upper and lower halves, with the lower half padded to eight digits.
+
+Use small named concepts for repeated type contracts. `ModuleFor<M, Event>`
+checks event-type compatibility at scheduling, cancellation, registration, and
+command-dispatch boundaries after the concrete module is complete. Keep
+value/metadata validation in constexpr checks. Prefer concrete parameter types
+when no template deduction is needed, and name repeated policy predicates.

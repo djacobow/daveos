@@ -1,11 +1,32 @@
 #pragma once
 
+#include <inttypes.h>
+
 #include <cstdio>
+#include <limits>
 
 #include "core/logging/log.hpp"
 
 namespace daveos::core {
 
+
+// Display unsigned statistics without relying on embedded libc's 64-bit
+// printf support. Values beyond uint32_t are shown as "4294967295+"; the
+// underlying counter is unchanged. Storage remains valid for this object's
+// life.
+class LogUnsigned {
+ public:
+  explicit LogUnsigned(std::uint64_t value) {
+    constexpr auto limit = std::numeric_limits<std::uint32_t>::max();
+    std::snprintf(bytes_.data(), bytes_.size(), "%" PRIu32 "%s",
+                  value > limit ? limit : static_cast<std::uint32_t>(value),
+                  value > limit ? "+" : "");
+  }
+  const char* c_str() const { return bytes_.data(); }
+
+ private:
+  std::array<char, 12> bytes_{};
+};
 
 // Optional subscriber-side presentation; buffered records retain full names and
 // microsecond timestamps. Days have at least three digits, milliseconds
@@ -31,13 +52,14 @@ class LogPrefix {
     // Even the largest uint64 microsecond timestamp fits in 32-bit days.
     auto written =
         std::snprintf(bytes_.data(), bytes_.size(),
-                      "[%03lu:%02lu:%02lu:%02lu.%03lu] %c %-*s: ",
-                      static_cast<unsigned long>(hours / 24),
-                      static_cast<unsigned long>(hours % 24),
-                      static_cast<unsigned long>(minutes % 60),
-                      static_cast<unsigned long>(seconds % 60),
-                      static_cast<unsigned long>(milliseconds % 1000),
-                      "DIWEF"[static_cast<unsigned>(record.severity)],
+                      "[%03" PRIu32 ":%02" PRIu32 ":%02" PRIu32 ":%02" PRIu32
+                      ".%03" PRIu32 "] %c %-*s: ",
+                      static_cast<std::uint32_t>(hours / 24),
+                      static_cast<std::uint32_t>(hours % 24),
+                      static_cast<std::uint32_t>(minutes % 60),
+                      static_cast<std::uint32_t>(seconds % 60),
+                      static_cast<std::uint32_t>(milliseconds % 1000),
+                      "DIWEF"[static_cast<std::size_t>(record.severity)],
                       static_cast<int>(ContextWidth), context.data());
     if (written > 0) size_ = static_cast<std::size_t>(written);
   }

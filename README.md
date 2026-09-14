@@ -149,7 +149,7 @@ GPDMA and SRAM clocks remain enabled during shallow sleep. Echo, line-oriented
 logs, whole-frame overflow drops, DMA statistics, and immediate reset match H755.
 The internal 64 MHz HSI drives PLL1 (M=16/N=125/P=2), giving nominal 250 MHz CPU,
 62.5 MHz PCLK1, and a 125 MHz TIM2 kernel divided down to 1 MHz. No external
-crystal is required. Both console targets use full newlib for 64-bit formatting.
+crystal is required. Both console targets retain full newlib (including floating-point statistics).
 The H563 firmware is cross-compiled but has not been tested on hardware.
 
 The CubeMX source project is `examples/stm32h563_blinky/blinky_demo.ioc`, selecting
@@ -580,7 +580,7 @@ from a single list, with no allocation or separate string table to maintain:
 
 ```cpp
 #define APP_STATES(X) X(idle) X(running) X(failed, 10)
-DAVEOS_ENUM(State, unsigned, APP_STATES)
+DAVEOS_ENUM(State, std::uint32_t, APP_STATES)
 #undef APP_STATES
 // enum_name(State::failed) returns "failed" (const char*).
 ```
@@ -596,3 +596,10 @@ dispatch. Backspace/Delete remove the last character. Incoming logs temporarily
 clear and redraw unfinished input. This is a single-line editor: use an ANSI
 terminal and keep input within the terminal width. Echo remains available without
 logging; the submitted-command record follows normal logging/filtering rules.
+
+Integer logging uses fixed-width types and the `PRI*` macros from `<inttypes.h>`.
+Embedded output avoids 64-bit integer printf conversions: `LogUnsigned` renders
+values through `PRIu32`, showing `4294967295+` above that limit. Statistics
+snapshots retain their full 64-bit values. Timestamp fields fit in 32 bits.
+If 64-bit hex output is needed, format its upper and lower 32-bit halves
+separately (padding the lower half to eight hex digits).

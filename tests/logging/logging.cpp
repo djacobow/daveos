@@ -260,3 +260,10 @@ TEST_CASE("log prefixes split elapsed time and align bounded context") {
   record.timestamp = kForever;
   CHECK(LogPrefix(record).view().starts_with("[213503982:08:01:49.551] I "));
 }
+
+TEST_CASE("integer log display avoids 64-bit printf and marks capped values") {
+  CHECK(std::string_view(LogUnsigned(0).c_str()) == "0");
+  CHECK(std::string_view(LogUnsigned(4294967295ULL).c_str()) == "4294967295");
+  CHECK(std::string_view(LogUnsigned(4294967296ULL).c_str()) == "4294967295+");
+  CHECK(std::string_view(LogUnsigned(kForever).c_str()) == "4294967295+");
+}

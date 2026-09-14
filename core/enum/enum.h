@@ -1,8 +1,10 @@
 #pragma once
 
+#include <cstdint>
+
 // Define at namespace scope using one X-macro list, then undefine the list:
 //   #define APP_COLORS(X) X(red) X(green, 7) X(blue)
-//   DAVEOS_ENUM(Color, unsigned, APP_COLORS)
+//   DAVEOS_ENUM(Color, std::uint32_t, APP_COLORS)
 //   #undef APP_COLORS
 // This generates an enum class and an ADL-visible constexpr enum_name(Color).
 // Names are static, null-terminated strings without the enum type prefix.

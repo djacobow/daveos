@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <concepts>
 #include <cstdarg>
 #include <span>
 #include <string_view>
@@ -12,6 +13,11 @@
 
 namespace daveos::core {
 
+
+// Event compatibility at registration/call boundaries, after M is complete.
+// This does not attempt to describe the entire module protocol.
+template <typename M, typename Event>
+concept ModuleFor = std::same_as<typename M::EventType, Event>;
 
 // One named task member function. A module exposes a constexpr std::array of
 // these via tasks(); names and callbacks must be nonempty/non-null and unique
@@ -112,9 +118,9 @@ class SchedulerInterface {
   // common run start time; while running they start at this call. Safe from
   // interrupts.
   template <typename M>
+    requires ModuleFor<M, Event>
   Status schedule(M& module, void (M::*callback)(), Time delay,
                   Mode mode = Mode::once) {
-    static_assert(std::is_same_v<typename M::EventType, Event>);
     auto tasks = M::tasks();
     for (std::size_t index = 0; index < tasks.size(); ++index) {
       if (tasks[index].callback == callback)
@@ -125,6 +131,7 @@ class SchedulerInterface {
   // Cancel pending execution (not an already executing callback). Returns
   // not_found for an unknown/inactive task; interrupt callers are rejected.
   template <typename M>
+    requires ModuleFor<M, Event>
   Status cancel(M& module, void (M::*callback)()) {
     auto tasks = M::tasks();
     for (std::size_t index = 0; index < tasks.size(); ++index) {

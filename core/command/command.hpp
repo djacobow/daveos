@@ -20,8 +20,8 @@ class CommandDispatcher<Event, ModuleList<Modules...>, LineCapacity,
   static_assert(LineCapacity > 0 && ArgumentCapacity >= 2);
   static_assert(LineCapacity <= std::numeric_limits<int>::max());
   template <typename M>
+    requires ModuleFor<M, Event>
   static consteval bool ValidModule() {
-    static_assert(std::is_same_v<typename M::EventType, Event>);
     constexpr auto commands = M::commands();
     if (commands.empty()) return true;
     if (!ValidCommandName(M::command_prefix()) ||

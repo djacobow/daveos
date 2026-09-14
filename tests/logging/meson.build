@@ -34,6 +34,7 @@ endif
 
 if get_option('logging')
   platform_check = '''
+    // uses_platform takes the logger's concrete platform type directly.
     #include "core/logging/logger.hpp"
     using namespace daveos::core;
     struct TestPlatform {};

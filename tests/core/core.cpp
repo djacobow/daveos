@@ -249,7 +249,7 @@ TEST_CASE("thread-safe queue falls back to critical sections without a mutex") {
 
 namespace enum_test {
 #define TEST_VALUES(X) X(negative, -4) X(zero, 0) X(next) X(sparse, 100)
-DAVEOS_ENUM(Value, int, TEST_VALUES)
+DAVEOS_ENUM(Value, std::int32_t, TEST_VALUES)
 #undef TEST_VALUES
 static_assert(std::string_view(enum_name(Value::negative)) == "negative");
 static_assert(static_cast<int>(Value::next) == 1);
