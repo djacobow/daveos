@@ -11,8 +11,8 @@ its separate M4 image completes startup synchronization and sleeps immediately.
 
 ## Start with a local checkout
 
-Until these APIs are committed and the wrap pin advances, use the current
-checkout. From the DaveOS repository root, with an unused destination:
+To develop against a local checkout, start from the DaveOS repository root
+with an unused destination:
 
 ```sh
 cp -a starters/stm32 /tmp/my-device
@@ -24,7 +24,7 @@ cd /tmp/my-device
 Install Meson, Ninja, Python 3, and an ARM C/C++20 compiler with newlib if needed.
 The commands below assume `arm-none-eabi-*` tools are on PATH.
 For a published checkout instead of a symlink, run `meson subprojects download`
-from the copied project; the wrap revision should pin a tested API commit.
+from the copied project; the wrap revision pins the tested API commit.
 
 Initialize the board's HAL/CMSIS submodules in the DaveOS checkout. For H563:
 

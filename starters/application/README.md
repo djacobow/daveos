@@ -12,9 +12,6 @@ meson test -C build/host --print-errorlogs
 ./build/host/my-app
 ```
 
-While these new APIs are uncommitted, use the local-checkout setup below; the
-wrap pin must advance to the API commit before distributing this starter.
-
 The first setup downloads DaveOS through `subprojects/daveos.wrap`. Its
 `revision` is pinned to a tested commit; update it deliberately when upgrading.
 For local DaveOS development, place a checkout (or symlink) at `subprojects/daveos`
