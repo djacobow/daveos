@@ -241,6 +241,11 @@ class Module {
 // storage.
 template <typename... Modules>
 struct ModuleList {
+  static_assert((requires {
+                   { Modules::name() } -> std::convertible_to<const char*>;
+                   typename std::bool_constant<(Modules::name() != nullptr)>;
+                 } && ...),
+                "modules must provide static constexpr const char* name()");
   static_assert(UniqueNames(std::array<const char*, sizeof...(Modules)>{
                     Modules::name()...}),
                 "module names must be nonempty and unique (case-insensitive)");

@@ -192,12 +192,16 @@ in `examples/stm32_console/`; each target supplies `board_config.h` and `console
 for its platform, LED/button access, DMA storage/cache handling, and timer clock.
 The modules, logger, scheduler, dispatcher, and transport buffers live at file
 scope. Their constructors store references and metadata; UART/USB/network setup
-runs in stage1 and command-source wiring in stage2, after every stage1 completes.
+runs in stage1. A dedicated `CommandWiring` module binds command sources in
+stage2, after every stage1 completes; `Board` only provides board commands.
 The platform timer is initialized after CubeMX peripheral setup and before
 scheduler initialization. The `.ioc` and FLASH linker script retain a 64 KiB
-stack reservation for nested calls and interrupt frames, enforced by MSPLIM.
-Keep that setting when regenerating with CubeMX. GCC's `.su` reports are emitted beside
-the example's object files. C++ exceptions and RTTI are disabled. The example
+stack reservation, enforced by MSPLIM. This was raised to accommodate the old
+34,216-byte application frame; `DaveOS_Run()` now uses 8 bytes in the debug
+build. That frame size is not a whole-program high-water mark. The reservation
+is retained pending measurement of nested calls and interrupts; keep the linker
+and CubeMX settings consistent when it is resized. GCC's `.su` reports are
+emitted beside the example's object files. C++ exceptions and RTTI are disabled. The example
 allows hosted headers because ST's umbrella header includes `math.h`; the core
 and STM32 adapter remain compiled in freestanding mode. The firmware disables
 standard-library runtime assertions to avoid their allocating stdio error path;
@@ -473,14 +477,16 @@ discarding pending logs/output. The board module calls `platform.reset()` direct
 the scheduler does not manage reset. Host/fake platforms return `Status::unsupported`.
 
 LEDs are LD1/PB0, LD2/PE1, and LD3/PB14; BTN1 is PC13 and reports its raw level.
-UART interrupts collect up to 16 complete lines; a 1 ms task dispatches one
-per invocation. The hardware FIFO absorbs short interrupt-masked intervals at
+Both H563 and H755 use the shared UART implementation: interrupts collect up to
+16 complete lines; a 1 ms task dispatches one per invocation. The hardware FIFO absorbs short interrupt-masked intervals at
 1 Mb/s. Each command may contain up to 256 bytes before its terminator. Queue
 overflow drops whole new lines and records a warning; sustained input still
 needs sender pacing. FIFO setup runs during module stage1, after CubeMX setup,
 so regeneration cannot silently disable it. H563 hardware validation passed
 580 unpaced commands, including repeated 16-line, 4,112-byte bursts and
-overlength rejection followed by a valid command.
+overlength rejection followed by a valid command. H755 has build coverage only
+for the static-storage, initialization-wiring, and UART FIFO/queue changes; its
+earlier hardware results do not validate those changes.
 Overlength lines are rejected, full queues drop entire lines, and UART errors
 discard input through the next terminator. Dropped input is reported via logging.
 Log records are queued in scheduler idle time, with timestamps, severity, module,

@@ -702,8 +702,8 @@ Add an interactive host console example with buffered stdin input and a
 `console exit` command for orderly shutdown and log flushing. EOF has no command
 meaning and must not stop the scheduler or cause a busy loop. The H563 and H755
 examples share USART3 input with application-owned line buffering.
-The STM32 UART console enables the peripheral FIFO in stage1 and queues up to
-16 complete lines (up to 256 command bytes each), dispatching one per 1 ms
+The shared H563/H755 STM32 UART console enables the peripheral FIFO in stage1
+and queues up to 16 complete lines (up to 256 command bytes each), dispatching one per 1 ms
 invocation. Queue overflow drops new whole lines and records a warning; this
 is bounded burst buffering, not flow control for unlimited sustained input.
 
@@ -804,8 +804,13 @@ reconnection. Its
 Cortex-M33 stack reservation is 64 KiB, enforced by MSPLIM. Long-lived STM32
 application objects (modules, logger, scheduler, dispatcher, and transport
 buffers) have file-scope storage. Hardware setup waits for initialization;
-command sources bind in stage2. Preserve the stack reservation
-setting in the linker script and CubeMX project.
+a dedicated application wiring module binds command sources in stage2. The
+64 KiB reservation addressed the old 34,216-byte application stack frame; the
+current debug `DaveOS_Run()` frame is 8 bytes. Total stack high-water usage has
+not been measured, so the reservation is retained pending that measurement.
+Keep linker and CubeMX settings consistent when resizing it. H755 has build
+coverage only for the subsequent static-storage, initialization-wiring, and
+UART FIFO/16-line queue changes; those changes still need H755 hardware testing.
 
 
 The optional TCP console is an independent log subscriber and command source,

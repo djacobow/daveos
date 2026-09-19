@@ -10,7 +10,10 @@ TEST_CASE("scheduler construction does not require constructed modules") {
   alignas(TestModule) std::byte storage[sizeof(TestModule)];
   auto* module = reinterpret_cast<TestModule*>(storage);
   // The scheduler may retain addresses and static descriptors, but must not
-  // touch the module until init. Its constructor runs later, as across TUs.
+  // touch the module until init. This deliberately forms a pointer to aligned
+  // storage before the object lifetime starts; construct_at starts that
+  // lifetime before init() dereferences it. This models construction across
+  // TUs.
   auto scheduler = make_scheduler<Event>(platform, ModuleList{module});
   auto destroy = [](TestModule* p) { std::destroy_at(p); };
   std::unique_ptr<TestModule, decltype(destroy)> owned(

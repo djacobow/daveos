@@ -45,7 +45,14 @@ using Tx = BufferedOutput<Platform, TxDriver, 4096>;
 using UartInput = Input<Platform, 16>;
 #endif
 enum class Event {};
-void BindCommands();
+
+// Application wiring is independent of the board command module. Stage2 runs
+// only after every transport has finished its independent stage1 setup.
+class CommandWiring final : public daveos::core::Module<CommandWiring, Event> {
+ public:
+  static constexpr const char* name() { return "commands"; }
+  Status init(InitStage stage);
+};
 
 class Board final : public daveos::core::Module<Board, Event> {
  public:
@@ -81,7 +88,6 @@ class Board final : public daveos::core::Module<Board, Event> {
   }
   Status init(InitStage stage) {
     if (stage == InitStage::stage1) I_("DaveOS %s; type help", board::kName);
-    if (stage == InitStage::stage2) BindCommands();
     return Status::ok;
   }
 
@@ -250,11 +256,6 @@ board::UsbTransport usb_transport(platform);
 board::UsbConsole<app::Event> usb(usb_transport);
 #endif
 #if DAVEOS_NETWORKING
-daveos::net::Config NetworkConfig() {
-  auto config = daveos::net::stm32::board_network_config();
-  // To use a static address, set dhcp=false and address/netmask/gateway here.
-  return config;
-}
 daveos::net::Service network(daveos::net::stm32::ethernet_driver(),
                              {&platform,
                               [](void* p) -> std::uint32_t {
@@ -262,7 +263,9 @@ daveos::net::Service network(daveos::net::stm32::ethernet_driver(),
                                        1000;
                               }},
                              {});
-daveos::net::Module<app::Event> network_module(network, NetworkConfig);
+// For static IPv4, pass a factory that sets dhcp=false and the address fields.
+daveos::net::Module<app::Event> network_module(
+    network, daveos::net::stm32::board_network_config);
 #if DAVEOS_TCP_CONSOLE
 app::TcpConsole<app::Event, app::Platform> tcp(platform, network);
 #endif
@@ -277,8 +280,9 @@ app::Board board_module(platform
                         usb_transport
 #endif
 );
+CommandWiring command_wiring;
 auto modules = ModuleList {
-  &board_module,
+  &command_wiring, &board_module,
 #if DAVEOS_NETWORKING
       &network_module,
 #if DAVEOS_TCP_CONSOLE
@@ -307,7 +311,8 @@ auto logger = make_logger(platform, subscribers);
 auto scheduler = make_scheduler<app::Event>(platform, modules, logger);
 CommandDispatcher dispatcher(modules, scheduler);
 
-void BindCommands() {
+Status CommandWiring::init(InitStage stage) {
+  if (stage != InitStage::stage2) return Status::ok;
   auto sources = CommandSourceList {
 #if DAVEOS_NETWORKING && DAVEOS_TCP_CONSOLE
     tcp.command_source(),
@@ -320,6 +325,7 @@ void BindCommands() {
 #endif
   };
   dispatcher.bind_sources(sources);
+  return Status::ok;
 }
 }  // namespace app
 

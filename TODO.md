@@ -32,7 +32,9 @@
 
 - [x] Extract shared console helpers and CRTP module; make USB application-owned and consume TCP input in bounded chunks.
 
-- [x] Fix H563 startup stack-overflow fault: reserve 64 KiB for the application-owned console and nested calls.
+- [x] Fix the original H563 startup stack overflow by reserving 64 KiB; later move application objects to static storage.
+- [ ] Measure H563 whole-program stack high-water usage under console/network/interrupt load, then right-size the retained 64 KiB reservation in both linker and CubeMX settings.
+- [ ] Hardware-test H755 static-storage initialization and UART FIFO/16-line queue changes over UART, USB, and TCP; currently build coverage only.
 - [ ] Revisit H755 stack reservation after the application-owned console refactor; its Cortex-M7 has no MSPLIM guard.
 
 - [x] Fix H563 UART burst overruns with hardware FIFO reception and a 16-line queue; validated 580 unpaced commands at 1 Mb/s, including 4,112-byte bursts and overlength recovery.
