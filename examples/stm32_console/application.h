@@ -6,6 +6,6 @@
 namespace app {
   namespace core = daveos::core;
   using Platform = board::Platform;
-  enum class Event {};
+  using Event = std::variant<std::monostate>;
 
 }  // namespace app

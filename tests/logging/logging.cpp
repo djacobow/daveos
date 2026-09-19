@@ -268,7 +268,7 @@ TEST_CASE("logger platform mismatch fails before module initialization") {
   module.receiver = [&](test::Event) { ran = true; };
   CHECK(scheduler.schedule(module, &test::TestModule::first, 0) ==
         core::Status::ok);
-  CHECK(scheduler.post(test::Event::first) == core::Status::ok);
+  CHECK(scheduler.post(test::First{}) == core::Status::ok);
   CHECK(scheduler.log(core::Level::info, "before init") == core::Status::ok);
   SECTION("explicit init") {
     CHECK(scheduler.init() == core::Status::invalid_argument);
@@ -281,7 +281,7 @@ TEST_CASE("logger platform mismatch fails before module initialization") {
   CHECK(scheduler.initialization_failure().status ==
         core::Status::invalid_argument);
   CHECK(scheduler.initialization_failure().module == nullptr);
-  CHECK(scheduler.post(test::Event::first) == core::Status::not_running);
+  CHECK(scheduler.post(test::First{}) == core::Status::not_running);
   REQUIRE(sink.records.size() == 2);
   CHECK(sink.records[0].message == "before init");
   CHECK(sink.records[1].message ==

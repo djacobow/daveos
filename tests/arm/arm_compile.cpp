@@ -7,7 +7,11 @@ namespace core = daveos::core;
 
 namespace {
 
-  enum class Event { sample };
+  struct SampleEvent {
+    std::uint32_t value = 0;
+  };
+
+  using Event = std::variant<SampleEvent>;
 #define ARM_MODES(X) X(start, -1) X(stop, 7)
   DAVEOS_ENUM(Mode, std::int8_t, ARM_MODES)
 #undef ARM_MODES
@@ -38,8 +42,14 @@ namespace {
       return core::Status::ok;
     }
 
+    static constexpr auto events() {
+      return std::tuple{DAVEOS_EVENT(Example, OnSample)};
+    }
+
+    void OnSample(const SampleEvent&) {}
+
     void tick() {
-      scheduler().post(Event::sample, this);
+      scheduler().post(SampleEvent{42}, this);
       scheduler().stop();
     }
   };

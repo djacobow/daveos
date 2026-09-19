@@ -36,7 +36,7 @@ network listeners beyond the current single-client TCP console.
 | `daveos::net::stm32` | Shared H5/H7 Ethernet driver and board network configuration. |
 
 The core platform contract belongs in `daveos::core`; concrete implementations
-belong under `daveos::platform`. Application modules and event enums use
+belong under `daveos::platform`. Application modules and event payload types use
 application-owned namespaces.
 
 ## Design
@@ -72,7 +72,8 @@ A module also has:
 
 * A nonempty `static constexpr const char* name()` accessor.
 * A `can_sleep()` callback that indicates whether the module permits system sleep.
-* An `on_event()` callback that receives an application-defined event enum value.
+* Optional typed event handlers declared by `events()`, or a custom
+  `on_event(const Event&)` visitor.
 * An `init(InitStage stage)` callback used at startup.
 * A reference or pointer to the module-facing scheduler interface.
 
@@ -121,7 +122,7 @@ Modules use the CRTP base `Module<Derived, Event>`. Platforms similarly use a
 CRTP base and are statically bound to the concrete scheduler.
 
 The scheduler provides `SchedulerInterface<Event>`, a small module-facing
-interface parameterized only by the application's event enum. It exposes
+interface parameterized only by the application's event variant. It exposes
 scheduling and cancellation, event posting,
 timers, and logging without exposing the concrete scheduler's module-list types or
 storage capacities. Modules depend on this interface rather than the full scheduler
@@ -442,15 +443,40 @@ will succeed.
 
 ## Events
 
-Any module can post an event to the scheduler. Events carry only an
-application-defined enum value, with no payload in the initial version.
-Applications define their events without modifying DaveOS.
-The application event enum type is a scheduler template parameter. Event posting
-and module event callbacks use that enum type directly, preserving type checking.
-Event posts may identify a sender module, including posts from interrupt handlers.
-When the sender is known, it is excluded from delivery. Without an identified
-sender, the event is delivered to every module. Sender identity is internal
-delivery metadata; the event callback still receives only the enum value.
+Any module can post an application-defined `std::variant` event. Each alternative
+is a payload type; empty structs represent notifications without data. Applications
+without events may use `std::variant<std::monostate>`. The variant type is a
+scheduler and module template parameter. Enum-only event types are no longer
+supported.
+
+`post(const Event&, void* sender = nullptr)` copies the variant into a fixed queue
+slot. `post(payload, sender)` accepts an exact alternative type and constructs the
+variant for the caller; unrelated implicit conversions are rejected. Alternatives
+must be unique, trivially copyable, nonthrowing default/copy constructible and copy
+assignable; the variant must also be trivially copyable. Payloads should own small,
+allocation-free data. Pointers or views do not transfer ownership: their referenced
+storage must independently remain valid through delivery. Each queue slot reserves
+space for the largest alternative plus variant and delivery metadata.
+
+Modules may return a constexpr tuple from `events()` containing
+`DAVEOS_EVENT(Module, Handler)` descriptors. Each handler has the signature
+`void Handler(const Payload&)`; const and noexcept members are also supported.
+The payload is inferred from the member function. Registration rejects mismatched
+module owners, payloads absent from the variant, duplicate handlers for a payload,
+invalid signatures, and empty handler names at compile time. Unregistered
+alternatives are ignored. Logs use the receiving module name and C++ handler name.
+Alternatively, a module may define `on_event(const Event&)` and use `std::visit`
+itself; its log context is `module.on_event`. A module cannot combine that override
+with nonempty `events()` registration. Callback references are valid only during
+the callback and must not be retained.
+
+Posting remains interrupt-safe and can identify a sender module. Known senders
+are excluded from delivery; unidentified posts go to every module. Sender identity
+is internal metadata. Reception order across modules is unspecified. Delivery of
+one event completes before the next event is dispatched, including when a handler
+posts another event or requests stop. Queue overflow returns `full` and records
+the failure without changing accepted events. Existing task/event timing and
+initialization rules are unchanged.
 
 ## Logging
 
@@ -648,8 +674,11 @@ These checks follow from the agreed behavior; they do not introduce additional A
   errors, and failure-path log delivery.
 * Verify earliest-first dispatch, retained overdue iterations, replacement,
   cancellation, self-rescheduling, zero-delay validation, and per-task statistics.
-* Verify sender exclusion, complete event broadcasts, fixed capacity, and overflow
-  reporting without depending on unspecified equal-time or recipient ordering.
+* Verify copied variant payloads, typed handler registration and rejection of
+  invalid declarations, ignored alternatives, visitor fallback, handler log context,
+  and allocation-free delivery, including concurrent interrupt posting. Verify
+  sender exclusion, complete broadcasts, fixed capacity, and overflow reporting
+  without depending on unspecified equal-time or recipient ordering.
 * Verify timestamped logs, severity filtering, truncation, overflow, and dispatch
   behind due tasks/events.
 * Verify queue failures preserve contents and all callers use consistent protection.
@@ -912,7 +941,7 @@ echo should be disabled; wrapped-line editing is outside the initial scope.
 
 Colocate headers and implementations by component: shared console helpers live
 under `console/`, core facilities live under
-`core/{schedule,command,logging,queue,platform,enum}/`, and adapters under
+`core/{schedule,command,event,logging,queue,platform,enum}/`, and adapters under
 `platform/{host,fake,stm32h5,stm32h7}/`, with shared adapter details in
 `platform/detail/`. Optional networking lives in `net/` (`daveos::net`), with
 shared STM32 Ethernet support in `platform/stm32/ethernet/`

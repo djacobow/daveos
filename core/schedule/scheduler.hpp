@@ -51,11 +51,12 @@ namespace daveos::core {
   };
 
   // Fixed-storage cooperative scheduler. Prefer make_scheduler() for deduction.
-  // Event is the application's enum. ModuleList determines module/task
-  // capacity. Logging is an optional borrowed service; the scheduler owns no
-  // log buffers. Platform, modules, logger and name strings must outlive this
-  // object. At least one module is required; task arrays may be empty.
-  // One thread owns init()/run()/destruction; these are never ISR entry points.
+  // Event is the application's payload variant. ModuleList determines
+  // module/task capacity. Logging is an optional borrowed service; the
+  // scheduler owns no log buffers. Platform, modules, logger and name strings
+  // must outlive this object. At least one module is required; task arrays may
+  // be empty. One thread owns init()/run()/destruction; these are never ISR
+  // entry points.
   template <typename Event, typename Modules, typename Logging, typename P,
             std::size_t EventCapacity = 32, std::size_t TimerCapacity = 16>
   class Scheduler;
@@ -84,7 +85,7 @@ namespace daveos::core {
       const char* name = "";
       void (*bind)(void*, SchedulerInterface<Event>&) = nullptr;
       Status (*init)(void*, InitStage) = nullptr;
-      void (*event)(void*, Event) = nullptr;
+      void (*event)(void*, const Event&) = nullptr;
       bool (*sleep)(void*) = nullptr;
     };
 
@@ -117,6 +118,7 @@ namespace daveos::core {
 
    public:
     using SchedulerInterface<Event>::timer;
+    using SchedulerInterface<Event>::post;
     using SchedulerInterface<Event>::cancel_timer;
 
     // Store references and static descriptors only; binding and callbacks wait
@@ -303,7 +305,7 @@ namespace daveos::core {
             if (module.object == event.sender) {
               continue;
             }
-            ContextGuard context(platform_, {module.name, "event"});
+            ContextGuard context(platform_, {module.name, "on_event"});
             module.event(module.object, event.value);
           }
           continue;
@@ -413,10 +415,13 @@ namespace daveos::core {
     // Queue a timestamped broadcast. sender, if supplied, must be registered
     // and is excluded from reception. Queue overflow increments
     // event_overflows.
-    Status post(Event value, void* sender = nullptr) {
+    Status post(const Event& value, void* sender = nullptr) {
       Guard guard(platform_);
       if (!AcceptsWork()) {
         return Status::not_running;
+      }
+      if (value.valueless_by_exception()) {
+        return Status::invalid_argument;
       }
       if (sender && !Contains(sender)) {
         return Status::not_found;
@@ -554,7 +559,7 @@ namespace daveos::core {
           [](void* self, InitStage stage) {
             return static_cast<M*>(self)->initialize(stage);
           },
-          [](void* self, Event event) {
+          [](void* self, const Event& event) {
             static_cast<M*>(self)->receive(event);
           },
           [](void* self) { return static_cast<M*>(self)->permits_sleep(); }};

@@ -56,7 +56,7 @@ time units, periodic tasks, Application composition, and failure diagnostics.
 ## Build structure
 
 Code is organized by component, with headers and implementations together:
-`core/{schedule,command,logging,queue,platform,enum}/` and
+`core/{schedule,command,event,logging,queue,platform,enum}/` and
 `platform/{host,fake,stm32h5,stm32h7,detail}/`. Optional networking lives in
 `net/` and console helpers in `console/`, with shared hardware support in `platform/stm32/ethernet/`.
 There is no separate `include/`
@@ -282,7 +282,8 @@ so module types do not depend on all other modules or scheduler capacities.
 
 ```cpp
 namespace core = daveos::core;
-enum class Event { ready };
+struct Ready {};
+using Event = std::variant<Ready>;
 
 class Blinker : public core::Module<Blinker, Event> {
  public:
@@ -1041,3 +1042,47 @@ and CN14 to a DHCP LAN. `net status` reports the address for `nc <address> 1000`
 When switching boards, stop any OpenOCD process still configured for the H755;
 use `target/stm32h5x.cfg` for H563. If GDB attachment cannot halt the old firmware,
 issue `reset halt` through OpenOCD before attaching.
+
+## Payload events
+
+Declare an application variant and register only the payloads each module handles:
+
+```cpp
+#include <cinttypes>
+#include "core/schedule/module.hpp"
+
+namespace core = daveos::core;
+
+struct ButtonPressed { std::uint8_t button = 0; };
+struct TemperatureChanged { float celsius = 0; };
+using Event = std::variant<ButtonPressed, TemperatureChanged>;
+
+struct Controller : core::Module<Controller, Event> {
+  static constexpr const char* name() { return "controller"; }
+
+  static constexpr auto events() {
+    return std::tuple{DAVEOS_EVENT(Controller, OnButton)};
+  }
+
+  void OnButton(const ButtonPressed& event) {
+    I_("button %" PRIu32, static_cast<std::uint32_t>(event.button));
+  }
+};
+
+// From a module callback; excludes this module from the broadcast:
+// scheduler().post(ButtonPressed{1}, this);
+```
+
+`TemperatureChanged` is ignored by this controller. To handle the full variant,
+override `void on_event(const Event&)` and call `std::visit` instead of registering
+`events()`. These two styles are mutually exclusive. Named handlers log under
+`controller.OnButton`; a custom visitor logs under `controller.on_event`.
+
+Posting copies the payload into the fixed-capacity event queue, including from
+interrupts. Receivers borrow it only for the duration of their callback. Payloads
+must be unique variant alternatives, trivially copyable and nonthrowing default/
+copy constructible and copy assignable. The variant must be trivially copyable.
+Use small owned payloads; views and pointers require separately managed lifetimes.
+Queue storage scales with the largest alternative. Sender exclusion, unspecified
+recipient ordering, and overflow reporting are unchanged. Use
+`std::variant<std::monostate>` for an application with no events.

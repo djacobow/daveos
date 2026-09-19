@@ -83,7 +83,7 @@ TEST_CASE("initialization failure discards work and flushes diagnostics") {
   module.first_action = [&] { ran = true; };
   module.initializer = [&](core::InitStage) {
     scheduler.schedule(module, &test::TestModule::first, 0);
-    scheduler.post(test::Event::first);
+    scheduler.post(test::First{});
     scheduler.log(core::Level::error, "startup failed");
     return core::Status::initialization_failed;
   };
@@ -107,7 +107,7 @@ TEST_CASE("initialization failure discards work and flushes diagnostics") {
 #else
   CHECK(sink.records.empty());
 #endif
-  CHECK(scheduler.post(test::Event::first) == core::Status::not_running);
+  CHECK(scheduler.post(test::First{}) == core::Status::not_running);
 }
 
 TEST_CASE(
@@ -180,19 +180,19 @@ TEST_CASE(
   std::vector<int> received;
   sender.receiver = [&](test::Event) { received.push_back(0); };
   one.receiver = [&](test::Event event) {
-    received.push_back(event == test::Event::first ? 1 : 3);
-    if (event == test::Event::first) {
-      CHECK(scheduler.post(test::Event::second, &sender) == core::Status::ok);
+    received.push_back(std::holds_alternative<test::First>(event) ? 1 : 3);
+    if (std::holds_alternative<test::First>(event)) {
+      CHECK(scheduler.post(test::Second{}, &sender) == core::Status::ok);
     }
   };
   two.receiver = [&](test::Event event) {
-    received.push_back(event == test::Event::first ? 2 : 4);
-    if (event == test::Event::second) {
+    received.push_back(std::holds_alternative<test::First>(event) ? 2 : 4);
+    if (std::holds_alternative<test::Second>(event)) {
       scheduler.stop();
     }
   };
-  CHECK(scheduler.post(test::Event::first, &sender) == core::Status::ok);
-  CHECK(scheduler.post(test::Event::second) == core::Status::full);
+  CHECK(scheduler.post(test::First{}, &sender) == core::Status::ok);
+  CHECK(scheduler.post(test::Second{}) == core::Status::full);
   CHECK(scheduler.run() == core::Status::ok);
   REQUIRE(received.size() == 4);
   // No promise about recipient order, only complete first broadcast before

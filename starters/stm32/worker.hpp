@@ -8,7 +8,7 @@ namespace app {
 
 
   namespace core = daveos::core;
-  enum class Event {};
+  using Event = std::variant<std::monostate>;
 
   // Replace Poll's body with bounded application work. No hardware is touched
   // during construction, and no init override is needed just to start a task.

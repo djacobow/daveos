@@ -7,7 +7,8 @@
 - [x] Smoke-test Application composition on H563: UART/USB/TCP commands, timers, button reads, LED command acknowledgements, statistics, large ping, TCP reconnect, and software-reset recovery.
 - [x] Add passive Application composition with post-init command binding and declarative periodic tasks with compile-time intervals and explicit overrides.
 - [x] Pin both starters to the tested application/console API commit.
-- [ ] Support application-defined payload events (`std::variant` or a tagged class) alongside enum events. Use `post(const Event&, void* sender = nullptr)` and `on_event(const Event&)`, copying into the fixed-capacity queue; receiver references last only for the callback. Initially require trivially copyable, nonthrowing default-constructible and copy-assignable event types with small, allocation-free payloads. Preserve broadcast behavior, sender exclusion, and interrupt-safe posting; document the largest-alternative storage cost and test payload delivery and queue overflow.
+- [x] Replace enum events with allocation-free std::variant payloads, typed DAVEOS_EVENT registration, and an explicit visitor fallback; preserve interrupt-safe copied broadcast delivery.
+- [ ] Advance both starter wrap pins to the variant-event implementation commit when releasing this change.
 - [x] Add clang-format configuration consistent with PROJECT.md and a formatting check.
 - [x] Add cppcheck configuration and a lint command; integrate both checks into CI.
 - [x] Implement the STM32H563 platform, CubeMX startup/linker integration, and DaveOS LED example.

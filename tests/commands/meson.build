@@ -7,7 +7,7 @@ test('commands', exe, suite: 'unit', timeout: 20)
 cpp = meson.get_compiler('cpp')
 registration_check = '''
   #include "core/command/command.hpp"
-  enum class Event {};
+  using Event = std::variant<std::monostate>;
   namespace core = daveos::core;
   struct Example : core::Module<Example, Event> {
     static constexpr const char* name() { return "example"; }
@@ -35,7 +35,7 @@ foreach descriptor, expected : {
 endforeach
 names_check = '''
   #include "core/command/command.hpp"
-  enum class Event {};
+  using Event = std::variant<std::monostate>;
   namespace core = daveos::core;
   template <int N> struct Example : core::Module<Example<N>, Event> {
     static constexpr const char* name() { return N == 0 ? "one" : @0@; }
@@ -69,8 +69,9 @@ event_check = '''
   #include "core/schedule/scheduler.hpp"
   #include "platform/fake/platform.h"
   namespace core = daveos::core;
-  enum class Event {};
-  enum class Other {};
+  using Event = std::variant<std::monostate>;
+  struct OtherPayload {};
+  using Other = std::variant<OtherPayload>;
   struct Example : core::Module<Example, @0@> {
     static constexpr const char* name() { return "example"; }
     void Task() {}

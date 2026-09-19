@@ -23,8 +23,10 @@ cd /tmp/my-device
 
 Install Meson, Ninja, Python 3, and an ARM C/C++20 compiler with newlib if needed.
 The commands below assume `arm-none-eabi-*` tools are on PATH.
-For a published checkout instead of a symlink, run `meson subprojects download`
-from the copied project; the wrap revision pins the tested API commit.
+The variant-event update in the current working tree requires the matching local
+DaveOS checkout. Until its release commit is pinned in `subprojects/daveos.wrap`,
+use that checkout as `subprojects/daveos` instead of downloading the older wrap
+revision (which still expects enum events).
 
 Initialize the board's HAL/CMSIS submodules in the DaveOS checkout. For H563:
 

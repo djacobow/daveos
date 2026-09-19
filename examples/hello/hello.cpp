@@ -16,7 +16,7 @@ namespace core = daveos::core;
 namespace app {
   using std::chrono_literals::operator""ms;
 
-  enum class Event { hello };
+  using Event = std::variant<std::monostate>;
 
   class Hello final : public core::Module<Hello, Event> {
    public:

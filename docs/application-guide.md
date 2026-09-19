@@ -13,7 +13,7 @@ callbacks run to completion.
 
 namespace core = daveos::core;
 using std::chrono_literals::operator""ms;
-enum class Event {};
+using Event = std::variant<std::monostate>;
 
 class Worker : public core::Module<Worker, Event> {
  public:
@@ -127,8 +127,9 @@ DaveOS exports `daveos-core`, `daveos-console`, selected platform dependencies, 
 `daveos-network` when networking is enabled. Host builds also export the fake
 platform. The starter's `dependency(..., fallback: ...)` calls show how to consume
 them. Disable DaveOS's own examples/tests for a small consumer build; your own
-application tests can use the fake platform without Catch2. The starter pins its
-wrap revision to a tested commit; keep upgrades pinned too. For a device
+application tests can use the fake platform without Catch2. Starter wrap revisions must pin a compatible tested commit; keep upgrades pinned
+too. The variant-event update currently requires the local checkout until those
+pins advance, as described in the starter READMEs. For a device
 application, use [the STM32 starter](../starters/stm32/README.md):
 its board dependency supplies CPU/ABI flags, startup, linker, and HAL settings.
 Custom boards supply their own equivalents.
@@ -137,3 +138,12 @@ For the guided progression, start with [hello](01-hello.md). Use
 [host::stdout_subscriber and host::run](02-logging-and-commands.md) for standard
 host output and exit handling, and [Console](03-hardware-console.md) for reusable
 STM32 transport registration.
+
+## Events with payloads
+
+Use an application-defined `std::variant` of small payload structs. A module's
+`events()` tuple registers `DAVEOS_EVENT(Module, Handler)` entries; the handler's
+`const Payload&` parameter selects the alternative it receives. Other alternatives
+are ignored. `scheduler().post(payload, this)` copies the value and excludes the
+sender. See [payload events](reference.md#payload-events) for a complete example,
+validation rules, and the explicit `std::visit` alternative.

@@ -330,7 +330,7 @@ TEST_CASE("Invalid frames do not poison later input") {
 
 TEST_CASE("Network configuration is acquired during stage1") {
 
-  enum class Event {};
+  using Event = std::variant<std::monostate>;
   Fake driver;
   daveos::platform::fake::Platform platform;
   net::Service service(driver.driver(), driver.clock());
@@ -355,7 +355,7 @@ TEST_CASE("Network configuration is acquired during stage1") {
 }
 
 TEST_CASE("Networking hardware failure leaves unrelated module running") {
-  enum class Event {};
+  using Event = std::variant<std::monostate>;
   Fake driver;
   driver.init_ok = false;
   net::Service s(driver.driver(), driver.clock());
@@ -526,7 +526,7 @@ TEST_CASE("TCP server isolates clients and bounds session buffers") {
 }
 
 namespace {
-  enum class ConsoleEvent {};
+  using ConsoleEvent = std::variant<std::monostate>;
   using TestPlatform = daveos::platform::fake::Platform;
 
   struct Receiver : daveos::core::Module<Receiver, ConsoleEvent> {

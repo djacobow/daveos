@@ -242,7 +242,7 @@ TEST_CASE(
 
     std::function<void()> action;
 
-    void on_event(test::Event) { action(); }
+    void on_event(const test::Event&) { action(); }
 
     core::Status Exit(core::CommandArguments args) {
       return args.empty() ? scheduler().stop() : core::Status::invalid_argument;
@@ -256,7 +256,7 @@ TEST_CASE(
   module.action = [&] {
     CHECK(dispatcher.dispatch("console exit") == core::Status::ok);
   };
-  CHECK(scheduler.post(test::Event::first) == core::Status::ok);
+  CHECK(scheduler.post(test::First{}) == core::Status::ok);
   CHECK(scheduler.run() == core::Status::ok);
   CHECK(scheduler.snapshot().tasks.empty());
 }

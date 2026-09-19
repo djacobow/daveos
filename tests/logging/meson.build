@@ -7,7 +7,7 @@ cpp = meson.get_compiler('cpp')
 if cpp.get_id() in ['gcc', 'clang', 'apple-clang']
   format_check = '''
     #include "core/schedule/module.hpp"
-    enum class Event { sample };
+    using Event = std::variant<std::monostate>;
     template <typename E>
     struct Example : daveos::core::Module<Example<E>, E> {
       void check() {

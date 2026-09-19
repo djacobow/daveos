@@ -1,3 +1,4 @@
+#include <cinttypes>
 #include <cstdint>
 #include <cstdio>
 
@@ -16,7 +17,11 @@ namespace core = daveos::core;
 
 namespace app {
 
-  enum class Event { pulse };
+  struct Pulse {
+    std::uint32_t sequence = 0;
+  };
+
+  using Event = std::variant<Pulse>;
 
   class Producer final : public core::Module<Producer, Event> {
    public:
@@ -40,7 +45,7 @@ namespace app {
     void pulse() {
       ++count_;
       I_("pulse %u", count_);
-      scheduler().post(Event::pulse, this);
+      scheduler().post(Pulse{count_}, this);
       if (count_ == 3) {
         scheduler().cancel(*this, &Producer::pulse);
         scheduler().timer(500, FinishTimer);
@@ -70,9 +75,19 @@ namespace app {
           core::TaskDescriptor<Consumer>{"report", &Consumer::report}};
     }
 
-    void on_event(Event) { scheduler().schedule(*this, &Consumer::report, 0); }
+    static constexpr auto events() {
+      return std::tuple{DAVEOS_EVENT(Consumer, OnPulse)};
+    }
 
-    void report() { I_("received pulse"); }
+    void OnPulse(const Pulse& pulse) {
+      sequence_ = pulse.sequence;
+      scheduler().schedule(*this, &Consumer::report, 0);
+    }
+
+    void report() { I_("received pulse %" PRIu32, sequence_); }
+
+   private:
+    std::uint32_t sequence_ = 0;
   };
 
   // Passive module construction; scheduler init() binds and initializes them.

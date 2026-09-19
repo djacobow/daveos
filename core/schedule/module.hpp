@@ -10,6 +10,7 @@
 #include <type_traits>
 
 #include "core/command/arguments.hpp"
+#include "core/event/event.hpp"
 #include "core/logging/log.hpp"
 #include "duration.hpp"
 
@@ -84,12 +85,14 @@ namespace daveos::core {
   // scheduler's lifetime.
   template <typename Event>
   class SchedulerInterface {
-    static_assert(std::is_enum_v<Event>);
+    static_assert(core::EventType<Event>,
+                  "events require a std::variant of unique, trivially "
+                  "copyable, nonthrowing payload types");
 
     struct Operations {
       Status (*schedule)(void*, void*, std::size_t, Time, Mode);
       Status (*cancel)(void*, void*, std::size_t);
-      Status (*post)(void*, Event, void*);
+      Status (*post)(void*, const Event&, void*);
       Status (*timer)(void*, Time, const TimerCallback&);
       Status (*cancel_timer)(void*, const TimerCallback&);
       Status (*stop)(void*);
@@ -114,7 +117,7 @@ namespace daveos::core {
             [](void* self, void* module, std::size_t index) {
               return static_cast<Impl*>(self)->CancelSlot(module, index);
             },
-            [](void* self, Event event, void* sender) {
+            [](void* self, const Event& event, void* sender) {
               return static_cast<Impl*>(self)->post(event, sender);
             },
             [](void* self, Time delay, const TimerCallback& callback) {
@@ -209,10 +212,19 @@ namespace daveos::core {
       return Status::not_found;
     }
 
-    // Queue an enum-only broadcast, optionally excluding a registered sender.
+    // Copy a variant broadcast, optionally excluding a registered sender.
     // Accepted before run() and from interrupts; full rejects the newest event.
-    Status post(Event event, void* sender = nullptr) {
+    Status post(const Event& event, void* sender = nullptr) {
       return operations_->post(object_, event, sender);
+    }
+
+    template <typename Payload>
+      requires(!std::same_as<Payload, Event>)
+    Status post(const Payload& payload, void* sender = nullptr) {
+      static_assert(
+          EventAlternative<Payload, Event>,
+          "posted payload must be an alternative of the application variant");
+      return post(Event{std::in_place_type<Payload>, payload}, sender);
     }
 
     // Interrupt-context one-shot, available only while running. Delay must be
@@ -283,7 +295,10 @@ namespace daveos::core {
     template <typename, typename, std::size_t, std::size_t>
     friend class CommandDispatcher;
 
-    // Dispatcher-only scope bridge; validates running state/interrupt context.
+    template <typename, typename>
+    friend class Module;
+
+    // Callback scope bridge; validates running state/interrupt context.
     Status Invoke(Context context, Status (*callback)(void*), void* argument) {
       return operations_->invoke(object_, context, callback, argument);
     }
@@ -299,6 +314,10 @@ namespace daveos::core {
   // registered module. Its name and object must outlive the scheduler.
   template <typename Derived, typename Event>
   class Module {
+    static_assert(core::EventType<Event>,
+                  "events require a std::variant of unique, trivially "
+                  "copyable, nonthrowing payload types");
+
    public:
     using EventType = Event;
 
@@ -317,7 +336,11 @@ namespace daveos::core {
     Status init(InitStage) { return Status::ok; }
 
     // Broadcast reception order between modules is unspecified.
-    void on_event(Event) {}
+    void on_event(const Event&) {}
+
+    // Named handlers are optional; alternatives absent from this tuple are
+    // ignored.
+    static constexpr auto events() { return std::tuple{}; }
 
     // A veto prevents sleeping but does not prevent the scheduler from waiting.
     bool can_sleep() { return true; }
@@ -363,12 +386,33 @@ namespace daveos::core {
       return static_cast<Derived*>(this)->init(stage);
     }
 
-    void receive(Event event) {
+    void receive(const Event& event) {
+      static constexpr auto handlers = Derived::events();
+      constexpr bool custom_visitor =
+          !std::is_same_v<decltype(&Derived::on_event),
+                          decltype(&Module::on_event)>;
       static_assert(
-          requires(Derived & module) {
-            { module.on_event(event) } -> std::same_as<void>;
-          }, "module on_event(Event) must return void");
-      static_cast<Derived*>(this)->on_event(event);
+          !custom_visitor || std::tuple_size_v<decltype(handlers)> == 0,
+          "use either events() registration or on_event(const Event&), not "
+          "both");
+      if constexpr (custom_visitor) {
+        using Visitor = detail::EventMember<decltype(&Derived::on_event)>;
+        static_assert(std::same_as<typename Visitor::Payload, Event>,
+                      "on_event must take const Event&");
+        static_cast<Derived*>(this)->on_event(event);
+      } else {
+        static_assert(detail::ValidEventHandlers<Derived, Event>(handlers),
+                      "invalid event handler metadata");
+        std::visit(
+            [&](const auto& payload) {
+              std::apply(
+                  [&](const auto&... handler) {
+                    (Deliver(handler, payload), ...);
+                  },
+                  handlers);
+            },
+            event);
+      }
     }
 
     bool permits_sleep() {
@@ -383,6 +427,25 @@ namespace daveos::core {
     ~Module() = default;
 
    private:
+    template <typename Handler, typename Payload>
+    void Deliver(const Handler& handler, const Payload& payload) {
+      if constexpr (std::same_as<typename Handler::Payload, Payload>) {
+        struct Call {
+          Derived& owner;
+          const Payload& payload;
+        } call{*static_cast<Derived*>(this), payload};
+
+        scheduler_->Invoke(
+            {Derived::name(), handler.name},
+            [](void* argument) {
+              auto& call = *static_cast<Call*>(argument);
+              (call.owner.*Handler::callback)(call.payload);
+              return Status::ok;
+            },
+            &call);
+      }
+    }
+
     SchedulerInterface<Event>* scheduler_ = nullptr;
   };
 

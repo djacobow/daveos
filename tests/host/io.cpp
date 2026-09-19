@@ -6,7 +6,7 @@
 
 namespace core = daveos::core;
 namespace host = daveos::platform::host;
-enum class Event {};
+using Event = std::variant<std::monostate>;
 
 struct Hello : core::Module<Hello, Event> {
   static constexpr const char* name() { return "hello"; }

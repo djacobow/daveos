@@ -14,7 +14,12 @@ namespace testing {
   namespace core = daveos::core;
 
   using Fake = daveos::platform::fake::Platform;
-  enum class Event { first, second };
+
+  struct First {};
+
+  struct Second {};
+
+  using Event = std::variant<First, Second>;
 
   template <std::size_t N>
   struct TestName {
@@ -29,7 +34,7 @@ namespace testing {
 
     std::function<core::Status(core::InitStage)> initializer;
     std::function<void()> first_action, second_action, third_action;
-    std::function<void(Event)> receiver;
+    std::function<void(const Event&)> receiver;
     bool sleep = true;
 
     static constexpr auto tasks() {
@@ -43,7 +48,7 @@ namespace testing {
       return initializer ? initializer(stage) : core::Status::ok;
     }
 
-    void on_event(Event event) {
+    void on_event(const Event& event) {
       if (receiver) {
         receiver(event);
       }

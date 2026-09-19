@@ -55,7 +55,7 @@ TEST_CASE(
       platform, core::ModuleList{&module}, logger);
   module.first_action = [&] {
     scheduler.log(core::Level::info, "value=%d", 42);
-    scheduler.post(test::Event::first);
+    scheduler.post(test::First{});
   };
   module.receiver = [&](test::Event) { scheduler.stop(); };
   allocations = 0;
@@ -239,4 +239,47 @@ TEST_CASE(
   CHECK(worker.stopped == core::Status::ok);
   CHECK(worker.calls == 1);
   CHECK(logs == unsigned(DAVEOS_LOGGING));
+}
+
+TEST_CASE(
+    "typed payload delivery and handler logging allocate no heap storage") {
+  struct Payload {
+    std::array<std::uint32_t, 8> data{};
+  };
+
+  using Event = std::variant<Payload>;
+
+  struct Receiver : core::Module<Receiver, Event> {
+    static constexpr const char* name() { return "receiver"; }
+
+    static constexpr auto events() {
+      return std::tuple{DAVEOS_EVENT(Receiver, Receive)};
+    }
+
+    void Receive(const Payload& payload) {
+      received = payload.data[7];
+      I_("received payload");
+      scheduler().stop();
+    }
+
+    std::uint32_t received = 0;
+  } module;
+
+  test::Fake platform;
+  auto logger = core::make_logger(
+      platform, core::SubscriberList{core::Subscriber{
+                    nullptr, [](void*, const core::LogRecord&) {}}});
+  auto scheduler =
+      core::make_scheduler<Event>(platform, core::ModuleList{&module}, logger);
+  Payload payload;
+  payload.data[7] = 42;
+  allocations = 0;
+  counting = true;
+  const auto posted = scheduler.post(payload);
+  const auto ran = scheduler.run();
+  counting = false;
+  CHECK(posted == core::Status::ok);
+  CHECK(ran == core::Status::ok);
+  CHECK(module.received == 42);
+  CHECK(allocations == 0);
 }
