@@ -40,6 +40,10 @@ int main() {
 '''
 foreach item : [
   ['auto app = core::make_application(platform, modules);', true],
+  ['auto app = core::make_application<core::Capacities{.events = 2}>(platform, modules);', true],
+  ['auto app = core::make_application<core::Capacities{.events = 2}, core::NoEvent>(platform, modules);', true],
+  ['auto app = core::make_application<core::Capacities{}>(platform, modules, bad);', false],
+  ['auto app = core::make_application<core::Capacities{}>(platform, modules, bad, sources);', false],
   ['auto app = core::make_application<core::NoEvent, core::Capacities{.events = 2}>(platform, modules);', true],
   ['auto app = core::make_application(platform, modules, bad);', false],
   ['auto app = core::make_application(platform, modules, bad, sources);', false],

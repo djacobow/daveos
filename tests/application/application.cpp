@@ -303,20 +303,19 @@ TEST_CASE(
         }
       };
       if (logging && commands) {
-        auto app = core::make_application<core::NoEvent, capacities>(
-            platform, modules, logger, sources);
+        auto app = core::make_application<capacities>(platform, modules, logger,
+                                                      sources);
         check(app);
       } else if (logging) {
-        auto app = core::make_application<core::NoEvent, capacities>(
-            platform, modules, logger);
+        auto app =
+            core::make_application<capacities>(platform, modules, logger);
         check(app);
       } else if (commands) {
-        auto app = core::make_application<core::NoEvent, capacities>(
-            platform, modules, sources);
+        auto app =
+            core::make_application<capacities>(platform, modules, sources);
         check(app);
       } else {
-        auto app = core::make_application<core::NoEvent, capacities>(platform,
-                                                                     modules);
+        auto app = core::make_application<capacities>(platform, modules);
         check(app);
       }
     }

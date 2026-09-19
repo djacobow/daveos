@@ -241,7 +241,8 @@ namespace daveos::core {
       result.friendly = F;
       static_assert(
           !(low || high) || sizeof(T) <= sizeof(std::uint32_t),
-          "bounded parameters must be integers up to 32 bits or float");
+          "bounded parameters must be integers up to 32 bits or float; "
+          "use a 32-bit integer or float, or handle bounds in the handler");
       if constexpr (std::is_enum_v<T>) {
         if constexpr (!std::is_same_v<C, void>) {
           ChoiceMetadata<T, C::entries>(result);
@@ -473,7 +474,8 @@ namespace daveos::core {
   struct CommandDescriptor {
     const char* name;
     const char* help;
-    Status (*callback)(M&, CommandArguments, CommandParameters, ArgumentError&);
+    Status (*callback)(M&, CommandArguments, const CommandParameters&,
+                       ArgumentError&);
     const char* handler;
     Storage arguments{};
     std::size_t count = 0;
@@ -488,7 +490,7 @@ namespace daveos::core {
   namespace detail {
     template <auto Function, typename Tuple, std::size_t... I>
     Status Invoke(typename Signature<decltype(Function)>::Owner& owner,
-                  CommandArguments args, CommandParameters descriptor,
+                  CommandArguments args, const CommandParameters& descriptor,
                   ArgumentError& error, std::index_sequence<I...>) {
       Tuple values{};
       [[maybe_unused]] auto parse = [&]<std::size_t Index>() {
@@ -545,16 +547,17 @@ namespace daveos::core {
         constexpr auto declarations = M::commands();
         std::array<Descriptor, declarations.size()> result{};
         std::size_t offset = 0;
-        for (std::size_t i = 0; i < result.size(); ++i) {
-          const auto& command = declarations[i];
-          result[i] = {command.name,
-                       command.help,
-                       command.callback,
-                       command.handler,
-                       std::span<const ArgumentMetadata>(arguments).subspan(
-                           offset, command.count),
-                       command.count,
-                       command.required};
+        std::size_t index = 0;
+        for (const auto& command : declarations) {
+          result[index++] = {
+              command.name,
+              command.help,
+              command.callback,
+              command.handler,
+              std::span<const ArgumentMetadata>(arguments).subspan(
+                  offset, command.count),
+              command.count,
+              command.required};
           offset += command.count;
         }
         return result;
@@ -580,7 +583,8 @@ namespace daveos::core {
     CommandDescriptor<M> result{name, help, nullptr,
                                 detail::HandlerLabel<Function>.data()};
     if constexpr (raw) {
-      result.callback = [](M& owner, CommandArguments args, CommandParameters,
+      result.callback = [](M& owner, CommandArguments args,
+                           const CommandParameters&,
                            ArgumentError&) { return (owner.*Function)(args); };
     } else if constexpr (sizeof...(A) == count &&
                          count <= CommandParameterCapacity) {
@@ -602,7 +606,8 @@ namespace daveos::core {
         }
       }
       result.callback = [](M& owner, CommandArguments args,
-                           CommandParameters descriptor, ArgumentError& error) {
+                           const CommandParameters& descriptor,
+                           ArgumentError& error) {
         if (args.size() < descriptor.required ||
             args.size() > descriptor.count) {
           error.reason = "wrong argument count";

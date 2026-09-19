@@ -763,7 +763,8 @@ underflow/overflow, hexadecimal forms, whitespace, and trailing text. Conversion
 uses `std::from_chars` and is locale independent. Bounds are validated and
 converted to the parameter type at compile time; bounded `int64_t`, `uint64_t`,
 and `double` parameters are compile errors (including optional forms), while
-unbounded parsing of those types remains supported. Integer bounds must be integral
+unbounded parsing of those types remains supported. The diagnostic recommends
+a 32-bit integer or float, or checking bounds inside the handler. Integer bounds must be integral
 and representable. Friendly boolean aliases are ASCII case-insensitive; strict
 booleans are exactly lowercase `true` and `false`. Borrowed `std::string_view`
 parameters are also supported, including optional text.
@@ -784,6 +785,9 @@ The application handlers use typed parameters: board LED takes a bounded 1–3
 index and a `LedAction` enum (`on`, `off`, or `toggle`), and network
 status/host exit take no arguments. Host echo deliberately remains a raw handler
 because it accepts an arbitrary number of tokens within the dispatcher limit.
+The default token buffer changed from 16 to 8; this also reduces the default
+raw-handler limit to six data arguments. A raw command with ten arguments needs
+a token capacity of at least 12, otherwise it fails before handler invocation.
 The typed six-parameter limit is independent of the configurable token buffer,
 which also holds the module/command names. The board timer accepts 1 through
 UINT32_MAX microseconds (about 71 minutes).
@@ -1127,6 +1131,10 @@ because its members refer to each other; the factory returns a prvalue using
 C++17 guaranteed copy elision. File-scope instances remain supported. Include `core/schedule/application.hpp`.
 The application factory takes a named structural configuration as its second
 template argument: `make_application<Event, Capacities{.events = 64}>(...)`.
+Capacity-only calls may use `make_application<Capacities{.events = 64}>(...)`,
+defaulting to NoEvent; an optional Event type may follow the capacity. This is
+a constrained forwarding form of the same factories, preserving service and
+logger validation.
 `Capacities` defaults to `events=32`, `timers=16`, `line=256`, and `arguments=8`.
 Command capacities apply when command sources are attached. The lower-level
 `make_scheduler` retains its event/timer numeric capacity arguments. Application

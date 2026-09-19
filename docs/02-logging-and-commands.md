@@ -131,3 +131,9 @@ Typed handlers accept at most six parameters. Numeric bounds apply to integers
 up to 32 bits and `float`; unbounded 64-bit integer and `double` parameters remain
 supported. Optional parameters follow the same rules. The dispatcher's separate
 token capacity includes module/command names and also limits raw handlers.
+
+The default token buffer shrank from 16 to 8. Raw handlers therefore accept at
+most six data arguments by default too. To retain a raw command with ten
+arguments, use `make_application<core::Capacities{.arguments = 12}>(...)`
+for a NoEvent application, or pass that capacity with the application's Event
+type. This changes the token buffer, not the typed six-parameter limit.

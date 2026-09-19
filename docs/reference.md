@@ -1106,14 +1106,16 @@ auto app = core::make_application<Event, core::Capacities{.events = 64}>(
 
 The fields are `events`, `timers`, `line`, and `arguments`, defaulting to
 32, 16, 256, and 8. Command capacities apply only with command sources.
-For event-free applications omit the event argument, or specify `core::NoEvent`
-when providing a capacity configuration. Logger overloads enforce the complete
+For event-free applications omit the event argument:
+`make_application<core::Capacities{.events = 64}>(platform, modules)`.
+Both capacity-first (optionally followed by Event) and Event-first forms are
+available. Logger overloads enforce the complete
 `LoggerFor<L, P>` contract. Low-level `make_scheduler` numeric capacities are unchanged.
 
 ### Command storage measurements
 
 With the ARM toolchain and H563 debug (`-O0`) configuration, enabling logging,
-UART, USB, networking, and TCP, the review changes reduced ELF text+data from
+UART, USB, networking, and TCP, commit `88f03b5` reduced ELF text+data from
 332,292 to 325,276 bytes and BSS from 162,008 to 161,944 bytes. These are build
 measurements, not hardware validation or release-optimization measurements.
 
@@ -1122,3 +1124,16 @@ is 32 bytes. The six-parameter declaration builder is 192 bytes, but the dispatc
 stores only the compact descriptors and actual argument entries. Help and dispatch
 share those entries. Type labels remain shared string pointers: replacing them
 with tags made individual records smaller but increased this firmware's code size.
+
+### Migrating commands with many raw arguments
+
+The default changed from 16 tokens to 8, **including raw `CommandArguments`
+handlers**. Module and command names consume two tokens, so ten raw arguments
+require at least `.arguments = 12` in the application's `Capacities`, or a token
+capacity of 12 on a directly constructed `CommandDispatcher`. Otherwise dispatch
+returns `too_many_arguments` without invoking the handler. Typed handlers remain
+limited to six parameters even with a larger token buffer.
+
+Bounds on 64-bit integer or `double` parameters are compile errors. Use a 32-bit
+integer or `float`, or parse the wide value without bounds metadata and check its
+range inside the handler.

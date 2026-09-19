@@ -304,3 +304,21 @@ TEST_CASE("A dispatcher can register no command sources") {
   f.Run(
       [&] { CHECK(dispatcher.dispatch("motor speed 1") == core::Status::ok); });
 }
+
+TEST_CASE("raw handlers can explicitly raise the default six-argument limit") {
+  Fixture f;
+  std::size_t count = 0;
+  f.motor.action = [&](core::CommandArguments args) {
+    count = args.size();
+    return core::Status::ok;
+  };
+  f.Run([&] {
+    constexpr auto line = "motor speed 1 2 3 4 5 6 7 8 9 10";
+    CHECK(f.dispatcher.dispatch(line) == core::Status::too_many_arguments);
+    CHECK(count == 0);
+    core::CommandDispatcher<test::Event, Fixture::List, 256, 12> larger(
+        f.modules, f.scheduler);
+    CHECK(larger.dispatch(line) == core::Status::ok);
+    CHECK(count == 10);
+  });
+}

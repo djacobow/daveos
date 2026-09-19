@@ -109,7 +109,9 @@ auto app = core::make_application<Event, capacity>(platform, modules, sources);
 Omitted fields retain their defaults: 32 events, 16 timers, 256 line bytes,
 and 8 tokens including prefix and command. For a program without events,
 `core::Module<Worker>` and `core::make_application(platform, modules)` default
-to `core::NoEvent`. Use `core::NoEvent` explicitly when supplying capacities.
+to `core::NoEvent`. For capacity-only tuning, use
+`core::make_application<core::Capacities{.events = 64}>(platform, modules)`.
+This form defaults to `core::NoEvent`; the Event-first form remains available.
 Logger arguments must satisfy `core::LoggerFor<Logger, Platform>`;
 logging and command sources remain independent.
 
@@ -156,3 +158,21 @@ Use an application-defined `std::variant` of small payload structs. A module's
 are ignored. `scheduler().post(payload, this)` copies the value and excludes the
 sender. See [payload events](reference.md#payload-events) for a complete example,
 validation rules, and the explicit `std::visit` alternative.
+
+## Command-limit migration
+
+The default token capacity changed from 16 to 8, counting the module and command
+names. This affects raw `CommandArguments` handlers too: a command with ten data
+arguments now returns `too_many_arguments` before calling its handler. For an
+event-free application that needs ten raw arguments, raise capacity explicitly:
+
+```cpp
+auto app = core::make_application<core::Capacities{.arguments = 12}>(
+    platform, modules, sources);
+```
+
+With application events, use `make_application<Event, capacity>(...)` (or
+`make_application<capacity, Event>(...)`). Raising token capacity does not raise
+the six-parameter limit for typed handlers. For 64-bit integer or `double`
+parameters, omit `.min()`, `.max()`, and `.range()` and check bounds in the handler,
+or change the bounded parameter to a 32-bit integer or `float`.

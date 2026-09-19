@@ -1,5 +1,7 @@
 #pragma once
 
+#include <utility>
+
 #include "core/command/command.hpp"
 #include "core/command/source.hpp"
 #include "scheduler.hpp"
@@ -156,6 +158,16 @@ namespace daveos::core {
     (void)logger;
     return make_application<Event, Capacity>(platform, modules, sources);
 #endif
+  }
+
+  // Capacity-first shorthand defaults to NoEvent and preserves all service
+  // combinations and validation from the explicit Event-first factories.
+  template <Capacities Capacity, typename Event = NoEvent, typename... Args>
+    requires requires(Args&&... args) {
+               make_application<Event, Capacity>(std::forward<Args>(args)...);
+             }
+  auto make_application(Args&&... args) {
+    return make_application<Event, Capacity>(std::forward<Args>(args)...);
   }
 
 

@@ -109,9 +109,9 @@ void InstantiateApplication(CompilePlatform& platform) {
   Example module;
   core::CommandSource source;
   auto logger = core::make_logger(platform, core::SubscriberList{});
-  auto app =
-      core::make_application<Event>(platform, core::ModuleList{&module}, logger,
-                                    core::CommandSourceList{source});
+  auto app = core::make_application<core::Capacities{.events = 8}, Event>(
+      platform, core::ModuleList{&module}, logger,
+      core::CommandSourceList{source});
   (void)app.run();
   (void)app.initialization_failure();
 }
