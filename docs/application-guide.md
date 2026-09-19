@@ -2,15 +2,18 @@
 
 Start from [`starters/application`](../starters/application/README.md) for a
 separate Meson project with a host executable and a fake-time test. The framework
-still uses explicit ownership and fixed capacities: constructors store references
+uses explicit ownership and fixed capacities: module constructors store references
 and metadata, all modules finish stage1 before any module begins stage2, and
 callbacks run to completion.
 
 ## Tasks and time units
 
 ```cpp
+#include "core/schedule/module.hpp"
+
 namespace core = daveos::core;
 using std::chrono_literals::operator""ms;
+enum class Event {};
 
 class Worker : public core::Module<Worker, Event> {
  public:
@@ -111,6 +114,7 @@ DaveOS exports `daveos-core`, `daveos-console`, selected platform dependencies, 
 platform. The starter's `dependency(..., fallback: ...)` calls show how to consume
 them. Disable DaveOS's own examples/tests for a small consumer build; your own
 application tests can use the fake platform without Catch2. Pin the wrap revision
-to a tested commit. Device startup, peripheral setup, linker scripts, and board
+to a tested commit. The starter covers host/fake only. Device startup, application
+CPU/ABI compiler and linker flags, peripheral setup, linker scripts, and board
 HAL selection remain the application's responsibility; the shared STM32 console
 provides a worked example.

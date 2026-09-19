@@ -1,8 +1,9 @@
 # A small DaveOS application
 
-Copy this directory into a new repository. It contains one module, a real-time
-host executable, and a fake-time test of the same module. All constructors are
-passive; the scheduler runs stage1 for every module before any stage2 callback.
+Copy this directory into a new repository and run the commands below from that
+repository's root. It contains one module, a real-time host executable, and a
+fake-time test of the same module. Application module constructors are passive;
+the scheduler runs stage1 for every module before any stage2 callback.
 
 ```sh
 meson setup build/host
@@ -14,8 +15,10 @@ meson test -C build/host --print-errorlogs
 The first setup downloads DaveOS through `subprojects/daveos.wrap`. Pin its
 `revision` to a tested commit for reproducible application builds. For local
 DaveOS development, place a checkout (or symlink) at `subprojects/daveos`
-before setup; no download is then needed. These commands need Meson, Ninja,
-and a C++20 compiler, but do not download DaveOS's own test dependencies.
+before setup; no download is then needed. The real-time host platform starts its
+timer thread when constructed in `main()`; module initialization waits for `run()`.
+These commands need Meson, Ninja, and a C++20 compiler, but do not download
+DaveOS's own test dependencies.
 
 The starter has no logging or commands. Add an application-owned logger to
 `make_scheduler` when needed. For commands, construct a dispatcher and register

@@ -1,10 +1,11 @@
 # DaveOS
 
 A C++20 cooperative scheduler for embedded applications. [PROJECT.md](PROJECT.md)
-is the behavioral specification. The initial implementation supplies real-time
-Linux host and deterministic fake-time platforms, STM32H563/H755 adapters and
-CubeMX-based LED example, an optional logging service, and command dispatch with
-an interactive host console.
+is the behavioral specification. The implementation provides real-time Linux
+host and deterministic fake-time platforms, STM32H563/H755 adapters, optional logging and command dispatch, and
+standalone application starter files. One shared STM32 console supports both
+Nucleo boards, with independently selectable UART, USB CDC, and TCP transports
+and optional lwIP Ethernet networking.
 
 ## Build and run
 
@@ -103,8 +104,8 @@ bodies require braces (`InsertBraces: true`); clang-format applies this to
 Use short namespace aliases (for example, `namespace core = daveos::core;`)
 and qualified names instead of namespace-wide using directives.
 The helper prefers `clang-format-15`, falling back to `clang-format`. Lint checks
-production code and examples, including both platform configurations. The
-`duplInheritedMember` diagnostic is suppressed because CRTP intentionally hides
+production code, examples, and application starters, including both platform
+configurations. The `duplInheritedMember` diagnostic is suppressed because CRTP intentionally hides
 inherited defaults; other enabled warning, performance, and portability checks
 remain active. Test and downloaded framework sources are excluded from cppcheck.
 CubeMX-generated `Core/` files and copied `Drivers/` are excluded from both
@@ -150,7 +151,8 @@ To also build the DaveOS board console firmware:
 
 ```sh
 git submodule update --init platform/stm32/STM32_USB_Device_Library
-meson setup build/arm --cross-file meson/stm32.ini -Dexamples=true
+# Enable firmware in the build configured above.
+meson configure build/arm -Dexamples=true
 meson compile -C build/arm
 ```
 
@@ -163,7 +165,8 @@ meson setup --wipe build/arm --cross-file meson/stm32.ini \
   -Dc_args= -Dcpp_args= -Dc_link_args= -Dcpp_link_args=
 ```
 
-A fresh build directory needs only the setup command above.
+For a fresh firmware build, use
+`meson setup build/arm --cross-file meson/stm32.ini -Dexamples=true`.
 Both boards build the same `stm32-console` target. ELF, HEX, BIN, and map files
 are written under `build/arm/examples/stm32_console/` as `stm32-console.*`.
 The board-specific CubeMX files and peripheral glue live in
@@ -173,7 +176,7 @@ target. Use `-Dboard=h755` with the same cross file for the other board.
 Separate build directories are convenient, but `meson configure build/arm
 -Dboard=h755` followed by a rebuild also switches the board (initialize its
 vendor submodules first).
-The firmware now runs the same board console as H755: `help`,
+Both boards run the same console commands: `help`,
 `board led <1|2|3> <on|off|toggle>`, `board button`, `board stats`,
 `board timer <microseconds>`, and `board reset`.
 LEDs are PB0/PF4/PG4 and the button is PC13. USART3 uses PD8 TX / PD9 RX at
@@ -227,8 +230,9 @@ components, logger, scheduler, and dispatcher at file scope and calls
 for its platform, LED/button access, DMA storage/cache handling, and timer clock.
 The modules, logger, scheduler, dispatcher, and transport buffers live at file
 scope. Their constructors store references and metadata; UART/USB/network setup
-runs in stage1. The reusable `core::CommandBinding` module binds command sources in
-stage2, after every stage1 completes; `Board` only provides board commands.
+runs in stage1. `appmain()` connects the reusable `core::CommandBinding` module
+to the dispatcher before `run()`. The helper binds sources in stage2, after every
+stage1 completes; `Board` only provides board commands.
 The platform timer is initialized after CubeMX peripheral setup and before
 scheduler initialization. The `.ioc` and FLASH linker script retain a 64 KiB
 stack reservation, enforced by MSPLIM. This was raised to accommodate the old
@@ -252,7 +256,7 @@ The 32-bit hardware count is extended to 64-bit microseconds with the overflow
 interrupt. Long timers use intermediate compare deadlines. Critical sections
 save/restore PRIMASK and can nest; do not mask interrupts for an entire counter
 period (about 71 minutes), or call DaveOS from NMI/HardFault handlers. Logging
-from an ISR receives the `core/interrupt` context automatically.
+from an ISR receives the `core.interrupt` context automatically.
 
 Idle uses shallow WFI sleep with TIM2's sleep clock enabled, or polls when a
 module declines sleep. Deep sleep/Stop modes are not supported. The final idle
@@ -261,7 +265,8 @@ interrupts wake the core before their handlers run, as described in
 [Arm's power-management guidance](https://documentation-service.arm.com/static/5ef9ff27cafe527e86f55b47).
 SysTick remains the HAL timebase and may wake the CPU every millisecond.
 Embedded `stop()` is a no-op. Host register-model tests exercise the adapter's
-timer and interrupt logic; hardware timing and sleep validation remain to do.
+timer and interrupt logic. Initial H563 hardware checks passed; precision timing,
+extended sleep/wake behavior, and injected-error stress remain in TODO.md.
 
 ## Application structure
 
@@ -297,7 +302,10 @@ class Blinker : public core::Module<Blinker, Event> {
 };
 ```
 
-Construct a platform and modules before the scheduler. Without logging, use
+Own the platform and modules for the scheduler's lifetime and complete their
+construction before calling `init()` or `run()`. The scheduler constructor only
+records references and static metadata; it does not initialize modules. Without
+logging, use
 `make_scheduler<Event>(platform, ModuleList{&one, &two})`. The optional numeric
 template arguments now specify only event and timer slots, defaulting to `32, 16`.
 Task storage is inferred from module descriptors.
@@ -385,10 +393,24 @@ queries return `Result<T>` so a busy lock cannot be mistaken for an empty queue.
 Elements must support default construction and assignment without allocation or
 exceptions; interrupt callers must also keep element operations bounded.
 
-`timer(delay, callback)` and `cancel_timer(callback)` use `void (*)()` callbacks.
-Callbacks are identified by pointer equality and execute in interrupt context;
-use wrapper functions for separate timers. Zero delays are rejected. Pre-run timer
-requests return `not_running`; pre-run *task* schedules are retained instead.
+`timer(delay, callback)` and `cancel_timer(callback)` accept `TimerCallback`:
+a plain `void (*)()` function, a noncapturing lambda, or an object-bound member
+callback. Plain functions use pointer identity; bound callbacks use the object
+and member function. Modules can call `timer<&Type::Expired>(delay)` and
+`cancel_timer<&Type::Expired>()` without a global owner pointer. Separate objects
+can use the same member independently; repeated requests for one pair replace
+its pending timer. Bound objects must outlive pending and in-flight callbacks.
+
+Timers still execute in interrupt context. Delays accept raw microseconds or
+integral chrono durations; invalid conversions are rejected without changing
+pending work. Zero timer delays are invalid. Valid pre-run timer requests return
+`not_running`; pre-run *task* schedules are retained instead. See the
+[application guide](docs/application-guide.md) for examples and conversion rules.
+
+`init()` and `run()` return statuses marked `[[nodiscard]]`.
+`initialization_failure()` retains the first failure's status, module, and stage,
+including with logging disabled; a null module identifies registration validation.
+The STM32 application saves this snapshot and `app::last_status` before halting.
 
 ## Commands
 
@@ -536,13 +558,14 @@ needs sender pacing. FIFO setup runs during module stage1, after CubeMX setup,
 so regeneration cannot silently disable it. H563 hardware validation passed
 580 unpaced commands, including repeated 16-line, 4,112-byte bursts and
 overlength rejection followed by a valid command. H755 has build coverage only
-for the static-storage, initialization-wiring, and UART FIFO/queue changes; its
-earlier hardware results do not validate those changes.
+for the later static-storage, UART FIFO/queue, Meson board/component selection,
+and convenience-API changes; its earlier hardware results do not validate the
+current firmware. H563 has passed hardware smoke tests of the current firmware.
 Overlength lines are rejected, full queues drop entire lines, and UART errors
 discard input through the next terminator. Dropped input is reported via logging.
-Log records are queued in scheduler idle time, with timestamps, severity, module,
-and handler names and automatic CRLF. With `-Dlogging=false`, commands still
-execute but help and log output are silent. There is no exit command on embedded.
+Log calls queue records immediately with timestamps, severity, module, and
+handler names. Scheduler idle time delivers them to subscribers, which append
+CRLF. With `-Dlogging=false`, commands still execute but help and log output are silent. There is no exit command on embedded.
 
 USART3 output (logs and echo) uses DMA1 Stream 0, memory-to-peripheral, with
 normal byte transfers and the USART3 TX request. DMA completion enables the
@@ -577,17 +600,24 @@ Select transports independently (both default to enabled on H563 and H755):
 | USB only | `-Duart_console=false -Dusb_console=true` |
 | Neither | `-Duart_console=false -Dusb_console=false` |
 
-Application wiring uses parallel lists:
+Application wiring registers modules, subscribers, and sources explicitly.
+The shared example generates these lists for the selected components; the
+corresponding manual setup is:
 
 ```cpp
+auto commands = core::make_command_binding<Event>(
+    core::CommandSourceList{uart.command_source(), usb.command_source()});
+auto modules = core::ModuleList{&commands, &board, &uart, &usb};
 auto subscribers = core::SubscriberList{uart.subscriber(), usb.subscriber()};
 auto logger = core::make_logger(platform, subscribers);
 auto scheduler = core::make_scheduler<Event>(platform, modules, logger);
 core::CommandDispatcher dispatcher(modules, scheduler);
-// During application initialization, normally stage2:
-dispatcher.bind_sources(core::CommandSourceList{uart.command_source(),
-                                                usb.command_source()});
+// In the entry point, before init/run; binding itself happens in stage2:
+commands.connect(dispatcher);
 ```
+
+Include `core/command/binding.hpp` for the helper. Its module name is `commands`.
+Explicit `dispatcher.bind_sources(...)` wiring is also supported.
 
 `CommandSource` submits complete lines through `dispatch()`; the dispatcher owns
 the only tokenizer. An unregistered source returns `Status::not_running`.
@@ -621,8 +651,8 @@ These options are independent of `-Dlogging=false`.
 
 USB output reuses the bounded ping-pong buffer helper with two 4 KiB buffers.
 The USB peripheral moves data through its FIFO in interrupts, without DMA or
-heap allocation. `board stats` includes USB transfer/drop counters. Output while
-unconfigured or DTR-low is discarded; backpressure drops whole new frames when
+heap allocation (H563 uses packet memory rather than a FIFO). `board stats`
+includes USB transfer/drop counters. Output while unconfigured or DTR-low is discarded; backpressure drops whole new frames when
 buffers fill. DTR deassertion, bus reset, and disconnect clear unfinished input
 and queued USB output. UART remains available independently.
 
@@ -658,8 +688,8 @@ rate; remaining validation is tracked in [TODO.md](TODO.md).
 ## Fake time and host interrupts
 
 The fake platform defaults to automatic advancement. When idle it advances to the
-next task or timer deadline. `Fake::Advancement::manual` lets a test advance time
-with `advance(microseconds)` or inject an interrupt explicitly. Due timer callbacks
+next task or timer deadline. `Platform::Advancement::manual` in
+`daveos::platform::fake` lets a test advance time with `advance(microseconds)` or inject an interrupt explicitly. Due timer callbacks
 run synchronously in simulated interrupt context before advancement returns.
 An indefinite wait requires an external simulated interrupt in either mode.
 
@@ -687,7 +717,9 @@ meson test -C build/tsan --print-errorlogs
 ```
 
 GitHub Actions runs host/fake tests, a host build with logging disabled, sanitizers,
-format/lint checks, and the ARM core, H563 console, and H755 M7/M4 firmware builds. Allocation tests
+format/lint checks, and the ARM core, H563 console, and H755 M7/M4 firmware builds.
+It also tests the separate starter as a Meson consumer, invalid API uses at compile
+time, board switching, and independent STM32 transport/logging configurations. Allocation tests
 instrument C++ `new` during representative core operations in ordinary and ASan builds (TSan owns its own allocator interceptors);
 they do not certify allocator behavior inside every platform libc
 formatting implementation. ARM firmware must validate its chosen libc as well.
@@ -727,8 +759,9 @@ meson configure build/h755 \
 
 OpenOCD needs ST's H5/H7 target scripts and the `stlink-dap` interface; use the
 installed ST distribution for H5 support. `flash-plan` never contacts hardware.
-Command construction is tested automatically; actual programming still needs
-hardware validation.
+Command construction is tested automatically. OpenOCD/GDB programming and image
+verification have been exercised on both boards; those checks do not certify
+every programmer backend or probe configuration.
 
 ### Debugging the H755
 
@@ -754,7 +787,8 @@ owner’s preference. Selecting the fitted X2 crystal
 instead requires the solder-bridge/capacitor configuration in UM2408 section 7.9.1,
 plus corresponding 25 MHz crystal-mode firmware settings.
 
-Log output in all examples uses `[ddd:hh:mm:ss.mmm] L module.function: message`,
+The logging-enabled hello, system, host console, and STM32 examples use
+`[ddd:hh:mm:ss.mmm] L module.function: message`,
 with the context left aligned in 22 columns. Names longer than that are
 ellipsized for display; records retain their full names. Days expand past three
 digits after 999 days. `daveos::core::LogPrefix<Width>` supplies the shared prefix
@@ -777,7 +811,8 @@ negative values are supported, duplicate-value aliases are not. Values without
 a named enumerator return `"unknown"`. `daveos::core::Status` uses this mechanism,
 and command diagnostics print status names instead of numeric values.
 
-The H755 console echoes the pending line from its scheduled input task. Return
+The shared H563/H755 UART console echoes the pending line from its scheduled
+input task. Return
 clears that line with an ANSI erase-line sequence, then logs `> command` before
 dispatch. Backspace/Delete remove the last character. Incoming logs temporarily
 clear and redraw unfinished input. This is a single-line editor: use an ANSI
@@ -794,7 +829,8 @@ separately (padding the lower half to eight hex digits).
 ## Optional Ethernet networking
 
 `-Dnetworking=true` adds a separate lwIP-based network service and the `net`
-module to either STM32 demo. It is off by default and independent of logging,
+module to either board selection of the STM32 console. It is off by default
+and independent of logging,
 UART, and USB. No networking methods are added to the scheduler/platform API.
 Networking supports IPv4 ARP, ping, DHCP/static addressing, and a single-client
 TCP console. IPv6, DNS, TLS, fragmentation/reassembly, and a general connection
@@ -806,7 +842,7 @@ Initialize the additional pinned submodules and build:
 git submodule update --init net/lwip platform/stm32/lan8742
 meson setup build/net-h755 --cross-file meson/stm32.ini -Dboard=h755 -Dexamples=true -Dnetworking=true
 meson compile -C build/net-h755
-# H563: use build/net-h563 and meson/stm32.ini instead.
+# H563: use build/net-h563 and omit -Dboard=h755 (or set -Dboard=h563).
 ```
 
 Keep the regular HAL/CMSIS/USB dependency setup from the board sections above.
@@ -906,8 +942,8 @@ output overflow drops whole records (`dropped_output()` counts these drops).
 No logs are saved for disconnected clients. lwIP has fixed pools for one
 listener, four TCP PCBs (including handshakes), and 24 segments.
 
-H755 hardware checks passed for TCP `help`, `net status`, asynchronous timer
-logs, rejection of a second client, and reconnect after an unfinished command.
+Earlier H755 hardware checks passed for TCP `help`, `net status`, asynchronous
+timer logs, rejection of a second client, and reconnect after an unfinished command.
 Packet tests also cover a full receive window, complete-record output overflow,
 peer FIN/reset, and link-loss recovery. H563 has build coverage, including TCP
 without UART/USB/logging and networking without the TCP console. Its UART,
@@ -936,8 +972,8 @@ is returned only for consumed bytes, and consumption no longer shifts the
 remaining buffer. Tests cover command bursts, partial tails, ring wrap, and USB
 callback ownership across failed initialization, stop, and a new instance.
 
-After the console refactor, H755 hardware checks passed for USB commands,
-multiple TCP commands in one burst, completion of a partial command in a later
+Before the later board/composition and convenience-API changes, H755 hardware
+checks passed for USB commands, multiple TCP commands in one burst, completion of a partial command in a later
 packet, and delivery of USB-originated command logs to the TCP subscriber.
 
 

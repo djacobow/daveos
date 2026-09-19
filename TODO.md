@@ -5,7 +5,7 @@
 - [x] Implement the STM32H563 platform, CubeMX startup/linker integration, and DaveOS LED example.
 - [x] Bring H563 to H755 console parity with shared commands, UART echo, TX DMA, and reset.
 - [x] Validate H563 HSI boot, physical LEDs/button, UART commands, TX DMA, software reset, and 200 ms timer completion on NUCLEO-H563ZI.
-- [ ] Stress H563 UART error recovery, DMA overflow, timing accuracy, and extended sleep/wake behavior.
+- [ ] Stress injected H563 UART errors and DMA overflow/recovery, precision timing, and extended sleep/wake behavior; burst and overlength recovery checks already pass.
 - [ ] Explore a MISRA-friendly alternative to printf-style log formatting.
 - [x] Add STM32 UART command input using application-owned line buffering (H755 M7).
 - [x] Add STM32H755 support with pinned CubeH7 HAL, M7 console, and sleeping M4 image.
@@ -34,7 +34,12 @@
 
 - [x] Fix the original H563 startup stack overflow by reserving 64 KiB; later move application objects to static storage.
 - [ ] Measure H563 whole-program stack high-water usage under console/network/interrupt load, then right-size the retained 64 KiB reservation in both linker and CubeMX settings.
-- [ ] Hardware-test H755 static-storage initialization and UART FIFO/16-line queue changes over UART, USB, and TCP; currently build coverage only.
+- [ ] Hardware-test the current H755 firmware over UART, USB, and TCP, including static storage, FIFO/16-line input, Meson board/component selection, bound timers, and reusable command binding; currently build coverage only.
 - [ ] Revisit H755 stack reservation after the application-owned console refactor; its Cortex-M7 has no MSPLIM guard.
 
 - [x] Fix H563 UART burst overruns with hardware FIFO reception and a 16-line queue; validated 580 unpaced commands at 1 Mb/s, including 4,112-byte bursts and overlength recovery.
+
+- [x] Consolidate STM32 examples into one Meson-selected board target (H563 default, H755 with sleeping M4) and remove application feature-selection macros.
+- [x] Add task helpers, exact chrono delays, object-bound timers, reusable stage2 command binding, and retained initialization diagnostics.
+- [x] Add a standalone host/fake application starter, exported Meson dependencies, and consumer build tests.
+- [x] Validate the updated H563 firmware over UART/USB/TCP, including the bound timer command, Ethernet, and reset recovery.

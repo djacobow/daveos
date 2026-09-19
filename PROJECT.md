@@ -4,10 +4,11 @@
 
 Build a simple, non-preemptive task scheduler suitable for embedded projects.
 
-The first embedded application will flash LEDs on a Nucleo board using an
-STM32H563. This provides a small application for exercising the scheduler and
-platform support after the initial host implementation.
-Longer-term applications may include multiple UARTs, CAN buses, and an Ethernet driver.
+The shared embedded console runs on NUCLEO-H563ZI and NUCLEO-H755ZI-Q, with
+LED/button commands, UART and USB CDC transports, and optional lwIP Ethernet/TCP.
+Host and fake-time examples exercise the same scheduler independently of hardware.
+Longer-term applications may include multiple UARTs, CAN buses, and additional
+network listeners beyond the current single-client TCP console.
 
 ## Language and Tools
 
@@ -278,9 +279,12 @@ operations that complete normally. Distinguish error conditions such as repeated
 initialization, module initialization failure, invalid repeat interval, event
 queue overflow, timer overflow, and `not_running`. The shared type is
 `daveos::core::Status`, declared in `core/platform/platform.hpp`; commands use it too.
-`not_running` consistently reports that an operation requires an active scheduler
-run. It is an explicit error for both a pre-run `stop()` call and a timer request
-during initialization, rather than a silently accepted operation.
+For scheduler operations, `not_running` reports unavailable execution, including
+pre-run `stop()` and valid timer requests during init, or work submitted after
+shutdown or terminal initialization failure.
+An unbound command source or unconnected `CommandBinding` also uses `not_running`
+to report unavailable dispatch. These are explicit failures, not silently
+accepted operations.
 Error counters retain aggregate diagnostics where specified; they do not replace
 the operation's explicit failure result.
 
@@ -511,7 +515,7 @@ sleep entry. Initialization failure and shutdown flush remaining records.
 - Each subscriber-facing record includes timestamp, severity, message text,
   module name, and task name. Attribution must be captured when the log call
   occurs and retained for deferred delivery. Calls outside a module task use
-  descriptive context labels such as `core/init` or `interrupt`. Interrupt logs
+  descriptive context labels such as `core.init` or `core.interrupt`. Interrupt logs
   must identify interrupt context rather than inherit the interrupted task's name.
 - During normal operation, dispatch logs only when no tasks or events are due,
   checking for due work between records. Initialization failure and normal host
@@ -532,7 +536,8 @@ sleep entry. Initialization failure and shutdown flush remaining records.
 ## Supported platforms
 
 The implementation provides real-time host and fake-time adapters, an STM32H563
-adapter and USART3 console, and an STM32H755 M7 adapter with the same console.
+adapter and an STM32H755 M7 adapter with one shared, board-selected console.
+UART, USB CDC, and optional TCP transports register independently.
 STM32CubeH5 and STM32CubeH7 are pinned as submodules; no board BSP is used.
 The H755 M4 completes CubeMX boot synchronization, disables SysTick, and sleeps
 in a WFI loop. It does not run DaveOS or access M7-owned peripherals.
@@ -594,7 +599,11 @@ H755 includes both core images. Tool paths and ST-LINK serial are configurable.
 
 * Emphasize simplicity and concision in design and implementation.
 * Be DRY (Don't Repeat Yourself): keep each piece of logic or knowledge in one place.
-* Use the Google C++ style guide.
+* Use Google C++ style with the repository's clang-format overrides: blank lines
+  between function/class definitions, braces on control-flow bodies, and indented
+  namespace contents.
+* Use short namespace aliases and qualified names instead of `using namespace`.
+* Follow the fixed-width integer and file-naming rules under Source organization.
 * Allow short variable names if their physical scope, from first to last textual
   appearance, is less than 15 lines.
 * Do not repeat the class name in member names.
@@ -612,10 +621,15 @@ unsigned decimal delay starts a one-shot DaveOS timer; its interrupt-time callba
 logs `Timer fired` for deferred delivery. Reissuing replaces the pending timer.
 
 H563 LEDs are PB0/PF4/PG4; H755 LEDs are PB0/PE1/PB14. Both read PC13.
-H563's CPU runs at nominal 250 MHz, H755 M7 at 400 MHz. H563 hardware validation
-is pending; validate boot, UART RX/error recovery, TX DMA handoff, LED/button
-commands, reset, timer timing, and sleep/wake. H755 additionally boots M4 into
-sleep. Shared code changes require both targets to build.
+H563's CPU runs at nominal 250 MHz, H755 M7 at 400 MHz. H563 hardware checks
+passed for boot, UART bursts and TX DMA, USB/TCP commands, timer completion,
+Ethernet, and software-reset recovery. Earlier physical checks also confirmed
+all LEDs, button press/release, USB-C orientations, and cable reconnection.
+Injected UART/DMA errors, precision timing, and prolonged sleep/backpressure
+stress remain outstanding. H755 additionally boots M4 into sleep; its earlier
+hardware results predate the static-storage, FIFO, board/composition, and
+convenience-API changes. Current H755 coverage is build-only. See TODO.md for
+remaining work. Shared code changes require both board selections to build.
 
 The application may call `platform.reset()` directly, independently of the
 scheduler. STM32 H5/H7 request an immediate system reset without returning
@@ -652,6 +666,9 @@ These checks follow from the agreed behavior; they do not introduce additional A
 * Verify logger counters reset independently of scheduler statistics, interrupt
   enqueue notifies idle dispatch, and pending records prevent sleep.
 * Verify console EOF does not stop the scheduler; `console exit` does.
+* Verify exact chrono conversion, invalid-delay preservation, compile-time task
+  selection, bound-timer identity/cancellation, and retained initialization errors.
+* Verify the optional command-binding module and separate consumer starter build.
 
 Public headers define concrete C++ signatures and status values. Changes to those
 interfaces must keep this specification and the application examples consistent.
@@ -738,8 +755,9 @@ FIFO on H755); disconnected
 output is discarded and full buffers drop whole frames. DTR deassertion, USB
 reset, and disconnect discard queued USB output and unfinished input. H563 has
 no VBUS disconnect interrupt: suspend clears these buffers while retaining DTR
-for normal resume. H563 USB attachment, enumeration, and reconnect require
-hardware validation.
+for normal resume. H563 attachment in both USB-C orientations, enumeration,
+commands, physical reconnection, and reset recovery have passed hardware checks;
+sustained backpressure and host suspend/resume stress remain to validate.
 
 Test parsing, matching, boundaries, help, context restoration, nested calls, command-only modules, compile-time validation, and
 allocation-free core operations on the fake platform, alongside existing host,
@@ -809,7 +827,7 @@ networking uses this separate library rather than extending SchedulerInterface.
 Hardware-init failure leaves the remaining application operational and requires
 reset to retry. Cable and DHCP recovery are automatic. `net status` reports link,
 addressing, and counters. Meson `networking` defaults to false and disabled builds
-need no networking submodules. Both STM32 demos use ST HAL and LAN8742, with
+need no networking submodules. Both STM32 board selections use ST HAL and LAN8742, with
 fixed DMA buffers and board-specific RMII wiring. H755 hardware validation
 passed for DHCP/static IPv4, ping, cable reconnection, and USB console
 responsiveness. H563 initial hardware validation passed for UART/USB commands,
@@ -832,13 +850,14 @@ sleeping M4 image with separate CPU flags. Both
 generated `Core/Src/main.c` entry points include `appmain.h` and call `appmain()`
 after CubeMX peripheral setup; `appmain()` initializes the platform and calls
 `scheduler.run()`. Hardware setup waits for initialization;
-a dedicated application wiring module binds command sources in stage2. The
+the reusable `core::CommandBinding` module binds command sources in stage2. The
 64 KiB reservation addressed the old 34,216-byte application stack frame; the
 current debug `appmain()` frame is 32 bytes. Total stack high-water usage has
 not been measured, so the reservation is retained pending that measurement.
 Keep linker and CubeMX settings consistent when resizing it. H755 has build
-coverage only for the subsequent static-storage, initialization-wiring, and
-UART FIFO/16-line queue changes; those changes still need H755 hardware testing.
+coverage only for the later static-storage, UART FIFO/16-line queue,
+board/component-selection, and convenience-API changes; the current H755 firmware
+still needs hardware testing.
 
 
 The optional TCP console is an independent log subscriber and command source,
@@ -882,7 +901,8 @@ Scheduling and timer delays accept integral `std::chrono::duration` values as we
 as existing raw microseconds. Reject negative counts, non-integral microseconds,
 and results at or above `kForever`, without changing pending work. Conversion is
 exact and avoids intermediate overflow; floating-point duration representations
-are not supported. Duration conversion errors are returned before lifecycle checks. Existing rules remain: zero-delay one-shots are valid, while
+are not supported. Duration conversion errors are returned before lifecycle
+checks. Existing rules remain: zero-delay one-shots are valid, while
 zero repeat intervals and zero-delay interrupt timers are invalid. Existing
 absolute-deadline saturation near the end of the clock range is unchanged.
 
