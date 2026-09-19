@@ -16,7 +16,8 @@ struct Line {
   std::size_t size = 0;
   std::string_view view() const { return {bytes.data(), size}; }
 };
-template <typename P>
+// Complete lines occupy fixed storage; overflow drops a whole new line.
+template <typename P, std::size_t LineCapacity = 4>
 class Input {
  public:
   explicit Input(P& platform) : platform_(platform) {}
@@ -87,7 +88,7 @@ class Input {
     }
   }
   P& platform_;
-  daveos::core::Queue<Line, 4> lines_;
+  daveos::core::Queue<Line, LineCapacity> lines_;
   Line line_;
   bool previous_cr_ = false, discard_ = false;
   std::uint32_t dropped_ = 0;

@@ -146,7 +146,7 @@ The firmware now runs the same board console as H755: `help`,
 LEDs are PB0/PF4/PG4 and the button is PC13. USART3 uses PD8 TX / PD9 RX at
 1,000,000 baud, 8N1, no flow control; disable terminal local echo.
 
-RX uses one-byte interrupts and a bounded line queue. TX uses GPDMA1 Channel 0
+RX uses the hardware FIFO, one-byte interrupts, and a 16-line queue. TX uses GPDMA1 Channel 0
 with the USART3 TX request, normal memory-to-peripheral byte transfers, and
 completion/error interrupts. Two 4 KiB ping-pong buffers live in normal SRAM;
 GPDMA and SRAM clocks remain enabled during shallow sleep. Echo, line-oriented
@@ -473,7 +473,14 @@ discarding pending logs/output. The board module calls `platform.reset()` direct
 the scheduler does not manage reset. Host/fake platforms return `Status::unsupported`.
 
 LEDs are LD1/PB0, LD2/PE1, and LD3/PB14; BTN1 is PC13 and reports its raw level.
-UART interrupts collect up to four complete lines; a 1 ms task dispatches them.
+UART interrupts collect up to 16 complete lines; a 1 ms task dispatches one
+per invocation. The hardware FIFO absorbs short interrupt-masked intervals at
+1 Mb/s. Each command may contain up to 256 bytes before its terminator. Queue
+overflow drops whole new lines and records a warning; sustained input still
+needs sender pacing. FIFO setup runs during module stage1, after CubeMX setup,
+so regeneration cannot silently disable it. H563 hardware validation passed
+580 unpaced commands, including repeated 16-line, 4,112-byte bursts and
+overlength rejection followed by a valid command.
 Overlength lines are rejected, full queues drop entire lines, and UART errors
 discard input through the next terminator. Dropped input is reported via logging.
 Log records are queued in scheduler idle time, with timestamps, severity, module,

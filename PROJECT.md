@@ -702,6 +702,11 @@ Add an interactive host console example with buffered stdin input and a
 `console exit` command for orderly shutdown and log flushing. EOF has no command
 meaning and must not stop the scheduler or cause a busy loop. The H563 and H755
 examples share USART3 input with application-owned line buffering.
+The STM32 UART console enables the peripheral FIFO in stage1 and queues up to
+16 complete lines (up to 256 command bytes each), dispatching one per 1 ms
+invocation. Queue overflow drops new whole lines and records a warning; this
+is bounded burst buffering, not flow control for unlimited sustained input.
+
 Both examples provide an application-owned USB CDC ACM console on CN13 (Type-C
 on H563, Micro-AB on H755), using a shared pinned ST USB Device Library submodule. UART and USB retain separate
 partial lines and echo while sharing command dispatch and log output. Each

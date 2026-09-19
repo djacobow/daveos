@@ -42,6 +42,7 @@ struct TxDriver {
   }
 };
 using Tx = BufferedOutput<Platform, TxDriver, 4096>;
+using UartInput = Input<Platform, 16>;
 #endif
 enum class Event {};
 void BindCommands();
@@ -155,7 +156,7 @@ class Board final : public daveos::core::Module<Board, Event> {
 #if DAVEOS_UART_CONSOLE
 class UartConsole final : public daveos::console::Module<UartConsole, Event> {
  public:
-  UartConsole(Input<Platform>& input, Tx& output)
+  UartConsole(UartInput& input, Tx& output)
       : input_(input),
         output_(output),
         display_(this, [](void* context, std::string_view text) {
@@ -163,6 +164,10 @@ class UartConsole final : public daveos::console::Module<UartConsole, Event> {
         }) {}
   Status init(InitStage stage) {
     if (stage == InitStage::stage1) {
+      // Keep received bytes in hardware while short critical sections mask
+      // IRQs. One-byte IT reception still handles partial lines immediately.
+      if (HAL_UARTEx_EnableFifoMode(&huart3) != HAL_OK)
+        return Status::initialization_failed;
       active_uart = this;
       start_receive();
     }
@@ -207,7 +212,7 @@ class UartConsole final : public daveos::console::Module<UartConsole, Event> {
   }
 
  private:
-  Input<Platform>& input_;
+  UartInput& input_;
   Tx& output_;
   LineDisplay display_;
   std::uint8_t rx_byte_ = 0;
@@ -237,7 +242,7 @@ app::Platform platform;
 #if DAVEOS_UART_CONSOLE
 app::TxDriver driver;
 app::Tx output(platform, driver, board::tx_storage);
-daveos::console::Input input(platform);
+UartInput input(platform);
 app::UartConsole uart(input, output);
 #endif
 #if DAVEOS_USB_CDC

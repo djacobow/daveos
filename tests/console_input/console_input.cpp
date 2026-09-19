@@ -7,7 +7,9 @@
 
 namespace {
 using Platform = daveos::platform::fake::Platform;
-void Feed(daveos::console::Input<Platform>& input, std::string_view bytes) {
+template <std::size_t Capacity>
+void Feed(daveos::console::Input<Platform, Capacity>& input,
+          std::string_view bytes) {
   for (auto byte : bytes) input.receive(byte);
 }
 std::string_view View(const daveos::console::Line& line) {
@@ -169,4 +171,28 @@ TEST_CASE(
   REQUIRE(result.complete);
   CHECK(line.view() == "five");
   CHECK(result.bytes == 6);
+}
+
+TEST_CASE("Configurable input queue retains bounded multi-line bursts") {
+  Platform platform;
+  daveos::console::Input<Platform, 16> input(platform);
+  // Sixteen maximum-size valid command lines, delivered before any polling.
+  for (int i = 0; i < 16; ++i) {
+    auto command = std::to_string(i);
+    command.resize(256, ' ');
+    Feed(input, command + "\r\n");
+  }
+  Feed(input, "discarded\n");
+  CHECK(input.take_dropped() == 1);
+  daveos::console::Line line;
+  for (int i = 0; i < 16; ++i) {
+    REQUIRE(input.pop(line));
+    CHECK(line.size == 256);
+    CHECK(line.view().starts_with(std::to_string(i) + " "));
+  }
+  CHECK_FALSE(input.pop(line));
+  Feed(input, "recovered\n");
+  REQUIRE(input.pop(line));
+  CHECK(line.view() == "recovered");
+  CHECK(input.take_dropped() == 0);
 }
