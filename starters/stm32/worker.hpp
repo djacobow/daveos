@@ -8,11 +8,11 @@ namespace app {
 
 
   namespace core = daveos::core;
-  using Event = std::variant<std::monostate>;
+  using Event = daveos::core::NoEvent;
 
   // Replace Poll's body with bounded application work. No hardware is touched
   // during construction, and no init override is needed just to start a task.
-  class Worker : public core::Module<Worker, Event> {
+  class Worker : public core::Module<Worker> {
    public:
     static constexpr const char* name() { return "worker"; }
 

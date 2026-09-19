@@ -6,10 +6,9 @@ namespace app {
 
 
   namespace core = daveos::core;
-  using Event = std::variant<std::monostate>;
 
   // Application logic is identical on the real-time host and fake platform.
-  class Counter final : public core::Module<Counter, Event> {
+  class Counter final : public core::Module<Counter> {
    public:
     static constexpr const char* name() { return "counter"; }
 

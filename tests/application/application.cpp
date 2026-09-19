@@ -243,3 +243,86 @@ TEST_CASE(
     CHECK(periodic.calls == 0);
   }
 }
+
+TEST_CASE(
+    "NoEvent defaults and named capacities work with every service "
+    "combination") {
+  struct Worker : core::Module<Worker> {
+    static constexpr const char* name() { return "worker"; }
+
+    static constexpr auto tasks() {
+      return std::array{DAVEOS_TASK(Worker, Tick)};
+    }
+
+    static constexpr auto commands() {
+      return std::array{DAVEOS_COMMAND(Worker, Go, "go", "Go")};
+    }
+
+    core::Status Go() {
+      ++calls;
+      return core::Status::ok;
+    }
+
+    void Tick() {
+      CHECK(source->dispatch("worker go") == core::Status::ok);
+      CHECK(source->dispatch("worker go extra") ==
+            core::Status::too_many_arguments);
+      CHECK(source->dispatch("worker this-line-is-too-long") ==
+            core::Status::line_too_long);
+      scheduler().stop();
+    }
+
+    core::CommandSource* source = nullptr;
+    std::uint32_t calls = 0;
+  };
+
+  STATIC_REQUIRE(std::same_as<Worker::EventType, core::NoEvent>);
+  constexpr core::Capacities capacities{
+      .events = 1, .timers = 2, .line = 20, .arguments = 2};
+  for (bool logging : {false, true}) {
+    for (bool commands : {false, true}) {
+      test::Fake platform;
+      Worker worker;
+      core::CommandSource source;
+      worker.source = &source;
+      auto modules = core::ModuleList{&worker};
+      auto sources = core::CommandSourceList{source};
+      test::Sink sink;
+      auto logger =
+          core::make_logger(platform, core::SubscriberList{sink.subscriber()});
+      auto check = [&](auto& app) {
+        CHECK(app.scheduler().post(std::monostate{}) == core::Status::ok);
+        CHECK(app.scheduler().post(std::monostate{}) == core::Status::full);
+        if (commands) {
+          CHECK(app.scheduler().template schedule<&Worker::Tick>(worker, 0) ==
+                core::Status::ok);
+          CHECK(app.run() == core::Status::ok);
+          CHECK(worker.calls == 1);
+        } else {
+          CHECK(app.init() == core::Status::ok);
+        }
+      };
+      if (logging && commands) {
+        auto app = core::make_application<core::NoEvent, capacities>(
+            platform, modules, logger, sources);
+        check(app);
+      } else if (logging) {
+        auto app = core::make_application<core::NoEvent, capacities>(
+            platform, modules, logger);
+        check(app);
+      } else if (commands) {
+        auto app = core::make_application<core::NoEvent, capacities>(
+            platform, modules, sources);
+        check(app);
+      } else {
+        auto app = core::make_application<core::NoEvent, capacities>(platform,
+                                                                     modules);
+        check(app);
+      }
+    }
+  }
+  test::Fake platform;
+  Worker worker;
+  auto app = core::make_application(platform, core::ModuleList{&worker});
+  CHECK(app.init() == core::Status::ok);
+}

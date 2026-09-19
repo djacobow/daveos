@@ -73,7 +73,9 @@ TEST_CASE("commands tokenize once and preserve argument spelling") {
   };
   f.Run([&] {
     CHECK(f.dispatcher.dispatch(
-              R"cmd(MOTOR SPEED "" "a b" c\"d "e\"f" a\\b c\nd "z\\")cmd") ==
+              R"cmd(MOTOR SPEED "" "a b" c\"d "e\"f" a\\b c\nd)cmd") ==
+          core::Status::ok);
+    CHECK(f.dispatcher.dispatch(R"cmd(motor speed "z\\")cmd") ==
           core::Status::ok);
   });
   CHECK(received == std::vector<std::string>{"", "a b", "c\"d", "e\"f", "a\\b",
@@ -97,7 +99,7 @@ TEST_CASE("malformed or overflowing lines never call handlers") {
     CHECK(f.dispatcher.dispatch(std::string(257, ' ')) ==
           core::Status::line_too_long);
     std::string text = "motor speed";
-    for (int i = 0; i < 15; ++i) {
+    for (int i = 0; i < 7; ++i) {
       text += " x";
     }
     CHECK(f.dispatcher.dispatch(text) == core::Status::too_many_arguments);
@@ -119,11 +121,11 @@ TEST_CASE("input and argument capacities include exactly their stated limits") {
           core::Status::ok);
     CHECK(length == 244);
     std::string text = "motor speed";
-    for (int i = 0; i < 14; ++i) {
+    for (int i = 0; i < 6; ++i) {
       text += " x";
     }
     CHECK(f.dispatcher.dispatch(text) == core::Status::ok);
-    CHECK(count == 14);
+    CHECK(count == 6);
     core::CommandDispatcher<test::Event, Fixture::List, 17, 3> small(
         f.modules, f.scheduler);
     CHECK(small.dispatch("motor speed 12345") == core::Status::ok);

@@ -13,7 +13,7 @@ callbacks run to completion.
 
 namespace core = daveos::core;
 using std::chrono_literals::operator""ms;
-using Event = std::variant<std::monostate>;
+using Event = daveos::core::NoEvent;
 
 class Worker : public core::Module<Worker, Event> {
  public:
@@ -98,10 +98,20 @@ through Application destruction. Application cannot be copied or moved.
 
 Use `application.init()` for explicit initialization or let `run()` do it.
 Use `application.scheduler()` for scheduling and diagnostics; lifecycle calls
-must go through Application. Event/timer capacities are optional numeric template
-arguments (defaults 32/16). Command-enabled factory overloads additionally accept
-line/argument capacities (defaults 256/16), for example
-`make_application<Event, 8, 4, 128, 8>(platform, modules, sources)`.
+must go through Application. Customize storage with a named compile-time value:
+
+```cpp
+constexpr core::Capacities capacity{
+    .events = 8, .timers = 4, .line = 128, .arguments = 8};
+auto app = core::make_application<Event, capacity>(platform, modules, sources);
+```
+
+Omitted fields retain their defaults: 32 events, 16 timers, 256 line bytes,
+and 8 tokens including prefix and command. For a program without events,
+`core::Module<Worker>` and `core::make_application(platform, modules)` default
+to `core::NoEvent`. Use `core::NoEvent` explicitly when supplying capacities.
+Logger arguments must satisfy `core::LoggerFor<Logger, Platform>`;
+logging and command sources remain independent.
 
 Custom applications can still assemble `make_scheduler`, `CommandDispatcher`,
 and `bind_sources` directly. The existing CommandBinding helper provides stage2

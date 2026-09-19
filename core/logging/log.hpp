@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <concepts>
 #include <cstdarg>
 #include <string_view>
 
@@ -88,6 +89,23 @@ namespace daveos::core {
 
     static bool empty() { return true; }
   };
+
+  // Validate the complete borrowed logger contract at the factory boundary.
+  template <typename L, typename P>
+  concept LoggerFor = requires(L& logger, const P& platform, Level level,
+                               const char* format, std::va_list args) {
+#if DAVEOS_LOGGING
+                        {
+                          logger.uses_platform(platform)
+                          } -> std::same_as<bool>;
+#endif
+                        {
+                          logger.write(level, format, args)
+                          } -> std::same_as<Status>;
+                        { logger.dispatch() } -> std::same_as<bool>;
+                        { logger.flush() } -> std::same_as<void>;
+                        { logger.empty() } -> std::same_as<bool>;
+                      };
 
   // Statically typed, non-owning attachment. The logger and scheduler must use
   // the same platform; the logger must outlive scheduler shutdown/destruction.

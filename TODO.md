@@ -1,5 +1,8 @@
 # Follow-up work
 
+- [x] Default event-free modules/factories to NoEvent; add named application capacities and full logger constraints.
+- [x] Compact command metadata into one shared static table per module and emit one specific diagnostic per adapter failure. With six typed parameters, 32-bit/float bounds and variant policies, H563 debug (-O0) full network-console image shrank by 7,016 flash bytes (text+data: 332,292 to 325,276) and 64 bytes of static RAM. ARM metadata: 28 bytes per argument, 32 bytes per compact command. Build measurement only.
+- [ ] Advance starter wrap pins to the NoEvent/default-capacity implementation commit when committing this change.
 - [x] Add enum-backed command choices, inferred from DAVEOS_ENUM or explicit label/value tables, using exact/unique-prefix lazy matching.
 - [x] Flash H563 and verify typed/enum command parsing with 114 UART/USB/TCP checks, then Ethernet ping, TCP reconnect, and software-reset recovery. No visual LED confirmation in this run.
 
@@ -43,7 +46,7 @@
 
 - [x] Fix the original H563 startup stack overflow by reserving 64 KiB; later move application objects to static storage.
 - [ ] Measure H563 whole-program stack high-water usage under console/network/interrupt load, then right-size the retained 64 KiB reservation in both linker and CubeMX settings.
-- [ ] Hardware-test the current H755 firmware over UART, USB, and TCP, including static storage, FIFO/16-line input, Meson board/component selection, bound timers, and reusable command binding; currently build coverage only.
+- [ ] Deferred by user: hardware-test the current H755 firmware over UART, USB, and TCP, including static storage, FIFO/16-line input, Meson board/component selection, bound timers, and reusable command binding; currently build coverage only.
 - [ ] Revisit H755 stack reservation after the application-owned console refactor; its Cortex-M7 has no MSPLIM guard.
 
 - [x] Fix H563 UART burst overruns with hardware FIFO reception and a 16-line queue; validated 580 unpaced commands at 1 Mb/s, including 4,112-byte bursts and overlength recovery.

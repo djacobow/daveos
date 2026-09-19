@@ -13,9 +13,8 @@ The smallest useful program can print once and stop on the host:
 
 namespace core = daveos::core;
 namespace host = daveos::platform::host;
-using Event = std::variant<std::monostate>;
 
-struct Hello : core::Module<Hello, Event> {
+struct Hello : core::Module<Hello> {
   static constexpr const char* name() { return "hello"; }
 
   static constexpr auto tasks() {
@@ -31,7 +30,7 @@ struct Hello : core::Module<Hello, Event> {
 int main() {
   host::Platform platform;
   Hello hello;
-  auto app = core::make_application<Event>(platform, core::ModuleList{&hello});
+  auto app = core::make_application(platform, core::ModuleList{&hello});
   return host::run(app);
 }
 ```

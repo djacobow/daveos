@@ -60,7 +60,7 @@ namespace daveos::core {
     struct Entry {
       const char* prefix;
       void* module;
-      Status (*dispatch)(CommandDispatcher&, void*, CommandArguments);
+      Status (*dispatch)(CommandDispatcher&, void*, CommandArguments, bool&);
       void (*help)(CommandDispatcher&);
     };
 
@@ -99,8 +99,9 @@ namespace daveos::core {
           {"core", "command"},
           [](void* argument) {
             auto& r = *static_cast<Request*>(argument);
-            Status status = r.self->Dispatch(r.line);
-            if (status != Status::ok) {
+            bool diagnosed = false;
+            Status status = r.self->Dispatch(r.line, diagnosed);
+            if (status != Status::ok && !diagnosed) {
               r.self->Error(status);
             }
             return status;
@@ -122,8 +123,9 @@ namespace daveos::core {
       if constexpr (!M::commands().empty()) {
         entries_[count_++] = {
             M::command_prefix(), module,
-            [](CommandDispatcher& self, void* object, CommandArguments args) {
-              return self.Handle(*static_cast<M*>(object), args);
+            [](CommandDispatcher& self, void* object, CommandArguments args,
+               bool& diagnosed) {
+              return self.Handle(*static_cast<M*>(object), args, diagnosed);
             },
             [](CommandDispatcher& self) { self.template Help<M>(); }};
       }
@@ -188,7 +190,7 @@ namespace daveos::core {
       return Status::ok;
     }
 
-    Status Dispatch(std::string_view line) {
+    Status Dispatch(std::string_view line, bool& diagnosed) {
       if (busy_) {
         return Status::busy;
       }
@@ -226,7 +228,8 @@ namespace daveos::core {
       }
       auto& entry = entries_[match.index];
       return entry.dispatch(*this, entry.module,
-                            CommandArguments(arguments_.data() + 1, argc_ - 1));
+                            CommandArguments(arguments_.data() + 1, argc_ - 1),
+                            diagnosed);
     }
 
     template <typename M>
@@ -234,7 +237,8 @@ namespace daveos::core {
 #if DAVEOS_LOGGING
       scheduler_.log(Level::info, "%s:", M::command_prefix());
       scheduler_.log(Level::info, "  help - list module commands");
-      static constexpr auto commands = M::commands();
+      static constexpr const auto& commands =
+          detail::CommandTable<M>::descriptors;
       for (const auto& command : commands) {
         scheduler_.log(Level::info, "  %s - %s", command.name, command.help);
         for (std::size_t i = 0; i < command.count; ++i) {
@@ -242,10 +246,11 @@ namespace daveos::core {
           scheduler_.log(Level::info, "    %c%s%c: %s",
                          argument.optional ? '[' : '<', argument.name,
                          argument.optional ? ']' : '>', argument.type);
-          for (std::size_t choice = 0; choice < argument.choice_count;
-               ++choice) {
-            scheduler_.log(Level::info, "      %s",
-                           argument.choice_name(choice));
+          if (const auto* choices =
+                  std::get_if<detail::ChoicePolicy>(&argument.policy)) {
+            for (std::size_t choice = 0; choice < choices->count; ++choice) {
+              scheduler_.log(Level::info, "      %s", choices->name(choice));
+            }
           }
         }
       }
@@ -253,8 +258,9 @@ namespace daveos::core {
     }
 
     template <typename M>
-    Status Handle(M& module, CommandArguments args) {
-      static constexpr auto commands = M::commands();
+    Status Handle(M& module, CommandArguments args, bool& diagnosed) {
+      static constexpr const auto& commands =
+          detail::CommandTable<M>::descriptors;
       if (args.empty()) {
         Help<M>();
         return Status::ok;
@@ -276,7 +282,7 @@ namespace daveos::core {
 
       struct Call {
         M& module;
-        const CommandDescriptor<M>& descriptor;
+        const typename detail::CommandTable<M>::Descriptor& descriptor;
         ArgumentError error{};
         CommandArguments args;
       } call{module, commands[match.index], {}, args.subspan(1)};
@@ -289,28 +295,33 @@ namespace daveos::core {
                                          c.error);
           },
           &call);
+      diagnosed = call.error.reason != nullptr;
 #if DAVEOS_LOGGING
       if (call.error.reason) {
         if (call.error.argument) {
-          if (call.error.argument->choice_count) {
-            scheduler_.log(Level::error, "%s %s: argument '%s': %s",
+          if (std::holds_alternative<detail::ChoicePolicy>(
+                  call.error.argument->policy)) {
+            scheduler_.log(Level::error, "%s %s: argument '%s': %s (status %s)",
                            M::command_prefix(), call.descriptor.name,
-                           call.error.argument->name, call.error.reason);
+                           call.error.argument->name, call.error.reason,
+                           enum_name(status));
           } else {
-            scheduler_.log(
-                Level::error,
-                "%s %s: argument '%s' must be %s and within its bounds",
-                M::command_prefix(), call.descriptor.name,
-                call.error.argument->name, call.error.argument->type);
+            scheduler_.log(Level::error,
+                           "%s %s: argument '%s' must be %s and within its "
+                           "bounds (status %s)",
+                           M::command_prefix(), call.descriptor.name,
+                           call.error.argument->name, call.error.argument->type,
+                           enum_name(status));
           }
         } else {
           scheduler_.log(Level::error,
                          "%s %s: expected %" PRIu32 " to %" PRIu32
-                         " arguments, received %" PRIu32,
+                         " arguments, received %" PRIu32 " (status %s)",
                          M::command_prefix(), call.descriptor.name,
                          static_cast<std::uint32_t>(call.descriptor.required),
                          static_cast<std::uint32_t>(call.descriptor.count),
-                         static_cast<std::uint32_t>(call.args.size()));
+                         static_cast<std::uint32_t>(call.args.size()),
+                         enum_name(status));
         }
       }
 #endif

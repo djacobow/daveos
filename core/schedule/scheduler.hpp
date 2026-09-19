@@ -747,15 +747,17 @@ namespace daveos::core {
   // Deduce module/platform types; optional sizes are event and timer slots.
   // With no logger there is no logging storage or work. An attached logger is
   // borrowed and must use the same platform and outlive the scheduler.
-  template <typename Event, std::size_t Events = 32, std::size_t Timers = 16,
-            typename P, typename... Modules>
+  template <typename Event = NoEvent, std::size_t Events = 32,
+            std::size_t Timers = 16, typename P, typename... Modules>
   auto make_scheduler(P& platform, ModuleList<Modules...> modules) {
     return Scheduler<Event, ModuleList<Modules...>, NoLogging, P, Events,
                      Timers>(platform, modules);
   }
 
-  template <typename Event, std::size_t Events = 32, std::size_t Timers = 16,
-            typename P, typename... Modules, typename L>
+  template <typename Event = NoEvent, std::size_t Events = 32,
+            std::size_t Timers = 16, typename P, typename... Modules,
+            typename L>
+    requires LoggerFor<L, P>
   auto make_scheduler(P& platform, ModuleList<Modules...> modules, L& logger) {
 #if DAVEOS_LOGGING
     return Scheduler<Event, ModuleList<Modules...>, LogService<L>, P, Events,

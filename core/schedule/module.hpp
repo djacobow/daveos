@@ -75,7 +75,7 @@ namespace daveos::core {
   }
 
   template <typename Event, typename Modules, std::size_t LineCapacity = 256,
-            std::size_t ArgumentCapacity = 16>
+            std::size_t ArgumentCapacity = 8>
   class CommandDispatcher;
 
   // Non-owning erased reference, independent of module lists and capacities.
@@ -312,7 +312,7 @@ namespace daveos::core {
   // optional. Callbacks run to completion on the scheduler thread; asynchronous
   // work must schedule a task or maintain its own state. Do not move a
   // registered module. Its name and object must outlive the scheduler.
-  template <typename Derived, typename Event>
+  template <typename Derived, typename Event = NoEvent>
   class Module {
     static_assert(core::EventType<Event>,
                   "events require a std::variant of unique, trivially "

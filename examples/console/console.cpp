@@ -15,7 +15,7 @@ namespace core = daveos::core;
 
 namespace app {
 
-  using Event = std::variant<std::monostate>;
+  using Event = daveos::core::NoEvent;
 
   // Keep one extra byte to let the dispatcher diagnose overlength input. Once
   // full, discard bytes until newline instead of splitting one command into

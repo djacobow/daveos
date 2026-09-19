@@ -9,6 +9,9 @@
 namespace daveos::core {
 
 
+  // Default event domain for applications that do not exchange events.
+  using NoEvent = std::variant<std::monostate>;
+
   namespace detail {
     template <typename T, typename... Types>
     inline constexpr std::size_t TypeCount =

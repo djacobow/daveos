@@ -74,3 +74,12 @@ Change `worker.hpp` for application behavior. For another board, replace the
 `board_config.h`; the console library remains separately reusable. See
 [the hardware guide](../../docs/03-hardware-console.md) and
 [custom components](../../docs/04-custom-components.md) in the DaveOS repository.
+
+## Updating the dependency pin
+
+The current NoEvent defaults require the local DaveOS checkout until the next
+implementation commit is pinned. For a release, commit the framework changes
+first, then set `revision` in both starter `subprojects/daveos.wrap` files to that
+full commit hash (`git rev-parse HEAD`). Commit the pin updates separately and
+publish both commits. Rebuild both starters against the selected revision; keep
+pins fixed to commits rather than moving branches.

@@ -498,12 +498,20 @@ their own arguments. Register raw handlers without argument descriptors.
 Typed text views have the same borrowed lifetime. Nested calls on the same dispatcher return `busy` and preserve
 active views. Inputs need no terminating NUL; embedded NUL bytes are rejected.
 
-Defaults are 256 input bytes and 16 arguments, counting the prefix and command.
+Defaults are 256 input bytes and 8 tokens, counting the prefix and command.
 To customize, use `CommandDispatcher<Event, decltype(modules), 512, 24>`.
-Typed descriptors own fixed metadata for at most 16 parameters, independently
-of the dispatcher token capacity. Overflows reject the complete line without invoking a handler. Specific results
+Compile-time declarations allow at most six parameters, independently of the
+dispatcher token capacity. A shared static table holds compact descriptors and
+metadata only for actual parameters; help and dispatch reuse it. Numeric bounds
+and choice policies share a variant, while type labels remain shared string pointers.
+Range bounds are supported for integers up to 32 bits and `float`; unbounded
+64-bit integer and `double` parsing remains available. These restrictions also
+apply to optional parameters. The six-parameter limit does not restrict raw
+handlers, which use the dispatcher token capacity. Overflows reject the complete line without invoking a handler. Specific results
 are `parse_error`, `ambiguous_match`, `line_too_long`, and `too_many_arguments`;
-unknown names return `not_found`. Handler results propagate unchanged.
+unknown names return `not_found`. Handler results propagate unchanged. Typed
+argument failures emit one specific diagnostic with the status, without a second
+generic command-error line.
 
 `help` lists the complete tree, short descriptions, and typed parameter
 names/types (`<required>` or `[optional]`). `motor` or `motor help`
@@ -1085,4 +1093,32 @@ copy constructible and copy assignable. The variant must be trivially copyable.
 Use small owned payloads; views and pointers require separately managed lifetimes.
 Queue storage scales with the largest alternative. Sender exclusion, unspecified
 recipient ordering, and overflow reporting are unchanged. Use
-`std::variant<std::monostate>` for an application with no events.
+`core::NoEvent` (an alias for `std::variant<std::monostate>`) for an application
+with no events. `Module<Worker>`, `make_scheduler(...)`, and
+`make_application(...)` default to that type.
+
+### Named application capacities
+
+```cpp
+auto app = core::make_application<Event, core::Capacities{.events = 64}>(
+    platform, modules, logger, sources);
+```
+
+The fields are `events`, `timers`, `line`, and `arguments`, defaulting to
+32, 16, 256, and 8. Command capacities apply only with command sources.
+For event-free applications omit the event argument, or specify `core::NoEvent`
+when providing a capacity configuration. Logger overloads enforce the complete
+`LoggerFor<L, P>` contract. Low-level `make_scheduler` numeric capacities are unchanged.
+
+### Command storage measurements
+
+With the ARM toolchain and H563 debug (`-O0`) configuration, enabling logging,
+UART, USB, networking, and TCP, the review changes reduced ELF text+data from
+332,292 to 325,276 bytes and BSS from 162,008 to 161,944 bytes. These are build
+measurements, not hardware validation or release-optimization measurements.
+
+Argument metadata is 28 bytes on ARM (previously 40); a compact command descriptor
+is 32 bytes. The six-parameter declaration builder is 192 bytes, but the dispatcher
+stores only the compact descriptors and actual argument entries. Help and dispatch
+share those entries. Type labels remain shared string pointers: replacing them
+with tags made individual records smaller but increased this firmware's code size.

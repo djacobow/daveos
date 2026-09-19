@@ -18,3 +18,36 @@ foreach interval : ['std::chrono::microseconds{0}', 'std::chrono::microseconds{-
     error('Invalid periodic interval unexpectedly compiled')
   endif
 endforeach
+
+factory_check = '''
+#include "core/schedule/application.hpp"
+#include "core/logging/logger.hpp"
+#include "platform/fake/platform.h"
+namespace core = daveos::core;
+struct Worker : core::Module<Worker> {
+  static constexpr const char* name() { return "worker"; }
+};
+struct BadLogger { int counters() { return 0; } };
+int main() {
+  daveos::platform::fake::Platform platform;
+  Worker worker;
+  auto modules = core::ModuleList{&worker};
+  core::CommandSource source;
+  auto sources = core::CommandSourceList{source};
+  BadLogger bad;
+  @0@
+}
+'''
+foreach item : [
+  ['auto app = core::make_application(platform, modules);', true],
+  ['auto app = core::make_application<core::NoEvent, core::Capacities{.events = 2}>(platform, modules);', true],
+  ['auto app = core::make_application(platform, modules, bad);', false],
+  ['auto app = core::make_application(platform, modules, bad, sources);', false],
+  ['auto app = core::make_application<core::NoEvent, core::Capacities{.line = 0}>(platform, modules, sources);', false],
+  ['auto app = core::make_application<core::NoEvent, core::Capacities{.arguments = 1}>(platform, modules, sources);', false],
+]
+  if cpp.compiles(factory_check.format(item[0]), dependencies: core_dep,
+      name: 'application factory ' + item[0]) != item[1]
+    error('Application factory validation did not behave as expected')
+  endif
+endforeach

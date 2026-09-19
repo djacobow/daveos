@@ -123,7 +123,7 @@ foreach variant : [
   ['core::Status', 'std::optional<int>, int', 'return core::Status::ok;', ', core::arg("optional"), core::arg("required")', false],
   ['core::Status', 'int&', 'return core::Status::ok;', ', core::arg("value")', false],
   ['core::Status', 'int', 'return core::Status::ok;', ', core::arg("")', false],
-  ['core::Status', 'std::optional<double>', 'return core::Status::ok;', ', core::arg("value").range(0.5, 2.0)', true],
+  ['core::Status', 'std::optional<double>', 'return core::Status::ok;', ', core::arg("value").range(0.5, 2.0)', false],
   ['core::Status', 'std::optional<std::string_view>', 'return core::Status::ok;', ', core::arg("value")', true],
   ['core::Status', 'std::optional<std::uint8_t>', 'return core::Status::ok;', ', core::arg("value").max(256u)', false],
   ['core::Status', 'std::optional<float>', 'return core::Status::ok;', ', core::arg("value").friendly()', false],
@@ -134,6 +134,9 @@ foreach variant : [
   ['core::Status', 'double', 'return core::Status::ok;', ', core::arg("value").min(std::numeric_limits<double>::quiet_NaN())', false],
   ['core::Status', 'double', 'return core::Status::ok;', ', core::arg("value").min("bad")', false],
   ['core::Status', 'const char*', 'return core::Status::ok;', ', core::arg("value")', false],
+  ['core::Status', 'std::int64_t', 'return core::Status::ok;', ', core::arg("value").min(0)', false],
+  ['core::Status', 'std::optional<std::uint64_t>', 'return core::Status::ok;', ', core::arg("value").max(1u)', false],
+  ['core::Status', 'double', 'return core::Status::ok;', ', core::arg("value")', true],
   ['core::Status', 'long double', 'return core::Status::ok;', ', core::arg("value")', false],
   ['core::Status', 'core::CommandArguments', 'return core::Status::ok;', ', core::arg("value")', false],
 ]
@@ -156,7 +159,7 @@ capacity_check = '''
   }
   constexpr auto descriptor = make(std::make_index_sequence<@0@>{});
 '''
-foreach count, expected : {'16': true, '17': false}
+foreach count, expected : {'6': true, '7': false}
   if cpp.compiles(capacity_check.format(count), dependencies: core_dep,
       name: 'typed parameter capacity ' + count) != expected
     error('Typed parameter capacity check did not behave as expected')

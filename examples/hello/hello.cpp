@@ -16,9 +16,7 @@ namespace core = daveos::core;
 namespace app {
   using std::chrono_literals::operator""ms;
 
-  using Event = std::variant<std::monostate>;
-
-  class Hello final : public core::Module<Hello, Event> {
+  class Hello final : public core::Module<Hello> {
    public:
     static constexpr const char* name() { return "hello"; }
 
@@ -48,7 +46,7 @@ int main() {
   auto logger = daveos::core::make_logger(
       platform, daveos::core::SubscriberList{
                     daveos::platform::host::stdout_subscriber()});
-  auto scheduler = daveos::core::make_scheduler<app::Event>(
+  auto scheduler = daveos::core::make_scheduler(
       platform, daveos::core::ModuleList{&app::hello}, logger);
   return daveos::platform::host::run(scheduler);
 }

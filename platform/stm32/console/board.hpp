@@ -41,7 +41,7 @@ namespace daveos::platform::stm32 {
     }
 
    private:
-    core::Status Timer(core::Time delay) {
+    core::Status Timer(std::uint32_t delay) {
       return this->template timer<&Board::TimerFired>(delay);
     }
 

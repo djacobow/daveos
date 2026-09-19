@@ -202,7 +202,7 @@ TEMPLATE_TEST_CASE(
 TEMPLATE_TEST_CASE(
     "numeric bounds apply to required and supplied optional values", "[typed]",
     std::int8_t, std::uint8_t, std::int16_t, std::uint16_t, std::int32_t,
-    std::uint32_t, std::int64_t, std::uint64_t, float, double) {
+    std::uint32_t, float) {
   using T = TestType;
   using M = Receiver<T>;
   constexpr auto bounded = core::arg("value").range(T{1}, T{3});
@@ -324,7 +324,7 @@ TEST_CASE(
 TEMPLATE_TEST_CASE(
     "floating range boundaries include endpoints but exclude adjacent outside "
     "values",
-    "[typed]", float, double) {
+    "[typed]", float) {
   using T = TestType;
   using M = Receiver<T>;
   constexpr auto bounds = core::arg("value").range(T{1}, T{2});

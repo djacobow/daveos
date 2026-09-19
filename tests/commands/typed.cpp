@@ -17,11 +17,11 @@ namespace {
     std::string text;
     std::optional<std::string> tail;
     std::optional<bool> enabled;
-    std::optional<double> ratio;
+    std::optional<float> ratio;
 
     core::Status Text(std::string_view value,
                       std::optional<std::string_view> suffix,
-                      std::optional<bool> flag, std::optional<double> amount) {
+                      std::optional<bool> flag, std::optional<float> amount) {
       ++calls;
       text = value;
       tail = suffix ? std::optional<std::string>(*suffix) : std::nullopt;
@@ -47,6 +47,12 @@ namespace {
     }
 
     core::Status Unsigned(std::uint64_t value) {
+      ++calls;
+      unsigned_integer = value;
+      return core::Status::ok;
+    }
+
+    core::Status Maximum(std::uint32_t value) {
       ++calls;
       unsigned_integer = value;
       return core::Status::ok;
@@ -80,8 +86,25 @@ namespace {
 
     core::Status Empty() const noexcept { return core::Status::full; }
 
+    core::Status Six(std::int8_t low, std::uint32_t high, float rate, bool flag,
+                     std::string_view label, std::optional<bool> tail_flag) {
+      ++calls;
+      integer = low;
+      unsigned_integer = high;
+      real = rate;
+      boolean = flag;
+      text = label;
+      enabled = tail_flag;
+      return core::Status::ok;
+    }
+
     static constexpr auto commands() {
       return std::array{
+          DAVEOS_COMMAND(
+              Typed, Six, "six", "Six typed parameters",
+              core::arg("low").min(-3), core::arg("high").max(UINT32_MAX),
+              core::arg("rate").range(0.0f, 2.0f), core::arg("flag").friendly(),
+              core::arg("label"), core::arg("tail")),
           DAVEOS_COMMAND(Typed, Signed, "signed", "Signed integer",
                          core::arg("value")),
           DAVEOS_COMMAND(Typed, Unsigned, "unsigned", "Unsigned integer",
@@ -104,9 +127,9 @@ namespace {
           DAVEOS_COMMAND(Typed, Text, "text", "Text and optional values",
                          core::arg("text"), core::arg("suffix"),
                          core::arg("enabled").friendly(),
-                         core::arg("ratio").range(0.5, 2.0)),
-          DAVEOS_COMMAND(Typed, Unsigned, "maximum", "Exact large bound",
-                         core::arg("value").min(UINT64_MAX))};
+                         core::arg("ratio").range(0.5f, 2.0f)),
+          DAVEOS_COMMAND(Typed, Maximum, "maximum", "Exact 32-bit bound",
+                         core::arg("value").min(UINT32_MAX))};
     }
   };
 
@@ -143,9 +166,9 @@ TEST_CASE("typed integers preserve limits and consume whole tokens") {
     CHECK(d.dispatch("typed unsigned 18446744073709551615") ==
           core::Status::ok);
     CHECK(m.unsigned_integer == UINT64_MAX);
-    CHECK(d.dispatch("typed maximum 18446744073709551614") ==
+    CHECK(d.dispatch("typed maximum 4294967294") ==
           core::Status::invalid_argument);
-    CHECK(d.dispatch("typed maximum 18446744073709551615") == core::Status::ok);
+    CHECK(d.dispatch("typed maximum 4294967295") == core::Status::ok);
     for (auto text : {"typed small -128", "typed small 127",
                       "typed small -0x80", "typed small +0b1111111"}) {
       CHECK(d.dispatch(text) == core::Status::ok);
@@ -330,5 +353,46 @@ TEST_CASE(
     CHECK_FALSE(m.optional.has_value());
     CHECK_FALSE(m.enabled.has_value());
     CHECK_FALSE(m.tail.has_value());
+  });
+}
+
+TEST_CASE("direct factory names support const and noexcept members") {
+  struct Names {
+    core::Status Plain() { return core::Status::ok; }
+
+    core::Status Constant() const { return core::Status::ok; }
+
+    core::Status NoThrow() const noexcept { return core::Status::ok; }
+  };
+
+  STATIC_REQUIRE(
+      std::string_view(core::command<&Names::Plain>("p", "P").handler) ==
+      "Plain");
+  STATIC_REQUIRE(
+      std::string_view(core::command<&Names::Constant>("c", "C").handler) ==
+      "Constant");
+  STATIC_REQUIRE(
+      std::string_view(core::command<&Names::NoThrow>("n", "N").handler) ==
+      "NoThrow");
+}
+
+TEST_CASE(
+    "six mixed parameters fit the default dispatcher including an optional "
+    "tail") {
+  Run([](auto& m, auto& d) {
+    CHECK(d.dispatch("typed six -3 4294967295 1.5 high text true") ==
+          core::Status::ok);
+    CHECK(m.integer == -3);
+    CHECK(m.unsigned_integer == UINT32_MAX);
+    CHECK(m.real == 1.5);
+    CHECK(m.boolean);
+    CHECK(m.text == "text");
+    CHECK(m.enabled == true);
+    CHECK(d.dispatch("typed six 0 1 0.5 low other") == core::Status::ok);
+    CHECK_FALSE(m.enabled.has_value());
+    CHECK_FALSE(m.boolean);
+    CHECK(d.dispatch("typed six 0 1 0.5 low other true extra") ==
+          core::Status::too_many_arguments);
+    CHECK(m.calls == 2);
   });
 }

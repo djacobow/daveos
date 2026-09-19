@@ -126,3 +126,8 @@ Enter `help`, `console echo "hello world"`, then `console exit`.
 The example uses `host::stdout_subscriber()` and `host::run(application)`.
 
 Next: [a hardware console](03-hardware-console.md).
+
+Typed handlers accept at most six parameters. Numeric bounds apply to integers
+up to 32 bits and `float`; unbounded 64-bit integer and `double` parameters remain
+supported. Optional parameters follow the same rules. The dispatcher's separate
+token capacity includes module/command names and also limits raw handlers.

@@ -21,7 +21,11 @@ TEST_CASE("disabled macros do not evaluate or require their arguments") {
 }
 
 TEST_CASE("disabled logging owns no storage and attaches no service") {
-  test::Fake platform, unused_logger_platform;
+  test::Fake platform;
+
+  struct UnusedPlatform {
+  } unused_logger_platform;
+
   test::TestModule module;
   test::Sink sink;
   auto logger = core::make_logger<4096, 1024>(

@@ -216,3 +216,22 @@ TEST_CASE(
   CHECK(records.empty());
 #endif
 }
+
+TEST_CASE(
+    "bad choices produce one specific diagnostic without a generic duplicate") {
+  auto records = Run([](auto&, auto& dispatcher) {
+    CHECK(dispatcher.dispatch("choices apply o") ==
+          core::Status::ambiguous_match);
+    CHECK(dispatcher.dispatch("choices apply on unknown") ==
+          core::Status::not_found);
+    CHECK(dispatcher.dispatch("unknown apply") == core::Status::not_found);
+  });
+#if DAVEOS_LOGGING
+  REQUIRE(records.size() == 3);
+  CHECK(records[0].message.find("argument 'mode': ambiguous choice") !=
+        std::string::npos);
+  CHECK(records[1].message.find("argument 'fallback': unknown choice") !=
+        std::string::npos);
+  CHECK(records[2].message.find("unknown command") != std::string::npos);
+#endif
+}

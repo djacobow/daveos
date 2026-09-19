@@ -7,6 +7,14 @@
 namespace daveos::core {
 
 
+  // Compile-time storage sizes, independent of optional logging/commands.
+  struct Capacities {
+    std::size_t events = 32;
+    std::size_t timers = 16;
+    std::size_t line = 256;
+    std::size_t arguments = 8;
+  };
+
   namespace detail {
     struct NoCommandSources {};
 
@@ -48,7 +56,7 @@ namespace daveos::core {
   template <typename Event, typename Modules, typename Logging, typename P,
             typename Sources = detail::NoCommandSources,
             std::size_t Events = 32, std::size_t Timers = 16,
-            std::size_t LineCapacity = 256, std::size_t ArgumentCapacity = 16>
+            std::size_t LineCapacity = 256, std::size_t ArgumentCapacity = 8>
   class Application {
    public:
     Application(P& platform, Modules modules, Logging logging, Sources sources)
@@ -98,55 +106,55 @@ namespace daveos::core {
 
   // No logger or command machinery. Return directly for guaranteed copy
   // elision.
-  template <typename Event, std::size_t Events = 32, std::size_t Timers = 16,
-            typename P, typename... M>
+  template <typename Event = NoEvent, Capacities Capacity = {}, typename P,
+            typename... M>
   auto make_application(P& platform, ModuleList<M...> modules) {
     return Application<Event, ModuleList<M...>, NoLogging, P,
-                       detail::NoCommandSources, Events, Timers>(
-        platform, modules, {}, {});
+                       detail::NoCommandSources, Capacity.events,
+                       Capacity.timers>(platform, modules, {}, {});
   }
 
   // Commands without logging. Sources remain externally owned and stable.
-  template <typename Event, std::size_t Events = 32, std::size_t Timers = 16,
-            std::size_t LineCapacity = 256, std::size_t ArgumentCapacity = 16,
-            typename P, typename... M, std::size_t Sources>
+  template <typename Event = NoEvent, Capacities Capacity = {}, typename P,
+            typename... M, std::size_t Sources>
   auto make_application(P& platform, ModuleList<M...> modules,
                         CommandSourceList<Sources> sources) {
     return Application<Event, ModuleList<M...>, NoLogging, P,
-                       CommandSourceList<Sources>, Events, Timers, LineCapacity,
-                       ArgumentCapacity>(platform, modules, {}, sources);
+                       CommandSourceList<Sources>, Capacity.events,
+                       Capacity.timers, Capacity.line, Capacity.arguments>(
+        platform, modules, {}, sources);
   }
 
   // Logging without commands. Disabled builds retain no logger attachment.
-  template <typename Event, std::size_t Events = 32, std::size_t Timers = 16,
-            typename P, typename... M, typename L>
-    requires requires(L& logger) { logger.counters(); }
+  template <typename Event = NoEvent, Capacities Capacity = {}, typename P,
+            typename... M, typename L>
+    requires LoggerFor<L, P>
   auto make_application(P& platform, ModuleList<M...> modules, L& logger) {
 #if DAVEOS_LOGGING
     return Application<Event, ModuleList<M...>, LogService<L>, P,
-                       detail::NoCommandSources, Events, Timers>(
-        platform, modules, LogService<L>(logger), {});
+                       detail::NoCommandSources, Capacity.events,
+                       Capacity.timers>(platform, modules,
+                                        LogService<L>(logger), {});
 #else
     (void)logger;
-    return make_application<Event, Events, Timers>(platform, modules);
+    return make_application<Event, Capacity>(platform, modules);
 #endif
   }
 
   // Logging and commands are independent; disabling logging keeps the sources.
-  template <typename Event, std::size_t Events = 32, std::size_t Timers = 16,
-            std::size_t LineCapacity = 256, std::size_t ArgumentCapacity = 16,
-            typename P, typename... M, typename L, std::size_t Sources>
+  template <typename Event = NoEvent, Capacities Capacity = {}, typename P,
+            typename... M, typename L, std::size_t Sources>
+    requires LoggerFor<L, P>
   auto make_application(P& platform, ModuleList<M...> modules, L& logger,
                         CommandSourceList<Sources> sources) {
 #if DAVEOS_LOGGING
     return Application<Event, ModuleList<M...>, LogService<L>, P,
-                       CommandSourceList<Sources>, Events, Timers, LineCapacity,
-                       ArgumentCapacity>(platform, modules,
-                                         LogService<L>(logger), sources);
+                       CommandSourceList<Sources>, Capacity.events,
+                       Capacity.timers, Capacity.line, Capacity.arguments>(
+        platform, modules, LogService<L>(logger), sources);
 #else
     (void)logger;
-    return make_application<Event, Events, Timers, LineCapacity,
-                            ArgumentCapacity>(platform, modules, sources);
+    return make_application<Event, Capacity>(platform, modules, sources);
 #endif
   }
 

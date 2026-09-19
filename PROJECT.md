@@ -445,7 +445,9 @@ will succeed.
 
 Any module can post an application-defined `std::variant` event. Each alternative
 is a payload type; empty structs represent notifications without data. Applications
-without events may use `std::variant<std::monostate>`. The variant type is a
+without events use `core::NoEvent`, an alias for `std::variant<std::monostate>`.
+It is the default for `Module<Derived>`, `make_scheduler(...)`, and
+`make_application(...)`; event-using modules and factories still specify their variant. The variant type is a
 scheduler and module template parameter. Enum-only event types are no longer
 supported.
 
@@ -724,7 +726,8 @@ default parameter values are not inferred.
 
 Provide parsers for integers, floating-point values, and booleans. Numeric
 conversion consumes the entire argument and rejects overflow. Integer and float
-metadata can specify optional inclusive minimum/maximum bounds through
+metadata can specify optional inclusive minimum/maximum bounds for integers up
+to 32 bits and `float` through
 `arg("name").min(value)`, `.max(value)`, or `.range(minimum, maximum)`.
 Reject NaN and infinity. Strict boolean parsing accepts `true` and `false`.
 Opt-in `.friendly()` accepts the pairs `true/false`, `1/0`, `on/off`, `yes/no`,
@@ -758,23 +761,32 @@ unsigned types reject minus signs. Floats (`float` and `double`) accept decimal
 and scientific notation, including one leading sign; reject nonfinite results,
 underflow/overflow, hexadecimal forms, whitespace, and trailing text. Conversion
 uses `std::from_chars` and is locale independent. Bounds are validated and
-converted to the parameter type at compile time; integer bounds must be integral
+converted to the parameter type at compile time; bounded `int64_t`, `uint64_t`,
+and `double` parameters are compile errors (including optional forms), while
+unbounded parsing of those types remains supported. Integer bounds must be integral
 and representable. Friendly boolean aliases are ASCII case-insensitive; strict
 booleans are exactly lowercase `true` and `false`. Borrowed `std::string_view`
 parameters are also supported, including optional text.
 
-Each homogeneous descriptor owns fixed metadata for up to 16 typed parameters;
-this is separate from the dispatcher's configurable token limit (16 by default,
-including module and command). Descriptors live in static constexpr storage in
-the dispatcher, not on the dispatch stack. No handler runs after an adapter
+Compile-time declarations support up to six typed parameters, separately from the
+dispatcher's configurable token limit (8 by default, including module and command).
+At compile time, each module's declarations are compacted into one shared static
+table: descriptors reference contiguous metadata sized for the actual parameters.
+Zero-argument commands consume no argument entries. Each argument stores mutually exclusive numeric/choice policies in a
+`std::variant`; range bounds occupy 32-bit integer/float storage. Help and dispatch share this
+table; neither copies full declaration arrays onto the dispatch stack. No handler runs after an adapter
 failure. Count and non-enum conversion failures return `invalid_argument`; enum
 choice failures use the matching statuses below. Log the parameter name/type or expected
-count through the ordinary optional logger. Help lists required/optional names
+count and status through the ordinary optional logger, without a second generic
+error line for a failure already diagnosed by the adapter. Help lists required/optional names
 and types below each command. Raw handlers retain their own validation.
 The application handlers use typed parameters: board LED takes a bounded 1–3
 index and a `LedAction` enum (`on`, `off`, or `toggle`), and network
 status/host exit take no arguments. Host echo deliberately remains a raw handler
-because it accepts an arbitrary number of tokens.
+because it accepts an arbitrary number of tokens within the dispatcher limit.
+The typed six-parameter limit is independent of the configurable token buffer,
+which also holds the module/command names. The board timer accepts 1 through
+UINT32_MAX microseconds (about 71 minutes).
 
 Test the public adapters across signed/unsigned 8/16/32/64-bit integers, float,
 double, strict/friendly booleans, and unconverted string views, both required and
@@ -858,7 +870,7 @@ Command names and prefixes contain only ASCII letters, digits, underscores, and
 hyphens; display names may contain spaces if the command prefix is overridden.
 
 The dispatcher owns fixed storage, with template defaults of 256 input bytes
-and 16 arguments including prefix and command. Overflow rejects the entire line
+and 8 tokens including prefix and command. Overflow rejects the entire line
 without truncation or handler invocation. Tokenization happens exactly once.
 ASCII whitespace separates arguments. Double quotes must surround whole
 arguments; empty quoted arguments are preserved. Mixed quoted/unquoted forms,
@@ -1113,8 +1125,13 @@ instances or hardware. All borrowed objects must finish construction before
 init/run and outlive the Application. Application is non-copyable/non-movable
 because its members refer to each other; the factory returns a prvalue using
 C++17 guaranteed copy elision. File-scope instances remain supported. Include `core/schedule/application.hpp`.
-Factory numeric arguments are event/timer capacities (32/16 by default), followed
-by command line/argument capacities (256/16) on command-enabled overloads.
+The application factory takes a named structural configuration as its second
+template argument: `make_application<Event, Capacities{.events = 64}>(...)`.
+`Capacities` defaults to `events=32`, `timers=16`, `line=256`, and `arguments=8`.
+Command capacities apply when command sources are attached. The lower-level
+`make_scheduler` retains its event/timer numeric capacity arguments. Application
+and scheduler logger overloads require the named `LoggerFor<L, P>` concept,
+checking the complete logger/platform contract rather than just `counters()`.
 
 app.init() runs scheduler initialization, then binds command
 sources only after successful completion of both stages. app.run() calls init()

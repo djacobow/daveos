@@ -11,7 +11,7 @@ namespace app {
 
 int main() {
   daveos::platform::host::Platform platform;
-  auto application = app::core::make_application<app::Event>(
+  auto application = app::core::make_application(
       platform, app::core::ModuleList{&app::counter});
   const auto result = daveos::platform::host::run(application);
   if (result == 0) {

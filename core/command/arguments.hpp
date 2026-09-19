@@ -12,6 +12,7 @@
 #include <tuple>
 #include <type_traits>
 #include <utility>
+#include <variant>
 
 #include "core/enum/choices.hpp"
 #include "match.hpp"
@@ -89,12 +90,11 @@ namespace daveos::core {
       static constexpr bool value = true;
     };
 
-    // Bounds are converted once, at compile time, without losing 64-bit
-    // integers.
+    // Bounded parameters are restricted to 32-bit integers and float.
     union Bound {
-      std::int64_t signed_value;
-      std::uint64_t unsigned_value;
-      double float_value;
+      std::int32_t signed_value;
+      std::uint32_t unsigned_value;
+      float float_value;
 
       constexpr Bound() : unsigned_value(0) {}
     };
@@ -122,23 +122,34 @@ namespace daveos::core {
     }
   }  // namespace detail
 
-  // Homogeneous descriptors own their metadata; no temporary declaration views.
-  // This limit matches the default dispatcher token capacity (which also counts
-  // the module and command). Increase it here if larger handlers are needed.
-  inline constexpr std::size_t CommandParameterCapacity = 16;
+  // Declaration builders own metadata; dispatch compacts it into static tables.
+  // Six typed handler parameters; dispatcher tokens also include
+  // prefix/command.
+  inline constexpr std::size_t CommandParameterCapacity = 6;
+
+  namespace detail {
+    struct NumericBounds {
+      Bound minimum{};
+      Bound maximum{};
+      bool has_minimum = false;
+      bool has_maximum = false;
+    };
+
+    struct ChoicePolicy {
+      std::size_t count = 0;
+      const char* (*name)(std::size_t) = nullptr;
+      Status (*parse)(std::string_view, void*) = nullptr;
+    };
+
+  }  // namespace detail
 
   struct ArgumentMetadata {
     const char* name = nullptr;
     const char* type = nullptr;
-    detail::Bound minimum{};
-    detail::Bound maximum{};
-    bool has_minimum = false;
-    bool has_maximum = false;
-    bool friendly = false;
     bool optional = false;
-    std::size_t choice_count = 0;
-    const char* (*choice_name)(std::size_t) = nullptr;
-    Status (*parse_choice)(std::string_view, void*) = nullptr;
+    bool friendly = false;
+    std::variant<std::monostate, detail::NumericBounds, detail::ChoicePolicy>
+        policy;
   };
 
   // Set only for adapter failures, not for errors returned by a handler.
@@ -191,9 +202,10 @@ namespace daveos::core {
         }
       }
       result.type = "enum choice";
-      result.choice_count = Table.size();
-      result.choice_name = [](std::size_t i) { return Table[i].name; };
-      result.parse_choice = [](std::string_view text, void* output) {
+      ChoicePolicy policy;
+      policy.count = Table.size();
+      policy.name = [](std::size_t i) { return Table[i].name; };
+      policy.parse = [](std::string_view text, void* output) {
         auto match = lazy_match(text, Table.size(),
                                 [](std::size_t i) { return Table[i].name; });
         if (match.status == Status::ok) {
@@ -201,6 +213,7 @@ namespace daveos::core {
         }
         return match.status;
       };
+      result.policy = policy;
     }
 
     template <typename P, typename L, typename H, bool F, typename C>
@@ -226,8 +239,9 @@ namespace daveos::core {
       result.name = declaration.name;
       result.optional = Optional<P>::value;
       result.friendly = F;
-      result.has_minimum = low;
-      result.has_maximum = high;
+      static_assert(
+          !(low || high) || sizeof(T) <= sizeof(std::uint32_t),
+          "bounded parameters must be integers up to 32 bits or float");
       if constexpr (std::is_enum_v<T>) {
         if constexpr (!std::is_same_v<C, void>) {
           ChoiceMetadata<T, C::entries>(result);
@@ -249,16 +263,22 @@ namespace daveos::core {
       } else {
         result.type = "text";
       }
-      if constexpr (low) {
-        Store(result.minimum, CheckBound<T>(declaration.minimum));
-      }
-      if constexpr (high) {
-        Store(result.maximum, CheckBound<T>(declaration.maximum));
-      }
-      if constexpr (low && high) {
-        if (Load<T>(result.minimum) > Load<T>(result.maximum)) {
-          std::abort();
+      if constexpr (low || high) {
+        NumericBounds bounds;
+        bounds.has_minimum = low;
+        bounds.has_maximum = high;
+        if constexpr (low) {
+          Store(bounds.minimum, CheckBound<T>(declaration.minimum));
         }
+        if constexpr (high) {
+          Store(bounds.maximum, CheckBound<T>(declaration.maximum));
+        }
+        if constexpr (low && high) {
+          if (Load<T>(bounds.minimum) > Load<T>(bounds.maximum)) {
+            std::abort();
+          }
+        }
+        result.policy = bounds;
       }
       return result;
     }
@@ -289,14 +309,16 @@ namespace daveos::core {
         if (text.empty() || text.front() == '-' || text.front() == '+') {
           return false;
         }
-        std::uint64_t magnitude = 0;
+        using Magnitude =
+            std::conditional_t<(sizeof(T) <= sizeof(std::uint32_t)),
+                               std::uint32_t, std::uint64_t>;
+        Magnitude magnitude = 0;
         auto end = text.data() + text.size();
         auto parsed = std::from_chars(text.data(), end, magnitude, base);
         if (parsed.ec != std::errc{} || parsed.ptr != end) {
           return false;
         }
-        auto maximum =
-            static_cast<std::uint64_t>(std::numeric_limits<T>::max());
+        auto maximum = static_cast<Magnitude>(std::numeric_limits<T>::max());
         if constexpr (std::is_signed_v<T>) {
           if (negative) {
             if (magnitude > maximum + 1) {
@@ -304,7 +326,9 @@ namespace daveos::core {
             }
             value = magnitude == maximum + 1
                         ? std::numeric_limits<T>::min()
-                        : static_cast<T>(-static_cast<std::int64_t>(magnitude));
+                        : static_cast<T>(
+                              -static_cast<std::make_signed_t<Magnitude>>(
+                                  magnitude));
             return true;
           }
         }
@@ -338,7 +362,11 @@ namespace daveos::core {
       using T = typename Optional<P>::Value;
       T value{};
       if constexpr (std::is_enum_v<T>) {
-        auto status = metadata.parse_choice(text, &value);
+        const auto* choices = std::get_if<ChoicePolicy>(&metadata.policy);
+        if (!choices) {
+          return Status::invalid_argument;
+        }
+        auto status = choices->parse(text, &value);
         if (status != Status::ok) {
           return status;
         }
@@ -368,10 +396,17 @@ namespace daveos::core {
       } else if constexpr (std::is_same_v<T, std::string_view>) {
         value = text;
       } else {
-        if (!Number(text, value) ||
-            (metadata.has_minimum && value < Load<T>(metadata.minimum)) ||
-            (metadata.has_maximum && value > Load<T>(metadata.maximum))) {
+        if (!Number(text, value)) {
           return Status::invalid_argument;
+        }
+        if constexpr (sizeof(T) <= sizeof(std::uint32_t)) {
+          if (const auto* bounds =
+                  std::get_if<NumericBounds>(&metadata.policy)) {
+            if ((bounds->has_minimum && value < Load<T>(bounds->minimum)) ||
+                (bounds->has_maximum && value > Load<T>(bounds->maximum))) {
+              return Status::invalid_argument;
+            }
+          }
         }
       }
       output = value;
@@ -384,8 +419,13 @@ namespace daveos::core {
     template <auto Function>
     consteval auto HandlerName() {
       constexpr std::string_view signature = __PRETTY_FUNCTION__;
-      constexpr auto start = signature.find("Function = ") + 11;
+      constexpr auto marker = signature.find("Function = ");
+      static_assert(marker != std::string_view::npos,
+                    "unsupported compiler function signature format");
+      constexpr auto start = marker + 11;
       constexpr auto end = signature.find_first_of(";]", start);
+      static_assert(end != std::string_view::npos && end > start,
+                    "unsupported compiler function signature format");
       constexpr auto qualified = signature.substr(start, end - start);
       constexpr auto scope = qualified.rfind("::");
       constexpr auto name =
@@ -421,26 +461,35 @@ namespace daveos::core {
         : Signature<R (M::*)(P...)> {};
   }  // namespace detail
 
-  template <typename M>
+  // Common invocation view used by owned declarations and compact tables.
+  struct CommandParameters {
+    std::span<const ArgumentMetadata> arguments;
+    std::size_t count;
+    std::size_t required;
+  };
+
+  template <typename M, typename Storage = std::array<ArgumentMetadata,
+                                                      CommandParameterCapacity>>
   struct CommandDescriptor {
     const char* name;
     const char* help;
-    Status (*callback)(M&, CommandArguments, const CommandDescriptor&,
-                       ArgumentError&);
+    Status (*callback)(M&, CommandArguments, CommandParameters, ArgumentError&);
     const char* handler;
-    std::array<ArgumentMetadata, CommandParameterCapacity> arguments{};
+    Storage arguments{};
     std::size_t count = 0;
     std::size_t required = 0;
+
+    constexpr operator CommandParameters() const {
+      return {std::span<const ArgumentMetadata>(arguments).first(count), count,
+              required};
+    }
   };
 
   namespace detail {
     template <auto Function, typename Tuple, std::size_t... I>
-    Status Invoke(
-        typename Signature<decltype(Function)>::Owner& owner,
-        CommandArguments args,
-        const CommandDescriptor<typename Signature<decltype(Function)>::Owner>&
-            descriptor,
-        ArgumentError& error, std::index_sequence<I...>) {
+    Status Invoke(typename Signature<decltype(Function)>::Owner& owner,
+                  CommandArguments args, CommandParameters descriptor,
+                  ArgumentError& error, std::index_sequence<I...>) {
       Tuple values{};
       [[maybe_unused]] auto parse = [&]<std::size_t Index>() {
         if (Index >= args.size()) {
@@ -465,6 +514,52 @@ namespace daveos::core {
       return std::apply(
           [&](auto... value) { return (owner.*Function)(value...); }, values);
     }
+
+    // Declarations are evaluated only at compile time. Emit a single compact
+    // table per module, shared by help and invocation, with no empty argument
+    // slots.
+    template <typename M>
+    struct CommandTable {
+      static constexpr std::size_t argument_count = [] {
+        std::size_t count = 0;
+        for (const auto& command : M::commands()) {
+          count += command.count;
+        }
+        return count;
+      }();
+
+      static constexpr auto arguments = [] {
+        std::array<ArgumentMetadata, argument_count> result{};
+        std::size_t offset = 0;
+        for (const auto& command : M::commands()) {
+          for (std::size_t i = 0; i < command.count; ++i) {
+            result[offset++] = command.arguments[i];
+          }
+        }
+        return result;
+      }();
+
+      using Descriptor =
+          CommandDescriptor<M, std::span<const ArgumentMetadata>>;
+      static constexpr auto descriptors = [] {
+        constexpr auto declarations = M::commands();
+        std::array<Descriptor, declarations.size()> result{};
+        std::size_t offset = 0;
+        for (std::size_t i = 0; i < result.size(); ++i) {
+          const auto& command = declarations[i];
+          result[i] = {command.name,
+                       command.help,
+                       command.callback,
+                       command.handler,
+                       std::span<const ArgumentMetadata>(arguments).subspan(
+                           offset, command.count),
+                       command.count,
+                       command.required};
+          offset += command.count;
+        }
+        return result;
+      }();
+    };
   }  // namespace detail
 
   // Build a homogeneous descriptor and an allocation-free typed invocation
@@ -485,8 +580,7 @@ namespace daveos::core {
     CommandDescriptor<M> result{name, help, nullptr,
                                 detail::HandlerLabel<Function>.data()};
     if constexpr (raw) {
-      result.callback = [](M& owner, CommandArguments args,
-                           const CommandDescriptor<M>&,
+      result.callback = [](M& owner, CommandArguments args, CommandParameters,
                            ArgumentError&) { return (owner.*Function)(args); };
     } else if constexpr (sizeof...(A) == count &&
                          count <= CommandParameterCapacity) {
@@ -508,8 +602,7 @@ namespace daveos::core {
         }
       }
       result.callback = [](M& owner, CommandArguments args,
-                           const CommandDescriptor<M>& descriptor,
-                           ArgumentError& error) {
+                           CommandParameters descriptor, ArgumentError& error) {
         if (args.size() < descriptor.required ||
             args.size() > descriptor.count) {
           error.reason = "wrong argument count";

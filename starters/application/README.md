@@ -5,6 +5,9 @@ repository's root. It contains one module, a real-time host executable, and a
 fake-time test of the same module. Application module constructors are passive;
 the scheduler runs stage1 for every module before any stage2 callback.
 
+The current NoEvent update requires a local checkout at `subprojects/daveos`
+before setup; see [updating the dependency pin](#updating-the-dependency-pin).
+
 ```sh
 meson setup build/host
 meson compile -C build/host
@@ -31,3 +34,12 @@ platform. Keep device access behind injected interfaces so the same module can
 later run on an STM32 platform. The repository's STM32 console demonstrates
 board startup, linker configuration, peripherals, and optional transports;
 this starter intentionally supplies only host/fake build targets.
+
+## Updating the dependency pin
+
+The current NoEvent defaults require the local DaveOS checkout until the next
+implementation commit is pinned. For a release, commit the framework changes
+first, then set `revision` in both starter `subprojects/daveos.wrap` files to that
+full commit hash (`git rev-parse HEAD`). Commit the pin updates separately and
+publish both commits. Rebuild both starters against the selected revision; keep
+pins fixed to commits rather than moving branches.
