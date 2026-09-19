@@ -1,6 +1,9 @@
 # Follow-up work
 
 - [x] Add capacity-first application factories and document the raw-handler token-limit migration; keep explicit handler-name extraction tests.
+- [x] Reflash and verify the final H563 image; pass another 120 command checks across UART/USB/TCP, two runs of the checked-in UART stress tool (1,160 burst commands), 1,400-byte ping, TCP reconnect, and software-reset recovery. All transmit counters remained clean; no visual LED/button confirmation in this run.
+- [x] Fix the UART DMA completion race: a post-start control-register read/modify/write could re-enable an exhausted H563 GPDMA transfer (captured HAL_DMA_ERROR_USE). Leave HAL half-transfer handling enabled on both boards; reduce echo pressure by appending only new input bytes.
+- [x] Repeat H563 hardware validation: the baseline failed 8/10 cycles; with both UART fixes, all 10 cycles passed 1,200 UART/USB/TCP command checks and 5,800 unpaced burst commands, with zero dropped frames/transmit errors. Add tools/hardware/uart_stress.py for repeatable UART regression checks. H755 remains build-tested only, with hardware testing deferred.
 
 - [x] Default event-free modules/factories to NoEvent; add named application capacities and full logger constraints.
 - [x] Compact command metadata into one shared static table per module and emit one specific diagnostic per adapter failure. With six typed parameters, 32-bit/float bounds and variant policies, at `88f03b5`, the H563 debug (-O0) full network-console image shrank by 7,016 flash bytes (text+data: 332,292 to 325,276) and 64 bytes of static RAM. ARM metadata: 28 bytes per argument, 32 bytes per compact command. Build measurement only.

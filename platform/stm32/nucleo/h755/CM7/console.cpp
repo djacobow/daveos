@@ -39,7 +39,8 @@ namespace board {
                               static_cast<std::uint16_t>(size)) != HAL_OK) {
       return false;
     }
-    __HAL_DMA_DISABLE_IT(huart3.hdmatx, DMA_IT_HT);
+    // Keep HAL's half-transfer handling, as on H5. Do not rewrite the
+    // active DMA control register merely to suppress that notification.
     return true;
   }
 

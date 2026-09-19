@@ -624,6 +624,23 @@ clocks remain enabled during shallow sleep. RX still uses one-byte interrupts.
 Output never waits for space: a complete display/log frame (up to 768 bytes) is
 dropped if it cannot fit. Transfer errors discard queued output with uncertain
 progress. `board stats` reports bytes sent, transfers, dropped frames, and errors.
+Both boards leave HAL's half-transfer interrupt enabled. Do not disable it by
+rewriting the DMA control register after starting a transfer: hardware can clear
+`EN` between the read and write, and the stale write can restart an exhausted
+H563 GPDMA transfer with a user-setting error. The HAL half-transfer callback is
+otherwise a no-op.
+
+For repeated UART hardware regression checks (requires pyserial), run:
+
+```sh
+python3 tools/hardware/uart_stress.py /dev/serial/by-id/usb-STMicroelectronics_STLINK-V3_YOUR_BOARD-if02 --repeat 10
+```
+
+This resets the board before each cycle and checks short/max-length commands,
+16-line bursts, overlength recovery, and UART-specific transmit counters.
+It saves logs under `build/hardware/uart-stress/` and fails on missing replies,
+dropped frames, or transmit errors. It does not replace USB/TCP or physical
+LED/button validation. Keep other UART readers and debuggers detached.
 
 The H755 also exposes a USB CDC ACM console on **CN13 (Micro-AB)**. Connect a
 USB data cable there and keep ST-LINK connected for power/debugging. On Linux,
@@ -865,8 +882,9 @@ a named enumerator return `"unknown"`. `daveos::core::Status` uses this mechanis
 and command diagnostics print status names instead of numeric values.
 
 The shared H563/H755 UART console echoes the pending line from its scheduled
-input task. Return
-clears that line with an ANSI erase-line sequence, then logs `> command` before
+input task. Newly appended characters are written once, rather than redrawing
+the whole line at every poll; edits and intervening logs still redraw as needed.
+Return clears that line with an ANSI erase-line sequence, then logs `> command` before
 dispatch. Backspace/Delete remove the last character. Incoming logs temporarily
 clear and redraw unfinished input. This is a single-line editor: use an ANSI
 terminal and keep input within the terminal width. Echo remains available without

@@ -30,7 +30,9 @@ namespace board {
                               static_cast<std::uint16_t>(size)) != HAL_OK) {
       return false;
     }
-    __HAL_DMA_DISABLE_IT(huart3.hdmatx, DMA_IT_HT);
+    // Leave HAL's half-transfer interrupt enabled. Rewriting the live DMA
+    // control register can race hardware clearing EN at completion and
+    // accidentally restart an exhausted transfer (GPDMA user-setting error).
     return true;
   }
 

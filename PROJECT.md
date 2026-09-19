@@ -947,8 +947,8 @@ one list. Names are borrowed static strings;
 unknown values return `"unknown"`. Explicit values are supported without requiring
 contiguous numbering; duplicate-value aliases are outside this helper's scope.
 
-The UART console echoes buffered input in task context, clears the typed line on
-Return, and logs the submitted command before dispatch. UART interrupts do not
+The UART console echoes appended characters once in task context, clears the
+typed line on Return, and logs the submitted command before dispatch. UART interrupts do not
 transmit or log synchronously. Backspace/Delete support basic line editing, and
 log output preserves unfinished input by erasing and redrawing it. Terminal-local
 echo should be disabled; wrapped-line editing is outside the initial scope.

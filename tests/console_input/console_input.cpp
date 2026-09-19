@@ -118,7 +118,7 @@ TEST_CASE("UART echo clears on submit and preserves input around log output") {
   line.bytes[1] = 'i';
   line.size = 2;
   display.show(line);
-  CHECK(terminal_output == "h\r\x1b[2Khi");
+  CHECK(terminal_output == "hi");
   terminal_output.clear();
   display.before_log();
   TerminalWrite("log\r\n");
@@ -208,4 +208,35 @@ TEST_CASE("Configurable input queue retains bounded multi-line bursts") {
   REQUIRE(input.pop(line));
   CHECK(line.view() == "recovered");
   CHECK(input.take_dropped() == 0);
+}
+
+TEST_CASE("Terminal echo appends long input once and redraws edits safely") {
+  terminal_output.clear();
+  daveos::console::LineDisplay display(
+      nullptr, [](void*, std::string_view text) { TerminalWrite(text); });
+  daveos::console::Line line;
+  for (std::size_t i = 0; i < 256; ++i) {
+    line.bytes[i] = 'x';
+    line.size = i + 1;
+    display.show(line);
+  }
+  CHECK(terminal_output == std::string(256, 'x'));
+  terminal_output.clear();
+  line.size = 2;
+  display.show(line);
+  CHECK(terminal_output == "\r\x1b[2Kxx");
+  terminal_output.clear();
+  line.bytes[1] = '\x1b';
+  display.show(line);
+  CHECK(terminal_output == "\r\x1b[2Kx?");
+  terminal_output.clear();
+  line.bytes[2] = '\x7f';
+  line.size = 3;
+  display.show(line);
+  CHECK(terminal_output == "?");
+  terminal_output.clear();
+  display.before_log();
+  TerminalWrite("message\r\n");
+  display.after_log();
+  CHECK(terminal_output == "\r\x1b[2Kmessage\r\nx??");
 }

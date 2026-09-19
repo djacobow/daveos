@@ -128,6 +128,13 @@ namespace daveos::console {
       if (shown_.view() == line.view()) {
         return;
       }
+      if (line.view().starts_with(shown_.view())) {
+        // Appending input needs only the new bytes, not an erase and redraw
+        // of the entire line at every polling tick.
+        WriteVisible(line.view().substr(shown_.size));
+        shown_ = line;
+        return;
+      }
       before_log();
       shown_ = line;
       after_log();
@@ -144,23 +151,23 @@ namespace daveos::console {
       }
     }
 
-    void after_log() {
+    void after_log() { WriteVisible(shown_.view()); }
+
+   private:
+    void WriteVisible(std::string_view text) {
       // Echo printable ASCII only; typed terminal escapes must not move the
       // cursor.
-      if (!shown_.size) {
+      if (text.empty()) {
         return;
       }
-      Line visible = shown_;
-      for (std::size_t i = 0; i < visible.size; ++i) {
-        auto& byte = visible.bytes[i];
-        if (byte < ' ' || byte > '~') {
-          byte = '?';
-        }
+      Line visible;
+      visible.size = text.size();
+      for (std::size_t i = 0; i < text.size(); ++i) {
+        visible.bytes[i] = text[i] < ' ' || text[i] > '~' ? '?' : text[i];
       }
       write_(context_, visible.view());
     }
 
-   private:
     void* context_;
     void (*write_)(void*, std::string_view);
     Line shown_;
