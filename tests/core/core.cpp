@@ -1,8 +1,29 @@
+#include <memory>
 #include <semaphore>
 #include <thread>
 
 #include "support.hpp"
 using namespace testing;
+
+TEST_CASE("scheduler construction does not require constructed modules") {
+  Fake platform;
+  alignas(TestModule) std::byte storage[sizeof(TestModule)];
+  auto* module = reinterpret_cast<TestModule*>(storage);
+  // The scheduler may retain addresses and static descriptors, but must not
+  // touch the module until init. Its constructor runs later, as across TUs.
+  auto scheduler = make_scheduler<Event>(platform, ModuleList{module});
+  auto destroy = [](TestModule* p) { std::destroy_at(p); };
+  std::unique_ptr<TestModule, decltype(destroy)> owned(
+      std::construct_at(module), destroy);
+  std::vector<InitStage> stages;
+  owned->initializer = [&](InitStage stage) {
+    CHECK(&owned->scheduler() == &scheduler);
+    stages.push_back(stage);
+    return Status::ok;
+  };
+  CHECK(scheduler.init() == Status::ok);
+  CHECK(stages == std::vector{InitStage::stage1, InitStage::stage2});
+}
 
 TEST_CASE("startup is two passes; task deadlines start at run") {
   Fake platform;

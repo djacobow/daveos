@@ -49,6 +49,11 @@ class UsbConsole final
  public:
   explicit UsbConsole(UsbTransport& transport) : transport_(transport) {}
   static constexpr const char* name() { return "usb"; }
+  daveos::core::Status init(daveos::core::InitStage stage) {
+    if (stage == daveos::core::InitStage::stage1 && !transport_.init())
+      return daveos::core::Status::initialization_failed;
+    return daveos::console::Module<UsbConsole<Event>, Event>::init(stage);
+  }
   bool poll_line(daveos::console::Line& line) {
     return transport_.poll_line(line);
   }

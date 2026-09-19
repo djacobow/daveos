@@ -8,11 +8,11 @@
 namespace daveos::core {
 
 
-// A non-owning complete-line input endpoint, registered when constructing the
-// dispatcher. Sources collect bytes themselves and submit only from scheduler
-// callbacks. The dispatcher must outlive all submissions. An unbound source
-// returns not_running. Source identity/storage must remain stable after
-// binding.
+// A non-owning complete-line input endpoint, registered with bind_sources()
+// during application initialization. Sources collect bytes themselves and
+// submit only from scheduler callbacks. The dispatcher must outlive all
+// submissions. An unbound source returns not_running. Source identity/storage
+// must remain stable after binding.
 class CommandSource {
  public:
   CommandSource() = default;
@@ -35,7 +35,7 @@ class CommandSource {
   void* context_ = nullptr;
   Status (*dispatch_)(void*, std::string_view) = nullptr;
 };
-// Constructor registration, like SubscriberList. References exclude null
+// Initialization-time registration. References exclude null
 // sources; no allocation or source polling is added to the dispatcher.
 template <std::size_t Size>
 struct CommandSourceList {

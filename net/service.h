@@ -57,6 +57,8 @@ class Service {
   Service(const Service&) = delete;
   Service& operator=(const Service&) = delete;
   bool init();
+  // Supply hardware-derived configuration at initialization, not construction.
+  bool init(const Config& config);
   void poll();
   void stop();
   // Return an independent copy so later polling cannot change a saved sample.

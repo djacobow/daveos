@@ -14,7 +14,9 @@ namespace daveos::net {
 template <typename Event>
 class Module final : public core::Module<Module<Event>, Event> {
  public:
-  explicit Module(Service& service) : service_(service) {}
+  // Optional configuration factory runs in stage1, after platform setup.
+  explicit Module(Service& service, Config (*configure)() = nullptr)
+      : service_(service), configure_(configure) {}
   static constexpr const char* name() { return "net"; }
   static constexpr auto tasks() {
     return std::array{core::TaskDescriptor<Module>{"poll", &Module::Poll}};
@@ -25,7 +27,7 @@ class Module final : public core::Module<Module<Event>, Event> {
   }
   core::Status init(core::InitStage stage) {
     if (stage != core::InitStage::stage1) return core::Status::ok;
-    if (!service_.init()) {
+    if (!(configure_ ? service_.init(configure_()) : service_.init())) {
       E_("Ethernet initialization failed; reset to retry");
       return core::Status::ok;
     }
@@ -68,6 +70,7 @@ class Module final : public core::Module<Module<Event>, Event> {
        s.rx, s.tx, s.dropped_rx, s.dropped_tx, s.errors);
   }
   Service& service_;
+  Config (*configure_)();
   Snapshot previous_{};
 };
 

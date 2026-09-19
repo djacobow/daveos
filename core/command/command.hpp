@@ -59,11 +59,10 @@ class CommandDispatcher<Event, ModuleList<Modules...>, LineCapacity,
     std::apply([&](auto*... module) { (Register(module), ...); },
                modules.items);
   }
+  // Bind sources during application initialization (normally stage2), after
+  // all endpoints have been constructed. No polling or allocation is added.
   template <std::size_t Sources>
-  CommandDispatcher(ModuleList<Modules...> modules,
-                    SchedulerInterface<Event>& scheduler,
-                    CommandSourceList<Sources> sources)
-      : CommandDispatcher(modules, scheduler) {
+  void bind_sources(CommandSourceList<Sources> sources) {
     for (auto* source : sources.items) source->Bind(*this);
   }
   CommandDispatcher(const CommandDispatcher&) = delete;
@@ -251,11 +250,6 @@ class CommandDispatcher<Event, ModuleList<Modules...>, LineCapacity,
 
 template <typename... Modules, typename Event>
 CommandDispatcher(ModuleList<Modules...>, SchedulerInterface<Event>&)
-    -> CommandDispatcher<Event, ModuleList<Modules...>>;
-
-template <typename... Modules, typename Event, std::size_t Sources>
-CommandDispatcher(ModuleList<Modules...>, SchedulerInterface<Event>&,
-                  CommandSourceList<Sources>)
     -> CommandDispatcher<Event, ModuleList<Modules...>>;
 
 

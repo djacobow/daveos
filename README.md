@@ -190,12 +190,13 @@ The generated `main.c` calls `DaveOS_Run()` from a CubeMX USER CODE section afte
 peripheral initialization. Shared commands, logging, input, and IRQ bridges live
 in `examples/stm32_console/`; each target supplies `board_config.h` and `console.cpp`
 for its platform, LED/button access, DMA storage/cache handling, and timer clock.
-The scheduler lives on the main stack; the `.ioc` and FLASH linker script reserve
-64 KiB for application-owned console objects, nested calls, and interrupt frames.
-The Cortex-M33 startup programs `MSPLIM` from this reservation. The full debug
-build uses 34,216 bytes in `DaveOS_Run()` alone; the former 16 KiB reservation
-caused a stack-overflow HardFault before USB or the scheduler could start. Keep
-the 64 KiB setting when regenerating with CubeMX. GCC's `.su` reports are emitted beside
+The modules, logger, scheduler, dispatcher, and transport buffers live at file
+scope. Their constructors store references and metadata; UART/USB/network setup
+runs in stage1 and command-source wiring in stage2, after every stage1 completes.
+The platform timer is initialized after CubeMX peripheral setup and before
+scheduler initialization. The `.ioc` and FLASH linker script retain a 64 KiB
+stack reservation for nested calls and interrupt frames, enforced by MSPLIM.
+Keep that setting when regenerating with CubeMX. GCC's `.su` reports are emitted beside
 the example's object files. C++ exceptions and RTTI are disabled. The example
 allows hosted headers because ST's umbrella header includes `math.h`; the core
 and STM32 adapter remain compiled in freestanding mode. The firmware disables
@@ -518,7 +519,9 @@ Application wiring uses parallel lists:
 auto subscribers = SubscriberList{uart.subscriber(), usb.subscriber()};
 auto logger = make_logger(platform, subscribers);
 auto scheduler = make_scheduler<Event>(platform, modules, logger);
-CommandDispatcher dispatcher(modules, scheduler,
+CommandDispatcher dispatcher(modules, scheduler);
+// During application initialization, normally stage2:
+dispatcher.bind_sources(
     CommandSourceList{uart.command_source(), usb.command_source()});
 ```
 

@@ -15,7 +15,7 @@ namespace daveos::core {
 // consumer. Formatting happens at the call site, so arguments need not survive
 // delivery. The application must choose a printf implementation suitable for
 // its ISR and allocation constraints; buffering alone does not make libc
-// formatting ISR-safe. Construct before the scheduler, attach with
+// formatting ISR-safe. Attach with
 // make_scheduler(..., logger), and keep this object and subscriber contexts
 // alive through shutdown. The scheduler only borrows this service.
 template <std::size_t Capacity, std::size_t MessageSize,

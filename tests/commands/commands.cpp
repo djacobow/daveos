@@ -239,8 +239,9 @@ TEST_CASE("Independent console sources share parsing and command dispatch") {
   Fixture f;
   CommandSource uart, usb;
   CHECK(uart.dispatch("motor speed 0") == Status::not_running);
-  CommandDispatcher dispatcher(f.modules, f.scheduler,
-                               CommandSourceList{uart, usb});
+  CommandDispatcher dispatcher(f.modules, f.scheduler);
+  CHECK(uart.dispatch("help") == Status::not_running);
+  dispatcher.bind_sources(CommandSourceList{uart, usb});
   std::vector<std::string> received;
   f.motor.action = [&](CommandArguments args) {
     for (auto arg : args) received.emplace_back(arg);
@@ -257,6 +258,7 @@ TEST_CASE("Independent console sources share parsing and command dispatch") {
 
 TEST_CASE("A dispatcher can register no command sources") {
   Fixture f;
-  CommandDispatcher dispatcher(f.modules, f.scheduler, CommandSourceList{});
+  CommandDispatcher dispatcher(f.modules, f.scheduler);
+  dispatcher.bind_sources(CommandSourceList{});
   f.Run([&] { CHECK(dispatcher.dispatch("motor speed 1") == Status::ok); });
 }

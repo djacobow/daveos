@@ -129,10 +129,12 @@ This interface is an allocation-free reference with a function-pointer operation
 table, not a virtual base. Heterogeneous task and subscriber callbacks likewise
 use stored function pointers where indirect dispatch is required.
 
-During construction, the scheduler automatically binds a reference or pointer to
-this interface into each registered module. This binding is available after
-scheduler construction and before any `stage1` callback. Module constructors run
-before binding and must not access the scheduler through that reference.
+Constructors store references and static metadata without accessing prerequisites
+or initializing other objects. During `init()`, after validation and before any
+`stage1` callback, the scheduler binds this interface into every module. Module
+constructors must not access it. All modules complete `stage1` before any module
+enters `stage2`; independent setup belongs in stage1, and setup that uses another
+module's initialized state belongs in stage2.
 
 Its operations are:
 
@@ -704,7 +706,7 @@ Both examples provide an application-owned USB CDC ACM console on CN13 (Type-C
 on H563, Micro-AB on H755), using a shared pinned ST USB Device Library submodule. UART and USB retain separate
 partial lines and echo while sharing command dispatch and log output. Each
 transport is an independent scheduled module, registers a `CommandSource` with
-the dispatcher through `CommandSourceList`,
+the dispatcher through `bind_sources(CommandSourceList{...})` during initialization,
 and registers its own logger subscriber. `uart_console` and `usb_console` Meson
 options select either, both, or neither on both boards, independently of logging.
 Sources submit complete lines from scheduler callbacks; all registered sources
@@ -794,7 +796,10 @@ responsiveness. H563 initial hardware validation passed for UART/USB commands,
 TX DMA, LEDs/button, timer completion, reset, DHCP, ping, and TCP commands.
 USB works in both USB-C orientations; USB/Ethernet recover after physical
 reconnection. Its
-Cortex-M33 stack reservation is 64 KiB, enforced by MSPLIM; preserve this
+Cortex-M33 stack reservation is 64 KiB, enforced by MSPLIM. Long-lived STM32
+application objects (modules, logger, scheduler, dispatcher, and transport
+buffers) have file-scope storage. Hardware setup waits for initialization;
+command sources bind in stage2. Preserve the stack reservation
 setting in the linker script and CubeMX project.
 
 

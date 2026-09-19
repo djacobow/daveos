@@ -220,7 +220,8 @@ class Module {
   void on_event(Event) {}
   // A veto prevents sleeping but does not prevent the scheduler from waiting.
   bool can_sleep() { return true; }
-  // Valid after scheduler construction, including during both init stages.
+  // Bound by scheduler init() before any stage1 callback. Not available in
+  // constructors; valid throughout both initialization stages and dispatch.
   SchedulerInterface<Event>& scheduler() { return *scheduler_; }
   void bind(SchedulerInterface<Event>& scheduler) { scheduler_ = &scheduler; }
   // CRTP forwarding keeps callback dispatch statically typed at registration.

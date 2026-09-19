@@ -44,6 +44,7 @@ struct TxDriver {
 using Tx = BufferedOutput<Platform, TxDriver, 4096>;
 #endif
 enum class Event {};
+void BindCommands();
 
 class Board final : public daveos::core::Module<Board, Event> {
  public:
@@ -79,6 +80,7 @@ class Board final : public daveos::core::Module<Board, Event> {
   }
   Status init(InitStage stage) {
     if (stage == InitStage::stage1) I_("DaveOS %s; type help", board::kName);
+    if (stage == InitStage::stage2) BindCommands();
     return Status::ok;
   }
 
@@ -159,6 +161,13 @@ class UartConsole final : public daveos::console::Module<UartConsole, Event> {
         display_(this, [](void* context, std::string_view text) {
           static_cast<UartConsole*>(context)->output_.write(text);
         }) {}
+  Status init(InitStage stage) {
+    if (stage == InitStage::stage1) {
+      active_uart = this;
+      start_receive();
+    }
+    return daveos::console::Module<UartConsole, Event>::init(stage);
+  }
   void start_receive() {
     if (HAL_UART_Receive_IT(&huart3, &rx_byte_, 1) != HAL_OK) Error_Handler();
   }
@@ -221,75 +230,79 @@ extern "C" void HAL_UART_ErrorCallback(UART_HandleTypeDef* uart) {
   if (uart == &huart3 && app::active_uart) app::active_uart->error();
 }
 #endif
-extern "C" void DaveOS_Run() {
-  using namespace daveos::core;
-  app::Platform platform;
-  app::active_platform = &platform;
-  auto timer_hz = board::TimerClock();
-  if (platform.init(timer_hz) != Status::ok) Error_Handler();
+namespace app {
+// Static storage keeps long-lived buffers off the MCU stack. Constructors
+// store references and metadata; hardware setup and wiring happen during init.
+app::Platform platform;
 #if DAVEOS_UART_CONSOLE
-  app::TxDriver driver;
-  app::Tx output(platform, driver, board::tx_storage);
-  daveos::console::Input input(platform);
-  app::UartConsole uart(input, output);
+app::TxDriver driver;
+app::Tx output(platform, driver, board::tx_storage);
+daveos::console::Input input(platform);
+app::UartConsole uart(input, output);
 #endif
 #if DAVEOS_USB_CDC
-  board::UsbTransport usb_transport(platform);
-  board::UsbConsole<app::Event> usb(usb_transport);
+board::UsbTransport usb_transport(platform);
+board::UsbConsole<app::Event> usb(usb_transport);
 #endif
 #if DAVEOS_NETWORKING
-  auto network_config = daveos::net::stm32::board_network_config();
+daveos::net::Config NetworkConfig() {
+  auto config = daveos::net::stm32::board_network_config();
   // To use a static address, set dhcp=false and address/netmask/gateway here.
-  daveos::net::Service network(daveos::net::stm32::ethernet_driver(),
-                               {&platform,
-                                [](void* p) -> std::uint32_t {
-                                  return static_cast<app::Platform*>(p)->now() /
-                                         1000;
-                                }},
-                               network_config);
-  daveos::net::Module<app::Event> network_module(network);
+  return config;
+}
+daveos::net::Service network(daveos::net::stm32::ethernet_driver(),
+                             {&platform,
+                              [](void* p) -> std::uint32_t {
+                                return static_cast<app::Platform*>(p)->now() /
+                                       1000;
+                              }},
+                             {});
+daveos::net::Module<app::Event> network_module(network, NetworkConfig);
 #if DAVEOS_TCP_CONSOLE
-  app::TcpConsole<app::Event, app::Platform> tcp(platform, network);
+app::TcpConsole<app::Event, app::Platform> tcp(platform, network);
 #endif
 #endif
-  app::Board board_module(platform
+app::Board board_module(platform
 #if DAVEOS_UART_CONSOLE
-                          ,
-                          output
+                        ,
+                        output
 #endif
 #if DAVEOS_USB_CDC
-                          ,
-                          usb_transport
+                        ,
+                        usb_transport
 #endif
-  );
-  auto modules = ModuleList {
-    &board_module,
+);
+auto modules = ModuleList {
+  &board_module,
 #if DAVEOS_NETWORKING
-        &network_module,
+      &network_module,
 #if DAVEOS_TCP_CONSOLE
-        &tcp,
+      &tcp,
 #endif
 #endif
 #if DAVEOS_UART_CONSOLE
-        &uart,
+      &uart,
 #endif
 #if DAVEOS_USB_CDC
-        &usb,
+      &usb,
 #endif
-  };
-  auto subscribers = SubscriberList {
+};
+auto subscribers = SubscriberList {
 #if DAVEOS_NETWORKING && DAVEOS_TCP_CONSOLE
-    tcp.subscriber(),
+  tcp.subscriber(),
 #endif
 #if DAVEOS_UART_CONSOLE
-        uart.subscriber(),
+      uart.subscriber(),
 #endif
 #if DAVEOS_USB_CDC
-        usb.subscriber(),
+      usb.subscriber(),
 #endif
-  };
-  auto logger = make_logger(platform, subscribers);
-  auto scheduler = make_scheduler<app::Event>(platform, modules, logger);
+};
+auto logger = make_logger(platform, subscribers);
+auto scheduler = make_scheduler<app::Event>(platform, modules, logger);
+CommandDispatcher dispatcher(modules, scheduler);
+
+void BindCommands() {
   auto sources = CommandSourceList {
 #if DAVEOS_NETWORKING && DAVEOS_TCP_CONSOLE
     tcp.command_source(),
@@ -301,14 +314,14 @@ extern "C" void DaveOS_Run() {
         usb.command_source(),
 #endif
   };
-  CommandDispatcher dispatcher(modules, scheduler, sources);
-#if DAVEOS_UART_CONSOLE
-  app::active_uart = &uart;
-  uart.start_receive();
-#endif
-#if DAVEOS_USB_CDC
-  if (!usb_transport.init()) Error_Handler();
-#endif
+  dispatcher.bind_sources(sources);
+}
+}  // namespace app
+
+extern "C" void DaveOS_Run() {
+  using namespace app;
+  active_platform = &platform;
+  if (platform.init(board::TimerClock()) != Status::ok) Error_Handler();
   scheduler.run();
 #if DAVEOS_NETWORKING
 #if DAVEOS_TCP_CONSOLE
@@ -319,7 +332,7 @@ extern "C" void DaveOS_Run() {
 #if DAVEOS_USB_CDC
   usb_transport.stop();
 #endif
-  // Initialization failure is terminal; detach ISR state before unwinding.
+  // Initialization failure is terminal; detach ISR state before halting.
 #if DAVEOS_UART_CONSOLE
   HAL_NVIC_DisableIRQ(USART3_IRQn);
   HAL_NVIC_DisableIRQ(board::kDmaIrq);

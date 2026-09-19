@@ -34,3 +34,5 @@
 
 - [x] Fix H563 startup stack-overflow fault: reserve 64 KiB for the application-owned console and nested calls.
 - [ ] Revisit H755 stack reservation after the application-owned console refactor; its Cortex-M7 has no MSPLIM guard.
+
+- [ ] Investigate H563 UART input drops with whole-line host writes at 1 Mb/s; 2 ms character pacing passes, while USB/TCP burst commands work. Observed during file-scope initialization hardware smoke tests.

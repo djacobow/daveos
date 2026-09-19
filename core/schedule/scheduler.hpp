@@ -69,6 +69,7 @@ class Scheduler<Event, ModuleList<Modules...>, Logging, P, EventCapacity,
   struct Registration {
     void* object = nullptr;
     const char* name = "";
+    void (*bind)(void*, SchedulerInterface<Event>&) = nullptr;
     Status (*init)(void*, InitStage) = nullptr;
     void (*event)(void*, Event) = nullptr;
     bool (*sleep)(void*) = nullptr;
@@ -97,8 +98,8 @@ class Scheduler<Event, ModuleList<Modules...>, Logging, P, EventCapacity,
   };
 
  public:
-  // Bind module interfaces immediately; validation and callbacks wait for
-  // init().
+  // Store references and static descriptors only; binding and callbacks wait
+  // for init(), after all application objects have been constructed.
   Scheduler(P& platform, ModuleList<Modules...> modules, Logging logging = {})
       : platform_(platform), logging_(logging) {
     this->bind(*this);
@@ -122,6 +123,7 @@ class Scheduler<Event, ModuleList<Modules...>, Logging, P, EventCapacity,
     }
     Status status = Validate();
     if (status == Status::ok) {
+      for (const auto& module : modules_) module.bind(module.object, *this);
       for (auto stage : {InitStage::stage1, InitStage::stage2}) {
         for (const auto& module : modules_) {
           ContextGuard context(platform_, {module.name, "init"});
@@ -406,18 +408,21 @@ class Scheduler<Event, ModuleList<Modules...>, Logging, P, EventCapacity,
       return;
     }
     modules_[module_count_++] = {
-        module, module->name(),
+        module,
+        M::name(),
+        [](void* self, SchedulerInterface<Event>& scheduler) {
+          static_cast<M*>(self)->bind(scheduler);
+        },
         [](void* self, InitStage stage) {
           return static_cast<M*>(self)->initialize(stage);
         },
         [](void* self, Event event) { static_cast<M*>(self)->receive(event); },
         [](void* self) { return static_cast<M*>(self)->permits_sleep(); }};
-    module->bind(*this);
     constexpr auto descriptors = M::tasks();
     for (std::size_t index = 0; index < descriptors.size(); ++index) {
       tasks_[task_count_] = {
           module,
-          module->name(),
+          M::name(),
           module,
           [](void* object, std::size_t slot) {
             constexpr auto tasks = M::tasks();
@@ -425,8 +430,7 @@ class Scheduler<Event, ModuleList<Modules...>, Logging, P, EventCapacity,
           },
           index,
           descriptors[index].name};
-      statistics_.tasks[task_count_++] = {module->name(),
-                                          descriptors[index].name};
+      statistics_.tasks[task_count_++] = {M::name(), descriptors[index].name};
       if (!descriptors[index].callback) registration_error_ = true;
       for (std::size_t previous = 0; previous < index; ++previous) {
         if (descriptors[previous].callback == descriptors[index].callback)

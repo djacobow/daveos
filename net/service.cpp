@@ -98,6 +98,11 @@ static Ipv4 Bytes(const ip4_addr_t* value) {
 Service::Service(Driver driver, Clock clock, const Config& config)
     : driver_(driver), clock_(clock), config_(config) {}
 Service::~Service() { stop(); }
+bool Service::init(const Config& config) {
+  if (attempted_) return false;
+  config_ = config;
+  return init();
+}
 bool Service::init() {
   if (attempted_) return false;
   attempted_ = true;

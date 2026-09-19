@@ -279,6 +279,31 @@ TEST_CASE("Invalid frames do not poison later input") {
   CHECK(s.snapshot().dropped_rx >= 1);
   CHECK(f.tx[f.sent - 1].bytes[21] == 2);
 }
+TEST_CASE("Network configuration is acquired during stage1") {
+  using namespace daveos::core;
+  enum class Event {};
+  Fake driver;
+  daveos::platform::fake::Platform platform;
+  Service service(driver.driver(), driver.clock());
+  static int configured = 0;
+  configured = 0;
+  daveos::net::Module<Event> network(service, [] {
+    ++configured;
+    auto config = Static();
+    config.mac = peer;
+    return config;
+  });
+  auto scheduler = make_scheduler<Event>(platform, ModuleList{&network});
+  CHECK(configured == 0);
+  CHECK(scheduler.init() == Status::ok);
+  CHECK(configured == 1);
+  CHECK(service.snapshot().mac == peer);
+  CHECK_FALSE(service.init(Static()));
+  CHECK(service.snapshot().mac == peer);
+  CHECK(scheduler.init() == Status::already_initialized);
+  CHECK(configured == 1);
+}
+
 TEST_CASE("Networking hardware failure leaves unrelated module running") {
   enum class Event {};
   Fake driver;
@@ -473,8 +498,8 @@ TEST_CASE(
   using namespace daveos::core;
   auto modules = ModuleList{&console, &receiver};
   auto scheduler = make_scheduler<ConsoleEvent>(platform, modules);
-  CommandDispatcher dispatcher(modules, scheduler,
-                               CommandSourceList{console.command_source()});
+  CommandDispatcher dispatcher(modules, scheduler);
+  dispatcher.bind_sources(CommandSourceList{console.command_source()});
   REQUIRE(scheduler.run() == Status::ok);
   REQUIRE(receiver.count == 3);
   CHECK(receiver.times == std::array<Time, 3>{1000, 2000, 3000});
