@@ -114,18 +114,20 @@ void Output(void*, const LogRecord& record) {
               static_cast<int>(record.message.size()), record.message.data());
   std::fflush(stdout);
 }
+// Passive application state; threads and scheduler execution begin in main.
+Input input;
+Console console(input);
 }  // namespace app
 int main() {
   using namespace daveos::core;
   daveos::platform::host::Platform platform;
-  app::Input input;
-  app::Console console(input);
-  auto modules = ModuleList{&console};
+  auto modules = ModuleList{&app::console};
   auto logger =
       make_logger(platform, SubscriberList{Subscriber{nullptr, app::Output}});
   auto scheduler = make_scheduler<app::Event>(platform, modules, logger);
   CommandDispatcher dispatcher(modules, scheduler);
-  console.dispatcher(dispatcher);
-  std::jthread reader([&](std::stop_token stop) { app::Read(stop, input); });
+  app::console.dispatcher(dispatcher);
+  std::jthread reader(
+      [](std::stop_token stop) { app::Read(stop, app::input); });
   return scheduler.run() == Status::ok ? 0 : 1;
 }

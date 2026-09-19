@@ -36,14 +36,15 @@ void Output(void*, const LogRecord& record) {
   std::printf("%.*s%.*s\n", static_cast<int>(text.size()), text.data(),
               static_cast<int>(record.message.size()), record.message.data());
 }
+// Passive module construction; scheduler init() binds and initializes them.
+Hello hello;
 }  // namespace app
 int main() {
   Platform platform;
-  app::Hello hello;
   auto logger = daveos::core::make_logger(
       platform, daveos::core::SubscriberList{
                     daveos::core::Subscriber{nullptr, app::Output}});
   auto scheduler = daveos::core::make_scheduler<app::Event>(
-      platform, daveos::core::ModuleList{&hello}, logger);
+      platform, daveos::core::ModuleList{&app::hello}, logger);
   return scheduler.run() == daveos::core::Status::ok ? 0 : 1;
 }

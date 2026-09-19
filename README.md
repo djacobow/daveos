@@ -416,6 +416,12 @@ meson compile -C build/host console-host
 # Try: help, console echo "Hello World", console exit
 ```
 
+The hello, system, and host console examples keep their passive modules at file
+scope; the console input queue also has static storage. Their platform, logger,
+and scheduler remain local to `main()`: constructing the host platform starts
+its timer thread, and local lifetimes keep startup and shutdown explicit.
+The console reader thread joins before scheduler/platform teardown.
+
 Its input thread assembles lines into a bounded queue; a scheduled task dispatches
 them. `console exit` requests shutdown and log flushing. EOF only ends input
 collection and does not stop the scheduler. UART transport integration is left
