@@ -10,6 +10,7 @@
 
 #include "core/command/match.hpp"
 #include "core/logging/log.hpp"
+#include "duration.hpp"
 
 namespace daveos::core {
 
@@ -27,6 +28,30 @@ namespace daveos::core {
     const char* name;
     void (M::*callback)();
   };
+
+// Register a task using its C++ function identifier as the displayed name.
+#define DAVEOS_TASK(ModuleType, function)      \
+  ::daveos::core::TaskDescriptor<ModuleType> { \
+#function, &ModuleType::function           \
+  }
+
+  // Validate compile-time task selection after the derived module is complete.
+  template <typename M, auto Function>
+  consteval std::size_t TaskIndex() {
+    constexpr auto tasks = M::tasks();
+    constexpr auto index = [] {
+      constexpr auto descriptors = M::tasks();
+      for (std::size_t i = 0; i < descriptors.size(); ++i) {
+        if (descriptors[i].callback == Function) {
+          return i;
+        }
+      }
+      return descriptors.size();
+    }();
+    static_assert(index < tasks.size(),
+                  "task callback must be registered in tasks()");
+    return index;
+  }
 
   // Parsed views borrow the dispatcher's buffer until the handler returns.
   using CommandArguments = std::span<const std::string_view>;
@@ -65,8 +90,8 @@ namespace daveos::core {
       Status (*schedule)(void*, void*, std::size_t, Time, Mode);
       Status (*cancel)(void*, void*, std::size_t);
       Status (*post)(void*, Event, void*);
-      Status (*timer)(void*, Time, TimerCallback);
-      Status (*cancel_timer)(void*, TimerCallback);
+      Status (*timer)(void*, Time, const TimerCallback&);
+      Status (*cancel_timer)(void*, const TimerCallback&);
       Status (*stop)(void*);
       void (*reset)(void*);
       void (*log_statistics)(void*);
@@ -92,10 +117,10 @@ namespace daveos::core {
             [](void* self, Event event, void* sender) {
               return static_cast<Impl*>(self)->post(event, sender);
             },
-            [](void* self, Time delay, TimerCallback callback) {
+            [](void* self, Time delay, const TimerCallback& callback) {
               return static_cast<Impl*>(self)->timer(delay, callback);
             },
-            [](void* self, TimerCallback callback) {
+            [](void* self, const TimerCallback& callback) {
               return static_cast<Impl*>(self)->cancel_timer(callback);
             },
             [](void* self) { return static_cast<Impl*>(self)->stop(); },
@@ -134,6 +159,42 @@ namespace daveos::core {
       return Status::not_found;
     }
 
+    template <typename M, DurationRep Rep, typename Period>
+      requires ModuleFor<M, Event>
+    [[nodiscard]] Status schedule(M& module, void (M::*callback)(),
+                                  std::chrono::duration<Rep, Period> delay,
+                                  Mode mode = Mode::once) {
+      Time micros;
+      const auto status = to_microseconds(delay, micros);
+      return status == Status::ok ? schedule(module, callback, micros, mode)
+                                  : status;
+    }
+
+    template <auto Function, typename M>
+      requires ModuleFor<M, Event>
+    [[nodiscard]] Status schedule(M& module, Time delay,
+                                  Mode mode = Mode::once) {
+      return operations_->schedule(object_, &module, TaskIndex<M, Function>(),
+                                   delay, mode);
+    }
+
+    template <auto Function, typename M, DurationRep Rep, typename Period>
+      requires ModuleFor<M, Event>
+    [[nodiscard]] Status schedule(M& module,
+                                  std::chrono::duration<Rep, Period> delay,
+                                  Mode mode = Mode::once) {
+      Time micros;
+      const auto status = to_microseconds(delay, micros);
+      return status == Status::ok ? schedule<Function>(module, micros, mode)
+                                  : status;
+    }
+
+    template <auto Function, typename M>
+      requires ModuleFor<M, Event>
+    [[nodiscard]] Status cancel(M& module) {
+      return operations_->cancel(object_, &module, TaskIndex<M, Function>());
+    }
+
     // Cancel pending execution (not an already executing callback). Returns
     // not_found for an unknown/inactive task; interrupt callers are rejected.
     template <typename M>
@@ -157,13 +218,31 @@ namespace daveos::core {
     // Interrupt-context one-shot, available only while running. Delay must be
     // positive and callback non-null. Reusing callback identity replaces its
     // timer.
-    Status timer(Time delay, TimerCallback callback) {
+    Status timer(Time delay, const TimerCallback& callback) {
       return operations_->timer(object_, delay, callback);
+    }
+
+    template <DurationRep Rep, typename Period>
+    [[nodiscard]] Status timer(std::chrono::duration<Rep, Period> delay,
+                               const TimerCallback& callback) {
+      Time micros;
+      const auto status = to_microseconds(delay, micros);
+      return status == Status::ok ? timer(micros, callback) : status;
+    }
+
+    template <auto Function, typename Object, typename Delay>
+    [[nodiscard]] Status timer(Object& object, Delay delay) {
+      return timer(delay, TimerCallback::bind<Function>(object));
+    }
+
+    template <auto Function, typename Object>
+    [[nodiscard]] Status cancel_timer(Object& object) {
+      return cancel_timer(TimerCallback::bind<Function>(object));
     }
 
     // Cancel by callback identity, including from interrupts; not_found if
     // absent.
-    Status cancel_timer(TimerCallback callback) {
+    Status cancel_timer(const TimerCallback& callback) {
       return operations_->cancel_timer(object_, callback);
     }
 
@@ -247,16 +326,58 @@ namespace daveos::core {
     // constructors; valid throughout both initialization stages and dispatch.
     SchedulerInterface<Event>& scheduler() { return *scheduler_; }
 
+    // Self-scheduling helpers validate the callback against tasks() at compile
+    // time. Raw microseconds and integral chrono durations are both accepted.
+    template <auto Function, typename Delay>
+    [[nodiscard]] Status schedule(Delay delay, Mode mode = Mode::once) {
+      return scheduler().template schedule<Function>(
+          static_cast<Derived&>(*this), delay, mode);
+    }
+
+    template <auto Function>
+    [[nodiscard]] Status cancel() {
+      return scheduler().template cancel<Function>(
+          static_cast<Derived&>(*this));
+    }
+
+    template <auto Function, typename Delay>
+    [[nodiscard]] Status timer(Delay delay) {
+      return scheduler().template timer<Function>(static_cast<Derived&>(*this),
+                                                  delay);
+    }
+
+    template <auto Function>
+    [[nodiscard]] Status cancel_timer() {
+      return scheduler().template cancel_timer<Function>(
+          static_cast<Derived&>(*this));
+    }
+
     void bind(SchedulerInterface<Event>& scheduler) { scheduler_ = &scheduler; }
 
     // CRTP forwarding keeps callback dispatch statically typed at registration.
     Status initialize(InitStage stage) {
+      static_assert(
+          requires(Derived & module) {
+            { module.init(stage) } -> std::same_as<Status>;
+          }, "module init(InitStage) must return core::Status");
       return static_cast<Derived*>(this)->init(stage);
     }
 
-    void receive(Event event) { static_cast<Derived*>(this)->on_event(event); }
+    void receive(Event event) {
+      static_assert(
+          requires(Derived & module) {
+            { module.on_event(event) } -> std::same_as<void>;
+          }, "module on_event(Event) must return void");
+      static_cast<Derived*>(this)->on_event(event);
+    }
 
-    bool permits_sleep() { return static_cast<Derived*>(this)->can_sleep(); }
+    bool permits_sleep() {
+      static_assert(
+          requires(Derived & module) {
+            { module.can_sleep() } -> std::same_as<bool>;
+          }, "module can_sleep() must return bool");
+      return static_cast<Derived*>(this)->can_sleep();
+    }
 
    protected:
     ~Module() = default;

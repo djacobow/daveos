@@ -41,6 +41,15 @@ namespace daveos::core {
     std::uint64_t timer_overflows = 0;
   };
 
+  // First initialization failure. module==nullptr denotes registration
+  // validation (stage is then irrelevant). Names are borrowed. Available even
+  // without logging, and retained after subsequent init/run attempts.
+  struct InitializationFailure {
+    Status status = Status::ok;
+    const char* module = nullptr;
+    InitStage stage = InitStage::stage1;
+  };
+
   // Fixed-storage cooperative scheduler. Prefer make_scheduler() for deduction.
   // Event is the application's enum. ModuleList determines module/task
   // capacity. Logging is an optional borrowed service; the scheduler owns no
@@ -105,6 +114,9 @@ namespace daveos::core {
     };
 
    public:
+    using SchedulerInterface<Event>::timer;
+    using SchedulerInterface<Event>::cancel_timer;
+
     // Store references and static descriptors only; binding and callbacks wait
     // for init(), after all application objects have been constructed.
     Scheduler(P& platform, ModuleList<Modules...> modules, Logging logging = {})
@@ -124,7 +136,7 @@ namespace daveos::core {
     // stage2. First failure is terminal: discard queued tasks/events and flush
     // logs. Successful initialization is never repeated; later calls report an
     // error.
-    Status init() {
+    [[nodiscard]] Status init() {
       {
         Guard guard(platform_);
         if (state_ == State::failed) {
@@ -145,6 +157,8 @@ namespace daveos::core {
             ContextGuard context(platform_, {module.name, "init"});
             status = module.init(module.object, stage);
             if (status != Status::ok) {
+              Guard guard(platform_);
+              initialization_failure_ = {status, module.name, stage};
               break;
             }
           }
@@ -160,6 +174,7 @@ namespace daveos::core {
         } else {
           state_ = State::failed;
           failure_ = status;
+          initialization_failure_.status = status;
           for (auto& task : tasks_) {
             task.active = false;
           }
@@ -168,10 +183,24 @@ namespace daveos::core {
       }
       if constexpr (kHasLogging) {
         if (status != Status::ok) {
+          const auto failure = initialization_failure();
+          // Subscriber delivery remains outside scheduler locks. Failed
+          // transports may not deliver this; the snapshot is always retained.
+          this->log(Level::error, "Initialization failed: %s (%s, stage %u)",
+                    enum_name(status),
+                    failure.module ? failure.module : "registration",
+                    failure.module
+                        ? (failure.stage == InitStage::stage1 ? 1u : 2u)
+                        : 0u);
           logging_.flush();
         }
       }
       return status;
+    }
+
+    [[nodiscard]] InitializationFailure initialization_failure() {
+      Guard guard(platform_);
+      return initialization_failure_;
     }
 
     // Single-use dispatch loop; initialize automatically when still fresh.
@@ -181,7 +210,7 @@ namespace daveos::core {
     // due. Idle considers both task and timer deadlines and sleeps only when
     // every module permits it. A supported stop waits for active callbacks,
     // discards work, then flushes logs.
-    Status run() {
+    [[nodiscard]] Status run() {
       bool initialize = false;
       {
         Guard guard(platform_);
@@ -393,7 +422,7 @@ namespace daveos::core {
     // from interrupts, but rejected before run(). Replacing a callback needs no
     // new slot; a new callback at capacity fails and increments
     // timer_overflows.
-    Status timer(Time delay, TimerCallback callback) {
+    Status timer(Time delay, const TimerCallback& callback) {
       Guard guard(platform_);
       if (state_ != State::running) {
         return Status::not_running;
@@ -423,7 +452,7 @@ namespace daveos::core {
 
     // ISR-safe cancellation of a pending callback, identified by function
     // pointer.
-    Status cancel_timer(TimerCallback callback) {
+    Status cancel_timer(const TimerCallback& callback) {
       Guard guard(platform_);
       if (state_ != State::running) {
         return Status::not_running;
@@ -691,6 +720,7 @@ namespace daveos::core {
     bool registration_error_ = false, used_ = false, stop_requested_ = false;
     State state_ = State::fresh;
     Status failure_ = Status::initialization_failed;
+    InitializationFailure initialization_failure_;
   };
 
   // Deduce module/platform types; optional sizes are event and timer slots.

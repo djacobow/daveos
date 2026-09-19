@@ -162,6 +162,13 @@ Initialization failure is terminal for that scheduler instance. Subsequent `init
 or `run()` calls return an error without retrying initialization or dispatching work.
 Discard pending task schedules and queued events on initialization failure; none
 of that work is dispatched. Buffered logs still follow the failure-path flush rule.
+`initialization_failure()` retains the first status, module name, and stage even
+without logging; a null module denotes registration validation, where stage is
+irrelevant. With logging enabled, the scheduler attempts to enqueue an error
+summary before flushing; delivery still depends on functioning subscribers and
+buffer/filter limits. The STM32 application retains platform/run status and the
+failure snapshot for debugger inspection before halting. Lifecycle init/run and
+new checked convenience operations are `[[nodiscard]]`.
 
 The host supports stopping so tests can return from `run()`. A stop request does
 not interrupt an executing callback; an in-progress event broadcast completes
@@ -355,15 +362,22 @@ pending due times and arms the platform timer for the earliest one. When the
 platform timer fires, the layer processes due timers, finds the next due time,
 and rearms the platform timer. Adding an earlier timer must update that arm.
 
-The public callback type is `using TimerCallback = void (*)();`: a plain function
-pointer with no arguments or return value. Function-pointer equality identifies
-timers for replacement and cancellation. No object or context argument is carried.
+The public `TimerCallback` is a non-owning, allocation-free value accepting a
+plain `void (*)()` function (including a noncapturing lambda), or an object and
+compile-time selected `void` member callback with no arguments. Plain functions
+retain function-pointer identity. Bound callbacks use object-plus-member identity;
+binding through base/derived references is normalized to the declaring class.
+Different objects can independently use the same member callback. The object must
+outlive pending work and any already-executing callback. No owned callable or
+arbitrary argument payload is introduced. Callback storage is three pointers.
+`TimerCallback::bind<&Type::Function>(object)` creates an explicit bound callback;
+the scheduler interface and module provide typed timer/cancellation helpers.
 
 DaveOS timer requests require a strictly positive delay. A zero-delay request
 returns an error without creating a timer or modifying an existing timer.
 
-Timer requests made before the scheduler starts normal dispatch return
-`not_running` and otherwise do nothing, including requests during initialization.
+Timer requests with valid delay arguments made before the scheduler starts normal
+dispatch return `not_running` and otherwise do nothing, including requests during initialization.
 They do not reserve a slot, arm the platform timer, or carry forward into execution.
 Applications needing timers
 during initialization must arrange them outside the DaveOS timer API.
@@ -373,7 +387,8 @@ facility and do not provide initialization-time timing services.
 
 Requesting a timer for a callback that already has a pending timer replaces that
 timer's due time rather than creating another timer. Applications needing separate
-timers for the same underlying behavior use distinct wrapper functions.
+timers for the same underlying behavior on one object use distinct wrapper
+functions; separate objects already have distinct callback identities.
 
 Provide `cancel_timer(callback)` to remove the pending timer identified by that
 callback and release its slot. Update the platform timer's arm if the earliest
@@ -819,7 +834,7 @@ after CubeMX peripheral setup; `appmain()` initializes the platform and calls
 `scheduler.run()`. Hardware setup waits for initialization;
 a dedicated application wiring module binds command sources in stage2. The
 64 KiB reservation addressed the old 34,216-byte application stack frame; the
-current debug `appmain()` frame is 8 bytes. Total stack high-water usage has
+current debug `appmain()` frame is 32 bytes. Total stack high-water usage has
 not been measured, so the reservation is retained pending that measurement.
 Keep linker and CubeMX settings consistent when resizing it. H755 has build
 coverage only for the subsequent static-storage, initialization-wiring, and
@@ -852,3 +867,40 @@ It consumes spans from a ring buffer without shifting remaining bytes. Bytes
 after a newline remain for subsequent commands, partial lines persist between
 invocations, and CRLF may cross chunk boundaries. No additional TCP command
 queue is required.
+
+## Application convenience APIs
+
+`DAVEOS_TASK(Type, Function)` names a task using its C++ function identifier.
+Existing explicitly named task descriptors remain supported. A module can call
+`schedule<&Type::Function>(delay, mode)` and `cancel<&Type::Function>()`; the
+scheduler interface additionally takes the target module. These typed forms
+validate task registration at compile time. Runtime member-pointer forms remain
+available for dynamic selection. Module lifecycle/event/sleep hooks have explicit
+signature diagnostics at their CRTP boundaries.
+
+Scheduling and timer delays accept integral `std::chrono::duration` values as well
+as existing raw microseconds. Reject negative counts, non-integral microseconds,
+and results at or above `kForever`, without changing pending work. Conversion is
+exact and avoids intermediate overflow; floating-point duration representations
+are not supported. Duration conversion errors are returned before lifecycle checks. Existing rules remain: zero-delay one-shots are valid, while
+zero repeat intervals and zero-delay interrupt timers are invalid. Existing
+absolute-deadline saturation near the end of the clock range is unchanged.
+
+Bound member timers can be requested/cancelled through
+`timer<&Type::Function>(object, delay)` / `cancel_timer<&Type::Function>(object)`.
+Module helpers supply `*this` automatically. These callbacks retain interrupt
+context and existing replacement, capacity, cancellation, and lifecycle semantics.
+
+Optional `core::CommandBinding<Event, Sources>` copies source pointers during
+passive construction. `make_command_binding<Event>(CommandSourceList{...})`
+deduces their count. Register it as a module and call `connect(dispatcher)` before
+init/run; it binds sources in stage2. A missing connection returns `not_running`
+and fails initialization. Its module name is `commands`; applications using it
+must reserve that name. Direct application wiring remains supported.
+
+The standalone `starters/application` project supplies one application module,
+a real-time host binary, and a fake-time test, consuming DaveOS through Meson
+dependencies. Export `daveos-core`, `daveos-console`, the selected adapter
+(`daveos-host`/`daveos-fake`/`daveos-stm32h5`/`daveos-stm32h7`), and optional
+`daveos-network`. The host configuration also exports the fake adapter. Consumers
+can disable framework examples/tests and pin the wrap revision independently.

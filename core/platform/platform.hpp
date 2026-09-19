@@ -4,6 +4,7 @@
 #include <limits>
 
 #include "core/enum/enum.h"
+#include "timer_callback.hpp"
 
 namespace daveos::core {
 
@@ -39,8 +40,8 @@ namespace daveos::core {
   enum class InitStage { stage1, stage2 };
   // Repeat cadence is based on scheduled time, not callback completion.
   enum class Mode { once, repeat };
-  // Application timer callbacks run in interrupt context, with no payload.
-  using TimerCallback = void (*)();
+
+  // Application timer callbacks run in interrupt context (see TimerCallback).
 
   // Borrowed names used for log attribution; strings must outlive their use.
   struct Context {

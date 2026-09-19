@@ -41,10 +41,7 @@ namespace app {
       if (parsed.ec != std::errc{} || parsed.ptr != end || !delay) {
         return core::Status::invalid_argument;
       }
-      // DaveOS timers take plain callbacks; route completion to this app-owned
-      // board.
-      timer_owner_ = this;
-      return scheduler().timer(delay, [] { timer_owner_->TimerFired(); });
+      return timer<&Board::TimerFired>(delay);
     }
 
     void TimerFired() { I_("Timer fired"); }
@@ -92,7 +89,6 @@ namespace app {
       return core::Status::ok;
     }
 
-    inline static Board* timer_owner_ = nullptr;
     Platform& platform_;
     void (*log_transports_)(core::SchedulerInterface<Event>&);
   };

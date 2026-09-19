@@ -111,3 +111,44 @@ TEST_CASE(
   CHECK(invalid_status == core::Status::not_found);
   CHECK(allocations == 0);
 }
+
+TEST_CASE("duration helpers and bound timers allocate no C++ heap storage") {
+  struct Worker : core::Module<Worker, test::Event> {
+    static constexpr const char* name() { return "worker"; }
+
+    static constexpr auto tasks() {
+      return std::array{DAVEOS_TASK(Worker, Start)};
+    }
+
+    core::Status init(core::InitStage stage) {
+      return stage == core::InitStage::stage1
+                 ? schedule<&Worker::Start>(std::chrono::microseconds{1})
+                 : core::Status::ok;
+    }
+
+    void Start() {
+      result = timer<&Worker::Done>(std::chrono::microseconds{2});
+    }
+
+    void Done() {
+      result = scheduler().stop();
+      ++calls;
+    }
+
+    int calls = 0;
+    core::Status result = core::Status::ok;
+  } worker;
+
+  test::Fake platform;
+  auto scheduler =
+      core::make_scheduler<test::Event>(platform, core::ModuleList{&worker});
+  allocations = 0;
+  counting = true;
+  const auto status = scheduler.run();
+  counting = false;
+  CHECK(status == core::Status::ok);
+  CHECK(worker.result == core::Status::ok);
+  CHECK(worker.calls == 1);
+  CHECK(platform.now() == 3);
+  CHECK(allocations == 0);
+}

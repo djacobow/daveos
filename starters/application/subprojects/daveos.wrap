@@ -1,0 +1,4 @@
+[wrap-git]
+url = https://github.com/djacobow/daveos.git
+revision = main
+depth = 1

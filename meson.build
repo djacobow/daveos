@@ -31,6 +31,22 @@ if get_option('networking')
   subdir('net')
 endif
 subdir('platform')
+# Stable dependency names for applications using DaveOS as a Meson subproject.
+meson.override_dependency('daveos-core', core_dep)
+meson.override_dependency('daveos-console', console_dep)
+if get_option('networking')
+  meson.override_dependency('daveos-network', network_dep)
+endif
+if platform in ['host', 'fake']
+  meson.override_dependency('daveos-fake', fake_dep)
+  if platform == 'host'
+    meson.override_dependency('daveos-host', host_dep)
+  endif
+elif platform == 'stm32h5'
+  meson.override_dependency('daveos-stm32h5', stm32h5_dep)
+else
+  meson.override_dependency('daveos-stm32h7', stm32h7_dep)
+endif
 firmware_images = []
 if get_option('examples')
   subdir('examples')

@@ -95,9 +95,15 @@ TEST_CASE("initialization failure discards work and flushes diagnostics") {
   CHECK(scheduler.run() == core::Status::initialization_failed);
   CHECK(scheduler.init() == core::Status::initialization_failed);
   CHECK_FALSE(ran);
+  const auto failure = scheduler.initialization_failure();
+  CHECK(failure.status == core::Status::initialization_failed);
+  CHECK(std::string_view(failure.module) == "module");
+  CHECK(failure.stage == core::InitStage::stage1);
 #if DAVEOS_LOGGING
-  REQUIRE(sink.records.size() == 1);
+  REQUIRE(sink.records.size() == 2);
   CHECK(sink.records[0].message == "startup failed");
+  CHECK(sink.records[1].message ==
+        "Initialization failed: initialization_failed (module, stage 1)");
 #else
   CHECK(sink.records.empty());
 #endif

@@ -41,6 +41,14 @@ All generated files, downloaded test sources, and analysis caches live under the
 ignored `build/` directory. It can be removed entirely and regenerated. Installed
 toolchains in `tools/external/` are separately ignored inputs, not build outputs.
 
+## Starting your own application
+
+Copy [`starters/application`](starters/application/README.md) into a new repository
+for a small host application and a fake-time test of the same module. It consumes
+DaveOS as a Meson subproject; no edits to the framework build are needed.
+See the [application guide](docs/application-guide.md) for task helpers, explicit
+time units, object-bound timers, stage2 command binding, and failure diagnostics.
+
 ## Build structure
 
 Code is organized by component, with headers and implementations together:
@@ -219,12 +227,12 @@ components, logger, scheduler, and dispatcher at file scope and calls
 for its platform, LED/button access, DMA storage/cache handling, and timer clock.
 The modules, logger, scheduler, dispatcher, and transport buffers live at file
 scope. Their constructors store references and metadata; UART/USB/network setup
-runs in stage1. A dedicated `CommandWiring` module binds command sources in
+runs in stage1. The reusable `core::CommandBinding` module binds command sources in
 stage2, after every stage1 completes; `Board` only provides board commands.
 The platform timer is initialized after CubeMX peripheral setup and before
 scheduler initialization. The `.ioc` and FLASH linker script retain a 64 KiB
 stack reservation, enforced by MSPLIM. This was raised to accommodate the old
-34,216-byte application frame; `appmain()` now uses 8 bytes in the debug
+34,216-byte application frame; `appmain()` now uses 32 bytes in the debug
 build. That frame size is not a whole-program high-water mark. The reservation
 is retained pending measurement of nested calls and interrupts; keep the linker
 and CubeMX settings consistent when it is resized. GCC's `.su` reports are
@@ -271,20 +279,19 @@ class Blinker : public core::Module<Blinker, Event> {
   static constexpr const char* name() { return "blinker"; }
 
   static constexpr auto tasks() {
-    return std::array{core::TaskDescriptor<Blinker>{"tick", &Blinker::tick}};
+    return std::array{DAVEOS_TASK(Blinker, tick)};
   }
 
   core::Status init(core::InitStage stage) {
     if (stage == core::InitStage::stage1) {
-      return scheduler().schedule(*this, &Blinker::tick, 1000,
-                                  core::Mode::repeat);
+      return schedule<&Blinker::tick>(std::chrono::milliseconds{1}, core::Mode::repeat);
     }
     return core::Status::ok;
   }
 
   void tick() {
     scheduler().log(core::Level::info, "tick");
-    scheduler().cancel(*this, &Blinker::tick);
+    (void)cancel<&Blinker::tick>();  // This example deliberately ignores cancellation status.
     scheduler().stop();
   }
 };

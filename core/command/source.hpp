@@ -46,6 +46,8 @@ namespace daveos::core {
     std::array<CommandSource*, Size> items;
 
     template <typename... Sources>
+      requires(sizeof...(Sources) == Size) &&
+              (std::same_as<Sources, CommandSource> && ...)
     explicit CommandSourceList(Sources&... sources) : items{&sources...} {}
   };
 

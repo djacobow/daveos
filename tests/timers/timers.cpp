@@ -98,7 +98,7 @@ TEST_CASE("manual fake sleep is released by time advancement") {
       core::make_scheduler<test::Event>(platform, core::ModuleList{&module});
   module.first_action = [&] { scheduler.stop(); };
   scheduler.schedule(module, &test::TestModule::first, 10);
-  std::thread runner([&] { scheduler.run(); });
+  std::thread runner([&] { (void)scheduler.run(); });
   while (!platform.sleeps()) {
     std::this_thread::yield();
   }
@@ -113,7 +113,7 @@ TEST_CASE("indefinite fake sleep wakes on an interrupt") {
   auto scheduler =
       core::make_scheduler<test::Event>(platform, core::ModuleList{&module});
   module.first_action = [&] { scheduler.stop(); };
-  std::thread runner([&] { scheduler.run(); });
+  std::thread runner([&] { (void)scheduler.run(); });
   while (!platform.sleeps()) {
     std::this_thread::yield();
   }

@@ -278,9 +278,14 @@ TEST_CASE("logger platform mismatch fails before module initialization") {
   CHECK(scheduler.init() == core::Status::invalid_argument);
   CHECK_FALSE(initialized);
   CHECK_FALSE(ran);
+  CHECK(scheduler.initialization_failure().status ==
+        core::Status::invalid_argument);
+  CHECK(scheduler.initialization_failure().module == nullptr);
   CHECK(scheduler.post(test::Event::first) == core::Status::not_running);
-  REQUIRE(sink.records.size() == 1);
+  REQUIRE(sink.records.size() == 2);
   CHECK(sink.records[0].message == "before init");
+  CHECK(sink.records[1].message ==
+        "Initialization failed: invalid_argument (registration, stage 0)");
 }
 
 TEST_CASE("log prefixes split elapsed time and align bounded context") {

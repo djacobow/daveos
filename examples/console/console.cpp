@@ -168,5 +168,10 @@ int main() {
   app::console.dispatcher(dispatcher);
   std::jthread reader(
       [](std::stop_token stop) { app::Read(stop, app::input); });
-  return scheduler.run() == core::Status::ok ? 0 : 1;
+  const auto status = scheduler.run();
+  if (status != core::Status::ok) {
+    std::fprintf(stderr, "DaveOS: %s\n", core::enum_name(status));
+    return 1;
+  }
+  return 0;
 }

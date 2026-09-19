@@ -95,5 +95,10 @@ int main() {
   auto scheduler = daveos::core::make_scheduler<app::Event>(
       platform, daveos::core::ModuleList{&app::producer, &app::consumer},
       logger);
-  return scheduler.run() == daveos::core::Status::ok ? 0 : 1;
+  const auto status = scheduler.run();
+  if (status != core::Status::ok) {
+    std::fprintf(stderr, "DaveOS: %s\n", core::enum_name(status));
+    return 1;
+  }
+  return 0;
 }

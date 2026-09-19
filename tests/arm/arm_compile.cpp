@@ -56,7 +56,7 @@ void Instantiate(CompilePlatform& platform) {
       platform, daveos::core::ModuleList{&module});
   core::CommandDispatcher dispatcher(core::ModuleList{&module}, scheduler);
   dispatcher.dispatch("arm_compile run");
-  scheduler.run();
+  (void)scheduler.run();
   scheduler.snapshot();
   daveos::core::ThreadSafeQueue<int, 8, CompilePlatform> queue(platform);
   queue.push(1);
@@ -75,5 +75,5 @@ void InstantiateLogging(CompilePlatform& platform) {
   logger.minimum(core::Level::debug);
   logger.counters();
   logger.reset();
-  scheduler.run();
+  (void)scheduler.run();
 }

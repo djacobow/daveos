@@ -21,3 +21,8 @@ subdir('programming')
 if get_option('networking')
   subdir('network')
 endif
+
+subdir('usability')
+if platform == 'host' and get_option('b_sanitize') == 'none'
+  subdir('starter')
+endif

@@ -14,6 +14,7 @@ using Platform = daveos::platform::host::Platform;
 namespace core = daveos::core;
 
 namespace app {
+  using std::chrono_literals::operator""ms;
 
   enum class Event { hello };
 
@@ -22,12 +23,12 @@ namespace app {
     static constexpr const char* name() { return "hello"; }
 
     static constexpr auto tasks() {
-      return std::array{core::TaskDescriptor<Hello>{"greet", &Hello::greet}};
+      return std::array{DAVEOS_TASK(Hello, greet)};
     }
 
     core::Status init(core::InitStage stage) {
       if (stage == core::InitStage::stage1) {
-        return scheduler().schedule(*this, &Hello::greet, 1000);
+        return schedule<&Hello::greet>(1ms);
       }
       return core::Status::ok;
     }
@@ -56,5 +57,10 @@ int main() {
                     daveos::core::Subscriber{nullptr, app::Output}});
   auto scheduler = daveos::core::make_scheduler<app::Event>(
       platform, daveos::core::ModuleList{&app::hello}, logger);
-  return scheduler.run() == daveos::core::Status::ok ? 0 : 1;
+  const auto status = scheduler.run();
+  if (status != core::Status::ok) {
+    std::fprintf(stderr, "DaveOS: %s\n", core::enum_name(status));
+    return 1;
+  }
+  return 0;
 }
