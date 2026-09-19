@@ -1,23 +1,34 @@
 #pragma once
 
-#include "application.h"
+#include "board_config.h"
 #include "console/module.hpp"
 #include "console/output.hpp"
+#include "console/transport.hpp"
 
-namespace app {
+namespace daveos::platform::stm32 {
+  namespace core = daveos::core;
+  using Platform = board::Platform;
   namespace console = daveos::console;
 
   // USART3 owns its input queue and TX frame buffer; DMA storage is
   // board-owned.
-  class UartConsole final : public console::Module<UartConsole, Event> {
+  class UartTransport final {
    public:
-    explicit UartConsole(Platform& platform);
+    explicit UartTransport(Platform& platform);
 
     static constexpr const char* name() { return "uart"; }
 
-    core::Status init(core::InitStage stage);
+    ~UartTransport() { stop(); }
+
+    UartTransport(const UartTransport&) = delete;
+    UartTransport& operator=(const UartTransport&) = delete;
+    bool init();
     void stop();
-    void log_statistics(core::SchedulerInterface<Event>& scheduler);
+
+    console::TxCounters counters() { return output_.counters(); }
+
+    static constexpr const char* statistics_label() { return "TX DMA"; }
+
     void start_receive();
     void received();
 
@@ -40,5 +51,9 @@ namespace app {
     console::BufferedOutput<Platform, Driver, 4096> output_;
     console::LineDisplay display_;
     std::uint8_t rx_byte_ = 0;
+    bool attempted_ = false;
   };
-}  // namespace app
+
+  template <typename Event>
+  using UartConsole = daveos::console::TransportModule<Event, UartTransport>;
+}  // namespace daveos::platform::stm32

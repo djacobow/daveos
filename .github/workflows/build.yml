@@ -95,3 +95,7 @@ jobs:
             meson configure build/$target -Duart_console=false -Dusb_console=false
             meson compile -C build/$target
           done
+      - name: Build standalone device starters
+        run: |
+          python tests/starter/stm32.py "$PWD" "$PWD/build/device-starter-h563" h563
+          python tests/starter/stm32.py "$PWD" "$PWD/build/device-starter-h755" h755

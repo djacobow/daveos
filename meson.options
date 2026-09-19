@@ -2,6 +2,7 @@ option('platform', type: 'combo', choices: ['host', 'fake', 'stm32'], value: 'ho
 option('board', type: 'combo', choices: ['h563', 'h755'], value: 'h563', description: 'Nucleo board for the STM32 console')
 option('tests', type: 'boolean', value: true)
 option('examples', type: 'boolean', value: true)
+option('stm32_support', type: 'boolean', value: false, description: 'Provide Nucleo board and console dependencies without building the example')
 option('logging', type: 'boolean', value: true, description: 'Enable buffered logging and log macros')
 option('openocd', type: 'string', value: '', description: 'OpenOCD executable; empty discovers the local install or PATH')
 option('cubeprogrammer', type: 'string', value: '', description: 'STM32_Programmer_CLI executable; empty discovers the local install or PATH')

@@ -214,6 +214,38 @@ TEST_CASE(
   }
 }
 
+TEST_CASE("identical member bodies retain independent timer identities") {
+  struct Target {
+    int calls = 0;
+
+    void First() { ++calls; }
+
+    void Second() { ++calls; }
+  } target;
+
+  auto first = core::TimerCallback::bind<&Target::First>(target);
+  auto second = core::TimerCallback::bind<&Target::Second>(target);
+  CHECK_FALSE(first == second);
+
+  test::Fake platform;
+  test::TestModule module;
+  auto scheduler = core::make_scheduler<test::Event, 32, 2>(
+      platform, core::ModuleList{&module});
+  module.first_action = [&] {
+    CHECK(scheduler.timer(1, first) == core::Status::ok);
+    CHECK(scheduler.timer(2, second) == core::Status::ok);
+    CHECK(scheduler.cancel_timer(first) == core::Status::ok);
+    CHECK(scheduler.cancel_timer(first) == core::Status::not_found);
+  };
+  module.second_action = [&] { CHECK(scheduler.stop() == core::Status::ok); };
+  CHECK(scheduler.schedule<&test::TestModule::first>(module, 0) ==
+        core::Status::ok);
+  CHECK(scheduler.schedule<&test::TestModule::second>(module, 3) ==
+        core::Status::ok);
+  CHECK(scheduler.run() == core::Status::ok);
+  CHECK(target.calls == 1);
+}
+
 TEST_CASE(
     "bound callback identity normalizes base references and supports const "
     "noexcept") {

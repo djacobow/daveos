@@ -3,6 +3,7 @@
 #include <new>
 
 #include "core/command/command.hpp"
+#include "core/schedule/application.hpp"
 #include "support.hpp"
 
 namespace core = daveos::core;
@@ -151,4 +152,64 @@ TEST_CASE("duration helpers and bound timers allocate no C++ heap storage") {
   CHECK(worker.calls == 1);
   CHECK(platform.now() == 3);
   CHECK(allocations == 0);
+}
+
+TEST_CASE(
+    "application construction and declarative dispatch allocate no C++ heap") {
+  struct Worker : core::Module<Worker, test::Event> {
+    core::CommandSource& source;
+    int calls = 0;
+    core::Status dispatched = core::Status::not_running;
+    core::Status stopped = core::Status::not_running;
+
+    explicit Worker(core::CommandSource& s) : source(s) {}
+
+    static constexpr const char* name() { return "worker"; }
+
+    static constexpr auto tasks() {
+      return std::array{
+          DAVEOS_PERIODIC(Worker, Poll, std::chrono::milliseconds{1})};
+    }
+
+    static constexpr auto commands() {
+      return std::array{DAVEOS_COMMAND(Worker, "go", Go, "record invocation")};
+    }
+
+    core::Status Go(core::CommandArguments) {
+      ++calls;
+      return core::Status::ok;
+    }
+
+    void Poll() {
+      dispatched = source.dispatch("worker go");
+      scheduler().log(core::Level::info, "done");
+      stopped = scheduler().stop();
+    }
+  };
+
+  test::Fake platform;
+  core::CommandSource source;
+  Worker worker(source);
+  unsigned logs = 0;
+  auto logger = core::make_logger(
+      platform, core::SubscriberList{core::Subscriber{
+                    &logs, [](void* p, const core::LogRecord&) {
+                      ++*static_cast<unsigned*>(p);
+                    }}});
+  allocations = 0;
+  counting = true;
+  core::Status status;
+  {
+    auto app = core::make_application<test::Event>(
+        platform, core::ModuleList{&worker}, logger,
+        core::CommandSourceList{source});
+    status = app.run();
+  }
+  counting = false;
+  CHECK(allocations == 0);
+  CHECK(status == core::Status::ok);
+  CHECK(worker.dispatched == core::Status::ok);
+  CHECK(worker.stopped == core::Status::ok);
+  CHECK(worker.calls == 1);
+  CHECK(logs == unsigned(DAVEOS_LOGGING));
 }

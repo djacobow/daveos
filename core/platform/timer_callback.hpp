@@ -11,6 +11,9 @@ namespace daveos::core {
   // Non-owning, allocation-free timer callback. Bound objects must remain alive
   // until cancellation/completion and until any in-flight ISR has returned.
   // Identity is the plain function, or the object plus bound member function.
+  // Bound identity uses the Invoke specialization's address. Builds must
+  // preserve distinct address-taken functions: unsafe linker folding such as
+  // --icf=all is unsupported (including for plain function callbacks).
   class TimerCallback {
     template <typename Owner>
     static Owner* OwnerType(void (Owner::*)());

@@ -1,5 +1,6 @@
 #include "core/command/command.hpp"
 #include "core/logging/logger.hpp"
+#include "core/schedule/application.hpp"
 #include "core/schedule/scheduler.hpp"
 
 namespace core = daveos::core;
@@ -12,7 +13,8 @@ namespace {
     static constexpr const char* name() { return "arm_compile"; }
 
     static constexpr auto tasks() {
-      return std::array{core::TaskDescriptor<Example>{"tick", &Example::tick}};
+      return std::array{
+          DAVEOS_PERIODIC(Example, tick, std::chrono::milliseconds{1})};
     }
 
     static constexpr auto commands() {
@@ -76,4 +78,15 @@ void InstantiateLogging(CompilePlatform& platform) {
   logger.counters();
   logger.reset();
   (void)scheduler.run();
+}
+
+void InstantiateApplication(CompilePlatform& platform) {
+  Example module;
+  core::CommandSource source;
+  auto logger = core::make_logger(platform, core::SubscriberList{});
+  auto app =
+      core::make_application<Event>(platform, core::ModuleList{&module}, logger,
+                                    core::CommandSourceList{source});
+  (void)app.run();
+  (void)app.initialization_failure();
 }

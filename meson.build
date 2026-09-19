@@ -21,7 +21,7 @@ if platform == 'stm32'
   cpu_flags += ['-mthumb', '-mfloat-abi=hard']
   add_project_arguments(cpu_flags + ['-ffreestanding', '-ffunction-sections',
     '-fdata-sections'], language: ['c', 'cpp'])
-  add_project_link_arguments(cpu_flags + ['--specs=nosys.specs'], language: ['c', 'cpp'])
+  add_project_link_arguments(cpu_flags, language: ['c', 'cpp'])
 endif
 
 subdir('tools')
@@ -30,6 +30,7 @@ subdir('console')
 if get_option('networking')
   subdir('net')
 endif
+firmware_images = []
 subdir('platform')
 # Stable dependency names for applications using DaveOS as a Meson subproject.
 meson.override_dependency('daveos-core', core_dep)
@@ -47,11 +48,10 @@ elif platform == 'stm32h5'
 else
   meson.override_dependency('daveos-stm32h7', stm32h7_dep)
 endif
-firmware_images = []
 if get_option('examples')
   subdir('examples')
 endif
-if firmware_images.length() > 0
+if get_option('examples') and firmware_images.length() > 0
   subdir('tools/programming')
 endif
 if platform in ['stm32h5', 'stm32h7']

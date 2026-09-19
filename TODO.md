@@ -1,5 +1,9 @@
 # Follow-up work
 
+- [x] Smoke-test Application composition on H563: UART/USB/TCP commands, timers, button reads, LED command acknowledgements, statistics, large ping, TCP reconnect, and software-reset recovery.
+- [x] Add passive Application composition with post-init command binding and declarative periodic tasks with compile-time intervals and explicit overrides.
+- [ ] Advance both starter wrap pins to the new API commit before publishing the updated starters.
+- [ ] Support application-defined payload events (`std::variant` or a tagged class) alongside enum events. Use `post(const Event&, void* sender = nullptr)` and `on_event(const Event&)`, copying into the fixed-capacity queue; receiver references last only for the callback. Initially require trivially copyable, nonthrowing default-constructible and copy-assignable event types with small, allocation-free payloads. Preserve broadcast behavior, sender exclusion, and interrupt-safe posting; document the largest-alternative storage cost and test payload delivery and queue overflow.
 - [x] Add clang-format configuration consistent with PROJECT.md and a formatting check.
 - [x] Add cppcheck configuration and a lint command; integrate both checks into CI.
 - [x] Implement the STM32H563 platform, CubeMX startup/linker integration, and DaveOS LED example.
@@ -43,3 +47,9 @@
 - [x] Add task helpers, exact chrono delays, object-bound timers, reusable stage2 command binding, and retained initialization diagnostics.
 - [x] Add a standalone host/fake application starter, exported Meson dependencies, and consumer build tests.
 - [x] Validate the updated H563 firmware over UART/USB/TCP, including the bound timer command, Ethernet, and reset recovery.
+
+- [x] Add ready-made host stdout subscriber and status-to-exit-code runner.
+- [x] Promote STM32 console transports/commands and Nucleo board support to reusable dependencies; add the C++ Console group.
+- [x] Add a standalone H563/H755 device starter and CI consumer-build/programming-plan checks.
+- [x] Organize the documentation into hello, logging/commands, hardware console, and custom-component levels.
+- [x] Validate the reusable console on H563 over UART/USB/TCP, including Ethernet ping and reset recovery; validate the standalone device starter's periodic worker, commands, and reset over UART. H755 has build/programming-plan coverage only for these changes.

@@ -23,6 +23,8 @@ if get_option('networking')
 endif
 
 subdir('usability')
+subdir('application')
+subdir('console_library')
 if platform == 'host' and get_option('b_sanitize') == 'none'
   subdir('starter')
 endif

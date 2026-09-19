@@ -4,7 +4,7 @@
 #include "core/logging/log_format.hpp"
 #include "net/tcp_server.h"
 
-namespace app {
+namespace daveos::console {
 
 
   // Plain TCP console: local terminal echo, shared command parsing and logging.
@@ -61,4 +61,4 @@ namespace app {
   };
 
 
-}  // namespace app
+}  // namespace daveos::console

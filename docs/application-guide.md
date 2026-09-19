@@ -20,14 +20,7 @@ class Worker : public core::Module<Worker, Event> {
   static constexpr const char* name() { return "worker"; }
 
   static constexpr auto tasks() {
-    return std::array{DAVEOS_TASK(Worker, Poll)};
-  }
-
-  core::Status init(core::InitStage stage) {
-    if (stage == core::InitStage::stage1) {
-      return schedule<&Worker::Poll>(10ms, core::Mode::repeat);
-    }
-    return core::Status::ok;
+    return std::array{DAVEOS_PERIODIC(Worker, Poll, 10ms)};
   }
 
  private:
@@ -35,7 +28,14 @@ class Worker : public core::Module<Worker, Event> {
 };
 ```
 
-`DAVEOS_TASK` derives the displayed name from the function identifier. Use
+`DAVEOS_PERIODIC` registers and schedules the task: first at 10 ms after normal
+dispatch begins, then every 10 ms. Its interval must be a positive, exact integral
+chrono duration known at compile time. Defaults are installed before any stage1
+hook; explicit schedule/cancel in either stage overrides them. Successful explicit
+scheduling/cancellation before init also wins. No callback runs during init.
+
+Use `DAVEOS_TASK` for tasks scheduled dynamically. Both macros derive
+the displayed name from the function identifier. Use
 `TaskDescriptor<Worker>{"custom name", &Worker::Poll}` when a different name is
 useful. The typed `schedule` and `cancel` helpers reject unregistered functions
 at compile time. To schedule another module, use
@@ -70,28 +70,42 @@ Expiry runs in **interrupt context**, just like a plain timer callback. Schedule
 a registered task from the callback if further work belongs on the scheduler
 thread. Logging remains buffered. No heap allocation or owned closure is involved.
 
-## Command binding
+## Application composition
 
-The optional wiring module replaces an application-specific stage2 hook:
+Include `core/schedule/application.hpp`. For a minimal application:
 
 ```cpp
-auto commands = core::make_command_binding<Event>(
-    core::CommandSourceList{uart.command_source(), usb.command_source()});
-auto modules = core::ModuleList{&commands, &board, &uart, &usb};
-auto scheduler = core::make_scheduler<Event>(platform, modules, logger);
-core::CommandDispatcher dispatcher(modules, scheduler);
-
-// In the entry point, after all objects exist and before init/run:
-commands.connect(dispatcher);
-const auto status = scheduler.run();
+auto application = core::make_application<Event>(platform, core::ModuleList{&worker});
+const auto status = application.run();
 ```
 
-Include `core/command/binding.hpp`. The helper copies source pointers, owns no
-transport, and binds them in stage2. All sources and the dispatcher must outlive
-its use. Its name is `commands`; reserve that module name. Omitting `connect`
-fails initialization with `not_running`. Logging remains independent: omit the
-logger argument when it is not needed. Applications can still wire sources
-explicitly with `dispatcher.bind_sources()`.
+Add a logger, command sources, or both independently:
+
+```cpp
+auto modules = core::ModuleList{&board, &uart, &usb};
+auto sources = core::CommandSourceList{uart.command_source(), usb.command_source()};
+auto application = core::make_application<Event>(platform, modules, logger, sources);
+const auto status = application.run();
+```
+
+Omit `logger` for commands without logging, or omit `sources` for logging without
+commands. Application owns its scheduler and optional dispatcher, borrows the
+supplied objects, and needs no wiring module or reserved module name. Sources bind
+after both initialization stages succeed, before dispatch starts. They cannot
+submit commands during initialization. Construction is passive, including at
+file scope; borrowed objects must be constructed before init/run and remain alive
+through Application destruction. Application cannot be copied or moved.
+
+Use `application.init()` for explicit initialization or let `run()` do it.
+Use `application.scheduler()` for scheduling and diagnostics; lifecycle calls
+must go through Application. Event/timer capacities are optional numeric template
+arguments (defaults 32/16). Command-enabled factory overloads additionally accept
+line/argument capacities (defaults 256/16), for example
+`make_application<Event, 8, 4, 128, 8>(platform, modules, sources)`.
+
+Custom applications can still assemble `make_scheduler`, `CommandDispatcher`,
+and `bind_sources` directly. The existing CommandBinding helper provides stage2
+binding when using those explicit pieces.
 
 ## Failures
 
@@ -99,7 +113,7 @@ Check the status from scheduling and lifecycle operations. Lifecycle and new
 convenience calls are `[[nodiscard]]`; an explicit `(void)` documents deliberate
 ignoring. Existing raw-microsecond APIs retain their previous annotation behavior.
 
-After an initialization failure, `scheduler.initialization_failure()` returns
+After an initialization failure, `application.initialization_failure()` returns
 `status`, `module`, and `stage`, even with no logger. A null module identifies
 registration validation rather than a module hook. The first failure is retained;
 initialization is never retried. An attached logger also receives an attempted
@@ -113,8 +127,13 @@ DaveOS exports `daveos-core`, `daveos-console`, selected platform dependencies, 
 `daveos-network` when networking is enabled. Host builds also export the fake
 platform. The starter's `dependency(..., fallback: ...)` calls show how to consume
 them. Disable DaveOS's own examples/tests for a small consumer build; your own
-application tests can use the fake platform without Catch2. Pin the wrap revision
-to a tested commit. The starter covers host/fake only. Device startup, application
-CPU/ABI compiler and linker flags, peripheral setup, linker scripts, and board
-HAL selection remain the application's responsibility; the shared STM32 console
-provides a worked example.
+application tests can use the fake platform without Catch2. The starter pins its
+wrap revision to a tested commit; keep upgrades pinned too. For a device
+application, use [the STM32 starter](../starters/stm32/README.md):
+its board dependency supplies CPU/ABI flags, startup, linker, and HAL settings.
+Custom boards supply their own equivalents.
+
+For the guided progression, start with [hello](01-hello.md). Use
+[host::stdout_subscriber and host::run](02-logging-and-commands.md) for standard
+host output and exit handling, and [Console](03-hardware-console.md) for reusable
+STM32 transport registration.

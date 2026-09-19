@@ -99,6 +99,8 @@ namespace daveos::core {
       Mode mode = Mode::once;
       Time interval = 0;
       Time due = 0;
+      Time default_period = 0;
+      bool explicitly_scheduled = false;
     };
 
     struct EventRecord {
@@ -151,6 +153,16 @@ namespace daveos::core {
       if (status == Status::ok) {
         for (const auto& module : modules_) {
           module.bind(module.object, *this);
+        }
+        {
+          Guard guard(platform_);
+          for (auto& task : tasks_) {
+            if (task.default_period && !task.explicitly_scheduled) {
+              task.active = true;
+              task.mode = Mode::repeat;
+              task.interval = task.due = task.default_period;
+            }
+          }
         }
         for (auto stage : {InitStage::stage1, InitStage::stage2}) {
           for (const auto& module : modules_) {
@@ -558,8 +570,10 @@ namespace daveos::core {
             },
             index,
             descriptors[index].name};
+        tasks_[task_count_].default_period = descriptors[index].period;
         statistics_.tasks[task_count_++] = {M::name(), descriptors[index].name};
-        if (!descriptors[index].callback) {
+        if (!descriptors[index].callback ||
+            descriptors[index].period == kForever) {
           registration_error_ = true;
         }
         for (std::size_t previous = 0; previous < index; ++previous) {
@@ -605,6 +619,7 @@ namespace daveos::core {
       for (auto& task : tasks_) {
         if (task.module == module && task.index == index) {
           task.active = true;
+          task.explicitly_scheduled = true;
           task.interval = delay;
           task.mode = mode;
           task.due =
@@ -630,6 +645,7 @@ namespace daveos::core {
             return Status::not_found;
           }
           task.active = false;
+          task.explicitly_scheduled = true;
           platform_.notify();
           return Status::ok;
         }

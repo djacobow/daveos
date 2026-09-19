@@ -1,11 +1,11 @@
 #pragma once
 
 #include "board_config.h"
-#include "console/module.hpp"
 #include "console/output.hpp"
+#include "console/transport.hpp"
 
-namespace board {
-
+namespace daveos::platform::stm32 {
+  using Platform = board::Platform;
 
   // Application-owned USB transport. Only the C middleware callback route is
   // global: one hardware USB device may be active at a time. All entry points
@@ -17,6 +17,11 @@ namespace board {
     ~UsbTransport();
     UsbTransport(const UsbTransport&) = delete;
     UsbTransport& operator=(const UsbTransport&) = delete;
+
+    static constexpr const char* name() { return "usb"; }
+
+    static constexpr const char* statistics_label() { return "USB TX"; }
+
     bool init();
     void stop();
     bool poll_line(daveos::console::Line& line);
@@ -50,35 +55,7 @@ namespace board {
     bool reset_display_ = false, attempted_ = false;
   };
 
-  // Independent USB module, borrowing the application's transport.
   template <typename Event>
-  class UsbConsole final
-      : public daveos::console::Module<UsbConsole<Event>, Event> {
-   public:
-    explicit UsbConsole(UsbTransport& transport) : transport_(transport) {}
+  using UsbConsole = daveos::console::TransportModule<Event, UsbTransport>;
 
-    static constexpr const char* name() { return "usb"; }
-
-    daveos::core::Status init(daveos::core::InitStage stage) {
-      if (stage == daveos::core::InitStage::stage1 && !transport_.init()) {
-        return daveos::core::Status::initialization_failed;
-      }
-      return daveos::console::Module<UsbConsole<Event>, Event>::init(stage);
-    }
-
-    bool poll_line(daveos::console::Line& line) {
-      return transport_.poll_line(line);
-    }
-
-    std::uint32_t take_dropped() { return transport_.take_dropped(); }
-
-    void output(const daveos::core::LogRecord& record) {
-      transport_.output(record);
-    }
-
-   private:
-    UsbTransport& transport_;
-  };
-
-
-}  // namespace board
+}  // namespace daveos::platform::stm32

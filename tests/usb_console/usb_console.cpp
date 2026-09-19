@@ -1,6 +1,6 @@
 #include "catch_amalgamated.hpp"
-#include "examples/stm32_console/usb/usb.hpp"
-#include "examples/stm32_console/usb/usb_device.h"
+#include "platform/stm32/console/usb/usb.hpp"
+#include "platform/stm32/console/usb/usb_device.h"
 
 namespace {
   bool init_ok = true, ready = false;
@@ -34,7 +34,7 @@ TEST_CASE("USB callback routing borrows one live application-owned transport") {
   board::Platform platform;
   starts = stops = 0;
   init_ok = true;
-  board::UsbTransport first(platform), second(platform);
+  daveos::platform::stm32::UsbTransport first(platform), second(platform);
   REQUIRE(first.init());
   REQUIRE_FALSE(first.init());
   REQUIRE_FALSE(second.init());
@@ -64,7 +64,7 @@ TEST_CASE("USB callback routing borrows one live application-owned transport") {
 TEST_CASE("USB initialization failure releases the callback route") {
   board::Platform platform;
   init_ok = false;
-  board::UsbTransport failed(platform), next(platform);
+  daveos::platform::stm32::UsbTransport failed(platform), next(platform);
   REQUIRE_FALSE(failed.init());
   init_ok = true;
   REQUIRE_FALSE(failed.init());

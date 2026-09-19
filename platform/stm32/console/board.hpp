@@ -2,10 +2,15 @@
 
 #include <charconv>
 
-#include "application.h"
+#include "board_config.h"
+#include "core/schedule/module.hpp"
 
-namespace app {
-  class Board final : public daveos::core::Module<Board, Event> {
+namespace daveos::platform::stm32 {
+  namespace core = daveos::core;
+  using Platform = board::Platform;
+
+  template <typename Event>
+  class Board final : public daveos::core::Module<Board<Event>, Event> {
    public:
     Board(Platform& platform,
           void (*log_transports)(core::SchedulerInterface<Event>&))
@@ -41,7 +46,7 @@ namespace app {
       if (parsed.ec != std::errc{} || parsed.ptr != end || !delay) {
         return core::Status::invalid_argument;
       }
-      return timer<&Board::TimerFired>(delay);
+      return this->template timer<&Board::TimerFired>(delay);
     }
 
     void TimerFired() { I_("Timer fired"); }
@@ -84,8 +89,8 @@ namespace app {
       if (!args.empty()) {
         return core::Status::invalid_argument;
       }
-      scheduler().log_statistics();
-      log_transports_(scheduler());
+      this->scheduler().log_statistics();
+      log_transports_(this->scheduler());
       return core::Status::ok;
     }
 
@@ -93,4 +98,4 @@ namespace app {
     void (*log_transports_)(core::SchedulerInterface<Event>&);
   };
 
-}  // namespace app
+}  // namespace daveos::platform::stm32

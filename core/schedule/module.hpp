@@ -3,6 +3,7 @@
 #include <array>
 #include <concepts>
 #include <cstdarg>
+#include <cstdlib>
 #include <span>
 #include <string_view>
 #include <tuple>
@@ -27,7 +28,27 @@ namespace daveos::core {
   struct TaskDescriptor {
     const char* name;
     void (M::*callback)();
+    Time period = 0;  // Zero leaves scheduling entirely to the application.
   };
+
+  // Declarative repeat interval: validated at compile time, never rounded.
+  // abort makes an invalid constant expression fail compilation, including in
+  // embedded builds without exceptions. No runtime abort path is generated.
+  template <typename M, DurationRep Rep, typename Period>
+  consteval TaskDescriptor<M> periodic_task(
+      const char* name, void (M::*callback)(),
+      std::chrono::duration<Rep, Period> interval) {
+    Time micros = 0;
+    if (to_microseconds(interval, micros) != Status::ok || !micros) {
+      std::abort();
+    }
+    return {name, callback, micros};
+  }
+
+// Register and repeat, first due one interval after normal dispatch starts.
+#define DAVEOS_PERIODIC(ModuleType, function, interval)                       \
+  ::daveos::core::periodic_task<ModuleType>(#function, &ModuleType::function, \
+                                            interval)
 
 // Register a task using its C++ function identifier as the displayed name.
 #define DAVEOS_TASK(ModuleType, function)      \
@@ -39,14 +60,13 @@ namespace daveos::core {
   template <typename M, auto Function>
   consteval std::size_t TaskIndex() {
     constexpr auto tasks = M::tasks();
-    constexpr auto index = [] {
-      constexpr auto descriptors = M::tasks();
-      for (std::size_t i = 0; i < descriptors.size(); ++i) {
-        if (descriptors[i].callback == Function) {
+    constexpr auto index = [&] {
+      for (std::size_t i = 0; i < tasks.size(); ++i) {
+        if (tasks[i].callback == Function) {
           return i;
         }
       }
-      return descriptors.size();
+      return tasks.size();
     }();
     static_assert(index < tasks.size(),
                   "task callback must be registered in tasks()");

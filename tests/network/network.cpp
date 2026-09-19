@@ -4,9 +4,9 @@
 #include <cstring>
 
 #include "catch_amalgamated.hpp"
+#include "console/tcp.hpp"
 #include "core/command/command.hpp"
 #include "core/schedule/scheduler.hpp"
-#include "examples/stm32_console/tcp_console.hpp"
 #include "net/module.hpp"
 #include "net/service.h"
 #include "net/tcp_server.h"
@@ -552,7 +552,8 @@ TEST_CASE(
   REQUIRE(service.init());
   service.poll();
   TestPlatform platform;
-  app::TcpConsole<ConsoleEvent, TestPlatform> console(platform, service);
+  daveos::console::TcpConsole<ConsoleEvent, TestPlatform> console(platform,
+                                                                  service);
   daveos::console::Line line;
   REQUIRE_FALSE(console.poll_line(line));  // Open listener.
   f.queue(Arp());

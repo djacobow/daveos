@@ -14,15 +14,8 @@ namespace app {
     static constexpr const char* name() { return "counter"; }
 
     static constexpr auto tasks() {
-      return std::array{DAVEOS_TASK(Counter, Tick)};
-    }
-
-    core::Status init(core::InitStage stage) {
-      if (stage == core::InitStage::stage1) {
-        return schedule<&Counter::Tick>(std::chrono::milliseconds{1},
-                                        core::Mode::repeat);
-      }
-      return core::Status::ok;
+      return std::array{
+          DAVEOS_PERIODIC(Counter, Tick, std::chrono::milliseconds{1})};
     }
 
     std::uint32_t count() const { return count_; }

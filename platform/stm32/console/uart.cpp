@@ -1,46 +1,46 @@
-#include "uart.h"
+#include "uart.hpp"
 
-#include "statistics.h"
 
 extern "C" UART_HandleTypeDef huart3;
 
 namespace {
   // HAL callbacks have no user context. This route owns no application state.
-  app::UartConsole* active_uart = nullptr;
+  daveos::platform::stm32::UartTransport* active_uart = nullptr;
 }  // namespace
 
-namespace app {
-  bool UartConsole::Driver::start(const std::uint8_t* bytes, std::size_t size) {
+namespace daveos::platform::stm32 {
+  bool UartTransport::Driver::start(const std::uint8_t* bytes,
+                                    std::size_t size) {
     return board::StartTransmit(bytes, size);
   }
 
-  UartConsole::UartConsole(Platform& platform)
+  UartTransport::UartTransport(Platform& platform)
       : input_(platform),
         output_(platform, driver_, board::tx_storage),
         display_(this, [](void* context, std::string_view text) {
-          static_cast<UartConsole*>(context)->output_.write(text);
+          static_cast<UartTransport*>(context)->output_.write(text);
         }) {}
 
-  core::Status UartConsole::init(core::InitStage stage) {
-    if (stage == core::InitStage::stage1) {
-      // Keep received bytes in hardware while short critical sections mask
-      // IRQs. One-byte IT reception still handles partial lines immediately.
-      if (HAL_UARTEx_EnableFifoMode(&huart3) != HAL_OK) {
-        return core::Status::initialization_failed;
-      }
-      active_uart = this;
-      start_receive();
+  bool UartTransport::init() {
+    if (active_uart || attempted_) {
+      return false;
     }
-    return daveos::console::Module<UartConsole, Event>::init(stage);
+    attempted_ = true;
+    if (HAL_UARTEx_EnableFifoMode(&huart3) != HAL_OK) {
+      return false;
+    }
+    active_uart = this;
+    start_receive();
+    return true;
   }
 
-  void UartConsole::start_receive() {
+  void UartTransport::start_receive() {
     if (HAL_UART_Receive_IT(&huart3, &rx_byte_, 1) != HAL_OK) {
       Error_Handler();
     }
   }
 
-  void UartConsole::received() {
+  void UartTransport::received() {
     if (huart3.ErrorCode & ~HAL_UART_ERROR_DMA) {
       input_.error();
     } else {
@@ -49,7 +49,7 @@ namespace app {
     start_receive();
   }
 
-  void UartConsole::error() {
+  void UartTransport::error() {
     if (huart3.ErrorCode & HAL_UART_ERROR_DMA) {
       output_.error();
     }
@@ -62,7 +62,7 @@ namespace app {
     }
   }
 
-  void UartConsole::output(const core::LogRecord& record) {
+  void UartTransport::output(const core::LogRecord& record) {
     display_.before_log();
     core::LogPrefix prefix(record);
     output_.write(prefix.view());
@@ -72,7 +72,7 @@ namespace app {
     output_.flush();
   }
 
-  bool UartConsole::poll_line(console::Line& line) {
+  bool UartTransport::poll_line(console::Line& line) {
     const bool pending = input_.pop(line);
     if (pending) {
       display_.clear();
@@ -83,7 +83,10 @@ namespace app {
     return pending;
   }
 
-  void UartConsole::stop() {
+  void UartTransport::stop() {
+    if (active_uart != this) {
+      return;
+    }
     HAL_NVIC_DisableIRQ(USART3_IRQn);
     HAL_NVIC_DisableIRQ(board::kDmaIrq);
     HAL_UART_AbortTransmit(&huart3);
@@ -91,10 +94,7 @@ namespace app {
     active_uart = nullptr;
   }
 
-  void UartConsole::log_statistics(core::SchedulerInterface<Event>& scheduler) {
-    LogTx(scheduler, "TX DMA", output_.counters());
-  }
-}  // namespace app
+}  // namespace daveos::platform::stm32
 
 extern "C" void HAL_UART_RxCpltCallback(UART_HandleTypeDef* uart) {
   if (uart == &huart3 && active_uart) {

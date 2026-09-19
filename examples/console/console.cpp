@@ -6,10 +6,9 @@
 #include <mutex>
 #include <thread>
 
-#include "core/command/command.hpp"
-#include "core/logging/log_format.hpp"
 #include "core/logging/logger.hpp"
-#include "core/schedule/scheduler.hpp"
+#include "core/schedule/application.hpp"
+#include "platform/host/io.hpp"
 #include "platform/host/platform.h"
 
 namespace core = daveos::core;
@@ -86,7 +85,8 @@ namespace app {
     static constexpr const char* name() { return "console"; }
 
     static constexpr auto tasks() {
-      return std::array{core::TaskDescriptor<Console>{"input", &Console::Poll}};
+      return std::array{
+          DAVEOS_PERIODIC(Console, Poll, std::chrono::milliseconds{10})};
     }
 
     static constexpr auto commands() {
@@ -95,19 +95,11 @@ namespace app {
           DAVEOS_COMMAND(Console, "exit", Exit, "Stop the host program")};
     }
 
-    template <typename Dispatcher>
-    void dispatcher(Dispatcher& dispatcher) {
-      dispatcher_ = &dispatcher;
-      dispatch_ = [](void* context, std::string_view line) {
-        return static_cast<Dispatcher*>(context)->dispatch(line);
-      };
-    }
+    core::CommandSource& command_source() { return source_; }
 
     core::Status init(core::InitStage stage) {
       if (stage == core::InitStage::stage1) {
         I_("Type help or console exit");
-        return scheduler().schedule(*this, &Console::Poll, 10000,
-                                    core::Mode::repeat);
       }
       return core::Status::ok;
     }
@@ -121,7 +113,7 @@ namespace app {
           return;
         }
       }
-      dispatch_(dispatcher_, std::string_view(line.bytes.data(), line.size));
+      source_.dispatch(std::string_view(line.bytes.data(), line.size));
     }
 
     core::Status Echo(core::CommandArguments args) {
@@ -140,17 +132,8 @@ namespace app {
     }
 
     Input& input_;
-    void* dispatcher_ = nullptr;
-    core::Status (*dispatch_)(void*, std::string_view) = nullptr;
+    core::CommandSource source_;
   };
-
-  void Output(void*, const core::LogRecord& record) {
-    core::LogPrefix prefix(record);
-    auto text = prefix.view();
-    std::printf("%.*s%.*s\n", static_cast<int>(text.size()), text.data(),
-                static_cast<int>(record.message.size()), record.message.data());
-    std::fflush(stdout);
-  }
 
   // Passive application state; threads and scheduler execution begin in main.
   Input input;
@@ -162,16 +145,12 @@ int main() {
   daveos::platform::host::Platform platform;
   auto modules = core::ModuleList{&app::console};
   auto logger = core::make_logger(
-      platform, core::SubscriberList{core::Subscriber{nullptr, app::Output}});
-  auto scheduler = core::make_scheduler<app::Event>(platform, modules, logger);
-  core::CommandDispatcher dispatcher(modules, scheduler);
-  app::console.dispatcher(dispatcher);
+      platform,
+      core::SubscriberList{daveos::platform::host::stdout_subscriber()});
+  auto application = core::make_application<app::Event>(
+      platform, modules, logger,
+      core::CommandSourceList{app::console.command_source()});
   std::jthread reader(
       [](std::stop_token stop) { app::Read(stop, app::input); });
-  const auto status = scheduler.run();
-  if (status != core::Status::ok) {
-    std::fprintf(stderr, "DaveOS: %s\n", core::enum_name(status));
-    return 1;
-  }
-  return 0;
+  return daveos::platform::host::run(application);
 }

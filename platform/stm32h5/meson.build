@@ -1,5 +1,5 @@
 subdir('cmsis')
-if get_option('examples')
+if get_option('examples') or get_option('stm32_support')
   subdir('hal')
 endif
 

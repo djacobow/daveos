@@ -12,11 +12,11 @@ EXCLUDE = (
     r"|/platform/stm32/lan8742/"
     r"|/platform/stm32h[57]/STM32CubeH[57]/"
     r"|/platform/stm32/STM32_USB_Device_Library/"
-    r"|/examples/stm32_console/boards/h755/(?:Drivers|Common|EWARM)/"
-    r"|/examples/stm32_console/boards/h755/CM[47]/Core/"
-    r"|/examples/stm32_console/boards/h755/.*\.(?:cmake|ioc|ld)$"
-    r"|/examples/stm32_console/boards/h563/(?:Core|Drivers|cmake)/"
-    r"|/examples/stm32_console/boards/h563/(?:CMakeLists\.txt|CMakePresets\.json|"
+    r"|/platform/stm32/nucleo/h755/(?:Drivers|Common|EWARM)/"
+    r"|/platform/stm32/nucleo/h755/CM[47]/Core/"
+    r"|/platform/stm32/nucleo/h755/.*\.(?:cmake|ioc|ld)$"
+    r"|/platform/stm32/nucleo/h563/(?:Core|Drivers|cmake)/"
+    r"|/platform/stm32/nucleo/h563/(?:CMakeLists\.txt|CMakePresets\.json|"
     r"startup_stm32h563xx\.s|STM32H563xx_(?:FLASH|RAM)\.ld|blinky_demo\.ioc)$"
 )
 
@@ -28,8 +28,8 @@ CONFIG = {
         "fake": ("fake adapter", ["platform", "fake"]),
         "stm32": ("STM32H5 adapter", ["platform", "stm32h5"]),
         "examples": ("examples", ["examples"]),
-        "blink": ("STM32H563 console", ["examples", "stm32_console", "boards", "h563"]),
-        "h755": ("STM32H755 console", ["examples", "stm32_console", "boards", "h755"]),
+        "blink": ("STM32H563 console", ["platform", "stm32", "nucleo", "h563"]),
+        "h755": ("STM32H755 console", ["platform", "stm32", "nucleo", "h755"]),
         "stm32h7": ("STM32H7 adapter", ["platform", "stm32h7"]),
         "tests": ("tests", ["tests"]),
         "tools": ("tools", ["tools"]),
@@ -70,7 +70,7 @@ CONFIG = {
             "examples": {"default": False, "include": ["examples"], "exclude": EXCLUDE},
             "tests": {"default": False, "include": ["tests"]},
             "tools": {"default": False, "include": ["tools"], "exclude": EXCLUDE},
-            "generated": {"default": False, "include": ["examples/stm32_console/boards/h563"], "exclude": r"/(?:Drivers|cmake)/"},
+            "generated": {"default": False, "include": ["platform/stm32/nucleo/h563"], "exclude": r"/(?:Drivers|cmake)/"},
             "vendor": {"default": False, "include": ["platform/stm32h5/STM32CubeH5/Drivers"]},
             "artifacts": {"default": False, "include": ["build"]},
         },

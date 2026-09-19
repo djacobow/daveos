@@ -1,0 +1,4 @@
+option('board', type: 'combo', choices: ['h563', 'h755'], value: 'h563')
+option('openocd', type: 'string', value: '')
+option('cubeprogrammer', type: 'string', value: '')
+option('probe_serial', type: 'string', value: '')

@@ -1,9 +1,8 @@
 #include "appmain.h"
 
 #include "composition.hpp"
-#include "core/command/command.hpp"
 #include "core/logging/logger.hpp"
-#include "core/schedule/scheduler.hpp"
+#include "core/schedule/application.hpp"
 
 namespace app {
   // Constructors only store references and metadata. Module init performs
@@ -16,11 +15,10 @@ namespace app {
   }
 
   Board board_module{platform, LogTransportStatistics};
-  auto command_wiring = core::make_command_binding<Event>(components.sources());
-  auto modules = components.modules(command_wiring, board_module);
+  auto modules = components.modules(board_module);
   auto logger = core::make_logger(platform, components.subscribers());
-  auto scheduler = core::make_scheduler<Event>(platform, modules, logger);
-  core::CommandDispatcher dispatcher(modules, scheduler);
+  auto application = core::make_application<Event>(platform, modules, logger,
+                                                   components.sources());
 
   // TIM2 is routed only after platform initialization succeeds.
   Platform* active_platform = nullptr;
@@ -41,9 +39,8 @@ extern "C" void appmain() {
     Error_Handler();
   }
   app::active_platform = &app::platform;
-  app::command_wiring.connect(app::dispatcher);
-  app::last_status = app::scheduler.run();
-  app::initialization_failure = app::scheduler.initialization_failure();
+  app::last_status = app::application.run();
+  app::initialization_failure = app::application.initialization_failure();
   // Initialization failure is terminal. Release transports before halting.
   app::components.stop();
   app::platform.quiesce();

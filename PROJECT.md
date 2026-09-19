@@ -628,7 +628,10 @@ all LEDs, button press/release, USB-C orientations, and cable reconnection.
 Injected UART/DMA errors, precision timing, and prolonged sleep/backpressure
 stress remain outstanding. H755 additionally boots M4 into sleep; its earlier
 hardware results predate the static-storage, FIFO, board/composition, and
-convenience-API changes. Current H755 coverage is build-only. See TODO.md for
+convenience-API changes. Current H755 coverage is build-only, including Application composition. H563
+smoke tests also passed after the Application migration: UART/USB/TCP commands,
+timers, statistics, button reads, LED acknowledgements, large-packet ping, TCP
+reconnect, and software-reset recovery; no new physical LED/button confirmation. See TODO.md for
 remaining work. Shared code changes require both board selections to build.
 
 The application may call `platform.reset()` directly, independently of the
@@ -844,13 +847,13 @@ statistics routing, and shutdown calls; disabled components have no instances.
 Component constructors are passive; hardware setup remains in module init.
 Both boards build one `stm32-console` application target. `platform=stm32` and
 `board=h563` (default) or `board=h755` select board files under
-`examples/stm32_console/boards/`, the platform adapter, HAL, CPU/ABI flags, startup,
+`platform/stm32/nucleo/`, the platform adapter, HAL, CPU/ABI flags, startup,
 and linker script. Both use `meson/stm32.ini`; H755 additionally builds its
 sleeping M4 image with separate CPU flags. Both
 generated `Core/Src/main.c` entry points include `appmain.h` and call `appmain()`
 after CubeMX peripheral setup; `appmain()` initializes the platform and calls
-`scheduler.run()`. Hardware setup waits for initialization;
-the reusable `core::CommandBinding` module binds command sources in stage2. The
+`application.run()`. Hardware setup waits for initialization;
+Application binds command sources after both initialization stages succeed. The
 64 KiB reservation addressed the old 34,216-byte application stack frame; the
 current debug `appmain()` frame is 32 bytes. Total stack high-water usage has
 not been measured, so the reservation is retained pending that measurement.
@@ -910,6 +913,10 @@ Bound member timers can be requested/cancelled through
 `timer<&Type::Function>(object, delay)` / `cancel_timer<&Type::Function>(object)`.
 Module helpers supply `*this` automatically. These callbacks retain interrupt
 context and existing replacement, capacity, cancellation, and lifecycle semantics.
+Identity relies on distinct address-taken functions, including the invocation
+specializations for bound members. Unsafe linker folding such as `--icf=all`
+is unsupported; the supplied builds do not enable it. Identical callback bodies
+must still have independent identities under supported compiler/linker options.
 
 Optional `core::CommandBinding<Event, Sources>` copies source pointers during
 passive construction. `make_command_binding<Event>(CommandSourceList{...})`
@@ -924,3 +931,128 @@ dependencies. Export `daveos-core`, `daveos-console`, the selected adapter
 (`daveos-host`/`daveos-fake`/`daveos-stm32h5`/`daveos-stm32h7`), and optional
 `daveos-network`. The host configuration also exports the fake adapter. Consumers
 can disable framework examples/tests and pin the wrap revision independently.
+
+## Application composition and periodic tasks
+
+The convenience layer keeps explicit scheduler/logger/dispatcher APIs available
+for custom composition. Prefer chrono durations in new examples/conveniences.
+
+### Application composition
+
+The factory accepts four combinations:
+
+```cpp
+auto app = core::make_application<Event>(platform, modules);
+auto app = core::make_application<Event>(platform, modules, logger);
+auto app = core::make_application<Event>(platform, modules, sources);
+auto app = core::make_application<Event>(platform, modules, logger, sources);
+```
+
+Here `modules` is a ModuleList, `sources` is a CommandSourceList, and `logger`
+is an application-owned Logger. Each line is an alternative. Application owns
+its scheduler and, only when commands are selected, its dispatcher. It borrows
+the platform, modules, logger, and sources. Capacities remain compile-time
+settings; defaults match the existing components. No heap, virtual dispatch,
+hidden registered module, reserved module name, or explicit connect() call.
+
+Construction stores references and static metadata without touching module
+instances or hardware. All borrowed objects must finish construction before
+init/run and outlive the Application. Application is non-copyable/non-movable
+because its members refer to each other; the factory returns a prvalue using
+C++17 guaranteed copy elision. File-scope instances remain supported. Include `core/schedule/application.hpp`.
+Factory numeric arguments are event/timer capacities (32/16 by default), followed
+by command line/argument capacities (256/16) on command-enabled overloads.
+
+app.init() runs scheduler initialization, then binds command
+sources only after successful completion of both stages. app.run() calls init()
+if needed before dispatch. Repeated init/run and failure behavior follow the
+existing scheduler rules, with initialization_failure() forwarded. Expose
+scheduler() for advanced use, but document that lifecycle entry is through
+Application. Logging and commands remain independently optional, including
+commands with no logger. No third module initialization stage is introduced.
+
+The helper binds sources after all stage2 hooks, before dispatch, rather than
+during a registered module's stage2. Commands may not be submitted during initialization through the helper. Explicit low-level
+CommandBinding remains available for applications requiring its stage2 wiring.
+
+### Declarative periodic tasks
+
+TaskDescriptor has an optional period (zero means no automatic scheduling).
+Declare a periodic task with:
+
+```cpp
+static constexpr auto tasks() {
+  return std::array{DAVEOS_PERIODIC(Worker, Poll, 10ms)};
+}
+```
+
+The helper accepts an integral chrono duration, validates exact positive
+microseconds at compile time, and registers the callback/name once. The first
+iteration is due one period after normal dispatch starts, then follows the
+existing repeat cadence and overdue-iteration rules. Immediate-first execution
+and dynamic periods continue to use explicit schedule().
+
+Install these default schedules once after registration validation and module
+binding, before any stage1 hook. Thus any explicit schedule/cancel during either
+stage overrides the default, including cancellation from another module's init.
+Successful explicit scheduling/cancellation before init also overrides defaults.
+Initialization failure discards these schedules with other pending work.
+Construction does not start clocks, schedule hardware, or call module methods.
+
+Tests cover all four composition combinations, passive
+construction, two-stage ordering, failure/repeated lifecycle calls, source
+binding, file-scope use, and allocation-free operation. Periodic tests cover cadence/start epoch, explicit overrides/cancellation, init failure,
+compile-time invalid durations, and unchanged explicit task descriptors.
+
+
+## Ready-made I/O, console library, and device starter
+
+`platform/host/io.hpp` provides `host::stdout_subscriber()` with the standard
+prefix, implicit newline, and per-record flush. `host::run(runnable)` accepts a
+Scheduler or Application, returns 0 for Status::ok and 1 otherwise, and reports
+failure status to stderr independently of DaveOS logging. Both helpers can be
+used with a fake platform and introduce no timer thread themselves.
+
+Reusable USART3/USB transports, Board commands, Nucleo network wiring, and the
+Console group live in `platform/stm32/console`, namespace
+`daveos::platform::stm32`. The transport-agnostic serial module wrapper and TCP
+console live in `console/`, namespace `daveos::console`. Library code depends on
+core/console/net and a consumer-supplied board contract, never on example headers.
+`TransportModule<Event, Transport>` owns a passive transport, initializes it in
+stage1, and supplies the common command/log/statistics interface. UART and USB
+expose the same shape; UART retains its FIFO and 16-line queue. A second active
+USART3/USB instance is rejected; C callback routing pointers own no state.
+
+`stm32::Console{uart, usb, tcp}` borrows any number of transports. It provides
+modules(other_modules...), subscribers(), sources(), log_statistics(), and
+reverse-order stop(). It creates no scheduler/module of its own and reserves no
+names. Network services remain separately owned and outlive their TCP consoles.
+The STM32 example's generated header selects objects; registration and console
+shutdown use this library group.
+
+Configured Nucleo startup, linker scripts, and peripheral glue live in
+`platform/stm32/nucleo/{h563,h755}`. `stm32_support=true` enables their dependencies
+without building the example. Export `daveos-nucleo`, `daveos-stm32-console`,
+`daveos-stm32-uart`, and conditional `daveos-stm32-usb` Meson dependencies.
+The board dependency propagates CPU/ABI and linker settings and compiles sources
+in the consuming application. The consumer provides appmain.h/appmain(). H755
+also provides a sleeping M4 image; programming must include both images.
+
+`starters/stm32` is a separate Meson consumer with its own appmain(), periodic
+Worker, and UART board console. Board selection defaults to H563. A mismatch
+between the starter's board and the subproject's board is an error. Startup uses
+our CubeMX configuration, not a board BSP. The host/fake and device starter wrap
+pins must advance when new public APIs they consume are committed.
+
+The documentation learning path has four levels: a small hello, logging and
+commands, hardware console, and custom components. README links to these levels;
+docs/reference.md retains detailed build, programming, and API information.
+Validate actual host stdout/stderr/exit codes, common console registration and
+reverse shutdown, existing USB/TCP behavior, and separate H563/H755 starter builds
+and programming plans. Hardware claims remain distinct from build coverage.
+
+The reusable full console has passed H563 UART/USB/TCP, Ethernet ping, timer,
+and software-reset recovery checks. The standalone H563 starter has passed
+periodic-worker, UART help/timer/statistics, and reset-recovery checks. H755
+starter and console validation for this extraction is build/programming-plan
+coverage only; its current firmware still needs hardware validation.

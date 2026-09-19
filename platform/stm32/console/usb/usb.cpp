@@ -7,10 +7,10 @@ namespace {
   // The STM32 C middleware offers no user-context parameter for these
   // callbacks. This pointer routes them to an application-owned transport; it
   // owns no state.
-  board::UsbTransport* active_usb = nullptr;
+  daveos::platform::stm32::UsbTransport* active_usb = nullptr;
 }  // namespace
 
-namespace board {
+namespace daveos::platform::stm32 {
 
 
   UsbTransport::UsbTransport(Platform& platform)
@@ -102,7 +102,7 @@ namespace board {
   }
 
 
-}  // namespace board
+}  // namespace daveos::platform::stm32
 
 extern "C" void UsbReceive(const std::uint8_t* bytes, std::uint32_t size) {
   if (active_usb) {
