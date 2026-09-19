@@ -116,7 +116,9 @@ TEST_CASE(
   module.first_action = [&] {
     order.push_back('a');
     platform.advance(++calls == 1 ? 25 : 1);
-    if (calls == 4) scheduler.cancel(module, &test::TestModule::first);
+    if (calls == 4) {
+      scheduler.cancel(module, &test::TestModule::first);
+    }
   };
   module.second_action = [&] { order.push_back('b'); };
   module.third_action = [&] { scheduler.stop(); };
@@ -144,10 +146,11 @@ TEST_CASE("replacement and self-rescheduling take precedence") {
   std::vector<core::Time> times;
   module.first_action = [&] {
     times.push_back(platform.now());
-    if (times.size() == 1)
+    if (times.size() == 1) {
       scheduler.schedule(module, &test::TestModule::first, 7);
-    else
+    } else {
       scheduler.stop();
+    }
   };
   CHECK(scheduler.cancel(module, &test::TestModule::first) ==
         core::Status::not_found);
@@ -172,12 +175,15 @@ TEST_CASE(
   sender.receiver = [&](test::Event) { received.push_back(0); };
   one.receiver = [&](test::Event event) {
     received.push_back(event == test::Event::first ? 1 : 3);
-    if (event == test::Event::first)
+    if (event == test::Event::first) {
       CHECK(scheduler.post(test::Event::second, &sender) == core::Status::ok);
+    }
   };
   two.receiver = [&](test::Event event) {
     received.push_back(event == test::Event::first ? 2 : 4);
-    if (event == test::Event::second) scheduler.stop();
+    if (event == test::Event::second) {
+      scheduler.stop();
+    }
   };
   CHECK(scheduler.post(test::Event::first, &sender) == core::Status::ok);
   CHECK(scheduler.post(test::Event::second) == core::Status::full);
@@ -289,11 +295,12 @@ TEST_CASE("thread-safe queue falls back to critical sections without a mutex") {
 
 namespace enum_test {
 #define TEST_VALUES(X) X(negative, -4) X(zero, 0) X(next) X(sparse, 100)
-DAVEOS_ENUM(Value, std::int32_t, TEST_VALUES)
+  DAVEOS_ENUM(Value, std::int32_t, TEST_VALUES)
 #undef TEST_VALUES
-static_assert(std::string_view(enum_name(Value::negative)) == "negative");
-static_assert(static_cast<int>(Value::next) == 1);
-static_assert(std::string_view(enum_name(static_cast<Value>(99))) == "unknown");
+  static_assert(std::string_view(enum_name(Value::negative)) == "negative");
+  static_assert(static_cast<int>(Value::next) == 1);
+  static_assert(std::string_view(enum_name(static_cast<Value>(99))) ==
+                "unknown");
 }  // namespace enum_test
 
 TEST_CASE(

@@ -8,11 +8,11 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 GENERATED = ("net/lwip", "platform/stm32/lan8742", "platform/stm32/STM32_USB_Device_Library", "platform/stm32h5/STM32CubeH5", "platform/stm32h7/STM32CubeH7",
-             "examples/stm32h563_blinky/Core", "examples/stm32h563_blinky/Drivers",
-             "examples/stm32h755_console/CM7/Core",
-             "examples/stm32h755_console/CM4/Core",
-             "examples/stm32h755_console/Common",
-             "examples/stm32h755_console/Drivers")
+             "examples/stm32_console/boards/h563/Core", "examples/stm32_console/boards/h563/Drivers",
+             "examples/stm32_console/boards/h755/CM7/Core",
+             "examples/stm32_console/boards/h755/CM4/Core",
+             "examples/stm32_console/boards/h755/Common",
+             "examples/stm32_console/boards/h755/Drivers")
 
 
 def main():

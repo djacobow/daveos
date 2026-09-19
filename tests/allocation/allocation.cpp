@@ -9,13 +9,17 @@ namespace core = daveos::core;
 namespace test = testing;
 
 namespace {
-thread_local bool counting = false;
-std::atomic<unsigned> allocations = 0;
+  thread_local bool counting = false;
+  std::atomic<unsigned> allocations = 0;
 }  // namespace
 
 void* operator new(std::size_t size) {
-  if (counting) ++allocations;
-  if (void* result = std::malloc(size ? size : 1)) return result;
+  if (counting) {
+    ++allocations;
+  }
+  if (void* result = std::malloc(size ? size : 1)) {
+    return result;
+  }
   std::abort();
 }
 
@@ -73,8 +77,9 @@ TEST_CASE(
     }
 
     core::Status Run(core::CommandArguments args) {
-      if (args.size() != 1 || args[0] != "one two")
+      if (args.size() != 1 || args[0] != "one two") {
         return core::Status::invalid_argument;
+      }
       I_("ran");
       return core::Status::ok;
     }

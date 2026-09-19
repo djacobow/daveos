@@ -7,23 +7,23 @@ using daveos::core::Time;
 using daveos::platform::stm32h5::Platform;
 
 namespace {
-struct Fixture {
-  Platform platform;
+  struct Fixture {
+    Platform platform;
 
-  Fixture() {
-    hardware::Reset();
-    REQUIRE(platform.init(125000000) == Status::ok);
-  }
+    Fixture() {
+      hardware::Reset();
+      REQUIRE(platform.init(125000000) == Status::ok);
+    }
 
-  void Interrupt() {
-    hardware::ipsr = 16 + TIM2_IRQn;
-    hardware::pending = false;
-    platform.interrupt();
-    hardware::ipsr = 0;
-  }
-};
+    void Interrupt() {
+      hardware::ipsr = 16 + TIM2_IRQn;
+      hardware::pending = false;
+      platform.interrupt();
+      hardware::ipsr = 0;
+    }
+  };
 
-void Count(void* context) { ++*static_cast<int*>(context); }
+  void Count(void* context) { ++*static_cast<int*>(context); }
 }  // namespace
 
 TEST_CASE_METHOD(Fixture, "STM32 initialization and nested interrupt masks") {
@@ -119,7 +119,9 @@ TEST_CASE_METHOD(Fixture, "STM32 callbacks can rearm in interrupt context") {
       REQUIRE(state.platform->in_interrupt());
       REQUIRE(std::string_view(state.platform->context().task) == "interrupt");
       REQUIRE(hardware::mask == 0);
-      if (++state.count == 1) state.platform->arm(5, Fire, argument);
+      if (++state.count == 1) {
+        state.platform->arm(5, Fire, argument);
+      }
     }
   } state{&platform};
 

@@ -1,4 +1,5 @@
-option('platform', type: 'combo', choices: ['host', 'fake', 'stm32h5', 'stm32h7'], value: 'host')
+option('platform', type: 'combo', choices: ['host', 'fake', 'stm32'], value: 'host')
+option('board', type: 'combo', choices: ['h563', 'h755'], value: 'h563', description: 'Nucleo board for the STM32 console')
 option('tests', type: 'boolean', value: true)
 option('examples', type: 'boolean', value: true)
 option('logging', type: 'boolean', value: true, description: 'Enable buffered logging and log macros')

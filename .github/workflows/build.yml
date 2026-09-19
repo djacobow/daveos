@@ -60,13 +60,19 @@ jobs:
       - run: |
           git submodule update --init platform/stm32h5/STM32CubeH5 platform/stm32/STM32_USB_Device_Library
           git -C platform/stm32h5/STM32CubeH5 submodule update --init --recursive Drivers/CMSIS/Device/ST/STM32H5xx Drivers/STM32H5xx_HAL_Driver
-      - run: meson setup build/arm --cross-file meson/stm32h563.ini -Dexamples=true
+      - run: meson setup build/arm --cross-file meson/stm32.ini -Dexamples=true
       - run: meson compile -C build/arm
       - run: |
           git submodule update --init platform/stm32h7/STM32CubeH7
           git -C platform/stm32h7/STM32CubeH7 submodule update --init --recursive Drivers/CMSIS/Device/ST/STM32H7xx Drivers/STM32H7xx_HAL_Driver
-      - run: meson setup build/h755 --cross-file meson/stm32h755.ini -Dexamples=true
+      - run: meson setup build/h755 --cross-file meson/stm32.ini -Dboard=h755 -Dexamples=true
       - run: meson compile -C build/h755
+      - name: Switch boards without replacing the cross file
+        run: |
+          meson configure build/arm -Dboard=h755
+          meson compile -C build/arm flash-plan
+          meson configure build/arm -Dboard=h563
+          meson compile -C build/arm flash-plan
       - name: Build independent console combinations
         run: |
           for options in 'true false' 'false true' 'false false'; do
@@ -85,5 +91,7 @@ jobs:
             meson configure build/$target -Duart_console=false -Dusb_console=false -Dlogging=false
             meson compile -C build/$target
             meson configure build/$target -Duart_console=true -Dusb_console=true -Dlogging=true -Dtcp_console=false
+            meson compile -C build/$target
+            meson configure build/$target -Duart_console=false -Dusb_console=false
             meson compile -C build/$target
           done

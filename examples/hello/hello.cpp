@@ -15,37 +15,38 @@ namespace core = daveos::core;
 
 namespace app {
 
-enum class Event { hello };
+  enum class Event { hello };
 
-class Hello final : public core::Module<Hello, Event> {
- public:
-  static constexpr const char* name() { return "hello"; }
+  class Hello final : public core::Module<Hello, Event> {
+   public:
+    static constexpr const char* name() { return "hello"; }
 
-  static constexpr auto tasks() {
-    return std::array{core::TaskDescriptor<Hello>{"greet", &Hello::greet}};
+    static constexpr auto tasks() {
+      return std::array{core::TaskDescriptor<Hello>{"greet", &Hello::greet}};
+    }
+
+    core::Status init(core::InitStage stage) {
+      if (stage == core::InitStage::stage1) {
+        return scheduler().schedule(*this, &Hello::greet, 1000);
+      }
+      return core::Status::ok;
+    }
+
+    void greet() {
+      I_("Hello, DaveOS!");
+      scheduler().stop();
+    }
+  };
+
+  void Output(void*, const core::LogRecord& record) {
+    core::LogPrefix prefix(record);
+    auto text = prefix.view();
+    std::printf("%.*s%.*s\n", static_cast<int>(text.size()), text.data(),
+                static_cast<int>(record.message.size()), record.message.data());
   }
 
-  core::Status init(core::InitStage stage) {
-    if (stage == core::InitStage::stage1)
-      return scheduler().schedule(*this, &Hello::greet, 1000);
-    return core::Status::ok;
-  }
-
-  void greet() {
-    I_("Hello, DaveOS!");
-    scheduler().stop();
-  }
-};
-
-void Output(void*, const core::LogRecord& record) {
-  core::LogPrefix prefix(record);
-  auto text = prefix.view();
-  std::printf("%.*s%.*s\n", static_cast<int>(text.size()), text.data(),
-              static_cast<int>(record.message.size()), record.message.data());
-}
-
-// Passive module construction; scheduler init() binds and initializes them.
-Hello hello;
+  // Passive module construction; scheduler init() binds and initializes them.
+  Hello hello;
 }  // namespace app
 
 int main() {

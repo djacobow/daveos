@@ -141,8 +141,9 @@ TEST_CASE("no logger discards logs and fatal does not stop") {
   auto scheduler =
       core::make_scheduler<test::Event>(platform, core::ModuleList{&module});
   module.first_action = [&] {
-    for (int index = 0; index < 5; ++index)
+    for (int index = 0; index < 5; ++index) {
       CHECK(scheduler.log(core::Level::fatal, "fatal") == core::Status::ok);
+    }
     scheduler.schedule(module, &test::TestModule::second, 1);
   };
   module.second_action = [&] { scheduler.stop(); };
@@ -165,10 +166,11 @@ TEST_CASE("idle delivery yields to work scheduled by a subscriber") {
       &delivery, [](void* pointer, const core::LogRecord& record) {
         auto& d = *static_cast<Delivery*>(pointer);
         d.order.emplace_back(record.message);
-        if (d.order.size() == 1)
+        if (d.order.size() == 1) {
           d.scheduler->schedule(*d.module, &test::TestModule::second, 0);
-        else
+        } else {
           d.scheduler->stop();
+        }
       }};
   auto logger = core::make_logger(platform, core::SubscriberList{sink});
   auto scheduler = core::make_scheduler<test::Event>(

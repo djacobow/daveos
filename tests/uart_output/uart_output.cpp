@@ -5,32 +5,34 @@
 #include "platform/fake/platform.h"
 
 namespace {
-struct Driver {
-  const std::uint8_t* bytes = nullptr;
-  std::size_t size = 0;
-  bool fail = false;
+  struct Driver {
+    const std::uint8_t* bytes = nullptr;
+    std::size_t size = 0;
+    bool fail = false;
 
-  bool start(const std::uint8_t* data, std::size_t length) {
-    if (fail) return false;
-    bytes = data;
-    size = length;
-    return true;
-  }
+    bool start(const std::uint8_t* data, std::size_t length) {
+      if (fail) {
+        return false;
+      }
+      bytes = data;
+      size = length;
+      return true;
+    }
 
-  std::string sent() const {
-    return {reinterpret_cast<const char*>(bytes), size};
-  }
-};
+    std::string sent() const {
+      return {reinterpret_cast<const char*>(bytes), size};
+    }
+  };
 
-struct Fixture {
-  daveos::platform::fake::Platform platform;
-  Driver driver;
-  std::array<std::uint8_t, 16> storage{};
-  daveos::console::BufferedOutput<decltype(platform), Driver, 8, 12> output{
-      platform, driver, storage};
-};
+  struct Fixture {
+    daveos::platform::fake::Platform platform;
+    Driver driver;
+    std::array<std::uint8_t, 16> storage{};
+    daveos::console::BufferedOutput<decltype(platform), Driver, 8, 12> output{
+        platform, driver, storage};
+  };
 
-using daveos::core::Status;
+  using daveos::core::Status;
 }  // namespace
 
 TEST_CASE("UART DMA preserves active data while accumulating the next buffer") {

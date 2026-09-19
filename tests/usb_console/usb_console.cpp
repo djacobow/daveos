@@ -3,13 +3,14 @@
 #include "examples/stm32_console/usb/usb_device.h"
 
 namespace {
-bool init_ok = true, ready = false;
-std::size_t starts = 0, stops = 0;
+  bool init_ok = true, ready = false;
+  std::size_t starts = 0, stops = 0;
 
-void Feed(const char* text) {
-  auto bytes = std::string_view(text);
-  UsbReceive(reinterpret_cast<const std::uint8_t*>(bytes.data()), bytes.size());
-}
+  void Feed(const char* text) {
+    auto bytes = std::string_view(text);
+    UsbReceive(reinterpret_cast<const std::uint8_t*>(bytes.data()),
+               bytes.size());
+  }
 }  // namespace
 
 extern "C" bool UsbDeviceInit() {

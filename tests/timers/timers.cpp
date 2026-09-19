@@ -16,10 +16,11 @@ TEST_CASE("timer replacement, cancellation, capacity and self-rearm") {
   test::timer_action = [&] {
     CHECK(platform.in_interrupt());
     times.push_back(platform.now());
-    if (++calls == 1)
+    if (++calls == 1) {
       CHECK(scheduler.timer(4, test::Timer) == core::Status::ok);
-    else
+    } else {
       scheduler.schedule(module, &test::TestModule::second, 0);
+    }
   };
   module.first_action = [&] {
     CHECK(scheduler.timer(0, test::Timer) == core::Status::invalid_argument);
@@ -98,7 +99,9 @@ TEST_CASE("manual fake sleep is released by time advancement") {
   module.first_action = [&] { scheduler.stop(); };
   scheduler.schedule(module, &test::TestModule::first, 10);
   std::thread runner([&] { scheduler.run(); });
-  while (!platform.sleeps()) std::this_thread::yield();
+  while (!platform.sleeps()) {
+    std::this_thread::yield();
+  }
   platform.advance(10);
   runner.join();
   CHECK(platform.now() == 10);
@@ -111,7 +114,9 @@ TEST_CASE("indefinite fake sleep wakes on an interrupt") {
       core::make_scheduler<test::Event>(platform, core::ModuleList{&module});
   module.first_action = [&] { scheduler.stop(); };
   std::thread runner([&] { scheduler.run(); });
-  while (!platform.sleeps()) std::this_thread::yield();
+  while (!platform.sleeps()) {
+    std::this_thread::yield();
+  }
   platform.interrupt(
       [](void* context) {
         auto& module = *static_cast<test::TestModule*>(context);

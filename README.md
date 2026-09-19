@@ -63,7 +63,7 @@ Build definitions follow the dependency and target directories:
 - `platform/{host,fake,stm32h5,stm32h7}/meson.build`: reusable adapter libraries.
 - `platform/{stm32h5,stm32h7}/{cmsis,hal}/meson.build`: vendor headers, device flags,
   and HAL component source dependencies.
-- `examples/{hello,system,console,stm32h563_blinky,stm32h755_console}/meson.build`: application targets
+- `examples/{hello,system,console,stm32_console}/meson.build`: application targets
   that select dependencies and supply their own configuration.
 - `tests/catch2/meson.build`: test framework dependency; other test directories
   define their respective test executables.
@@ -89,6 +89,9 @@ These targets are available in every configuration. They also work without Meson
 `python3 tools/check.py format-check` and `python3 tools/check.py lint`.
 Formatting uses Google style with blank lines between function and class
 definitions (`SeparateDefinitionBlocks: Always`), including inline methods.
+Namespace contents are indented (`NamespaceIndentation: All`). Control-flow
+bodies require braces (`InsertBraces: true`); clang-format applies this to
+`if`/`else` and loops, including single-statement bodies.
 Use short namespace aliases (for example, `namespace core = daveos::core;`)
 and qualified names instead of namespace-wide using directives.
 The helper prefers `clang-format-15`, falling back to `clang-format`. Lint checks
@@ -121,7 +124,7 @@ For the locally installed toolchain:
 
 ```sh
 export PATH="$PWD/tools/external/arm-gnu-toolchain-15.2.rel1-x86_64-arm-none-eabi/bin:$PATH"
-meson setup build/arm --cross-file meson/stm32h563.ini
+meson setup build/arm --cross-file meson/stm32.ini
 meson compile -C build/arm
 ```
 
@@ -129,21 +132,39 @@ This builds a Cortex-M33 static archive that instantiates the scheduler, queue,
 command dispatcher, and optional logger APIs without host dependencies. The
 STM32 adapter library is also built, even with examples disabled.
 Neither static library is a firmware image.
-The cross-file uses the Cortex-M33 FPv5 single-precision hard-float ABI for both
-C and C++, matching the generated CubeMX toolchain.
+The shared `meson/stm32.ini` cross file selects the ARM toolchain and
+`platform=stm32`. Meson selects CPU and hard-float flags from `board`: `h563`
+(the default, Cortex-M33/FPv5 single precision) or `h755` (Cortex-M7/FPv5
+double precision). The H755 sleeping M4 has its own Cortex-M4/FPv4 flags.
+Board selection applies to the platform libraries as well as the application.
 
 To also build the DaveOS board console firmware:
 
 ```sh
 git submodule update --init platform/stm32/STM32_USB_Device_Library
-meson setup build/arm --cross-file meson/stm32h563.ini -Dexamples=true
+meson setup build/arm --cross-file meson/stm32.ini -Dexamples=true
 meson compile -C build/arm
 ```
 
-Use `--wipe` with setup when replacing an existing build configured with the old
-cross-file flags. ELF, HEX, BIN, and map files are written under
-`build/arm/examples/stm32h563_blinky/` (the directory and `stm32h563-blinky`
-artifact names are retained for existing build/programming commands).
+For an existing build made with the old board-specific cross files, reset its
+saved compiler/linker options when migrating (Meson preserves them across a wipe):
+
+```sh
+meson setup --wipe build/arm --cross-file meson/stm32.ini \
+  -Dplatform=stm32 -Dboard=h563 -Dexamples=true \
+  -Dc_args= -Dcpp_args= -Dc_link_args= -Dcpp_link_args=
+```
+
+A fresh build directory needs only the setup command above.
+Both boards build the same `stm32-console` target. ELF, HEX, BIN, and map files
+are written under `build/arm/examples/stm32_console/` as `stm32-console.*`.
+The board-specific CubeMX files and peripheral glue live in
+`examples/stm32_console/boards/{h563,h755}/`; their Meson files contribute
+sources, dependencies, compiler definitions, and a linker script to the shared
+target. Use `-Dboard=h755` with the same cross file for the other board.
+Separate build directories are convenient, but `meson configure build/arm
+-Dboard=h755` followed by a rebuild also switches the board (initialize its
+vendor submodules first).
 The firmware now runs the same board console as H755: `help`,
 `board led <1|2|3> <on|off|toggle>`, `board button`, `board stats`,
 `board timer <microseconds>`, and `board reset`.
@@ -183,7 +204,7 @@ TX DMA, all three LEDs, button press/release, the 200 ms timer command, DHCP,
 large-packet ping, and the TCP console. Software reset recovers UART/USB and
 DHCP/TCP operation.
 
-The CubeMX source project is `examples/stm32h563_blinky/blinky_demo.ioc`, selecting
+The CubeMX source project is `examples/stm32_console/boards/h563/blinky_demo.ioc`, selecting
 STM32H563ZIT6. Keep generated Core sources, the startup assembly, and the FLASH
 linker script in Git. Copied drivers and generated CMake files are ignored;
 Meson owns the build. After CubeMX regeneration, update the example's HAL dependency
@@ -192,9 +213,9 @@ under the repository's `build/` directory.
 
 The generated `Core/Src/main.c` includes the C-compatible `appmain.h` and calls
 `appmain()` from a CubeMX USER CODE section after peripheral initialization.
-The shared `examples/stm32_console/appmain.cpp` defines the application modules,
-instantiates the file-scope objects, and calls `scheduler.run()`. Its implementation
-is C++ because it constructs DaveOS objects. Each target supplies `board_config.h` and `console.cpp`
+The shared `examples/stm32_console/appmain.cpp` instantiates the selected
+components, logger, scheduler, and dispatcher at file scope and calls
+`scheduler.run()`. Its implementation is C++ because it constructs DaveOS objects. Each target supplies `board_config.h` and `console.cpp`
 for its platform, LED/button access, DMA storage/cache handling, and timer clock.
 The modules, logger, scheduler, dispatcher, and transport buffers live at file
 scope. Their constructors store references and metadata; UART/USB/network setup
@@ -254,9 +275,10 @@ class Blinker : public core::Module<Blinker, Event> {
   }
 
   core::Status init(core::InitStage stage) {
-    if (stage == core::InitStage::stage1)
+    if (stage == core::InitStage::stage1) {
       return scheduler().schedule(*this, &Blinker::tick, 1000,
                                   core::Mode::repeat);
+    }
     return core::Status::ok;
   }
 
@@ -376,7 +398,9 @@ class Motor : public core::Module<Motor, Event> {
   }
 
   core::Status SetSpeed(core::CommandArguments args) {
-    if (args.size() != 1) return core::Status::invalid_argument;
+    if (args.size() != 1) {
+      return core::Status::invalid_argument;
+    }
     I_("requested speed: %.*s", static_cast<int>(args[0].size()),
        args[0].data());
     return core::Status::ok;
@@ -443,7 +467,7 @@ to the application and is not part of this example.
 
 ## STM32H755 console (M7) and sleeping M4
 
-The CubeMX project in `examples/stm32h755_console/` builds two hard-float images,
+The CubeMX project in `examples/stm32_console/boards/h755/` builds two hard-float images,
 using the pinned STM32CubeH7 **v1.13.0** HAL and CMSIS without a board BSP:
 
 ```sh
@@ -452,16 +476,16 @@ git -C platform/stm32h7/STM32CubeH7 submodule update --init --recursive \
   Drivers/CMSIS/Device/ST/STM32H7xx Drivers/STM32H7xx_HAL_Driver
 git submodule update --init platform/stm32/STM32_USB_Device_Library
 export PATH="$PWD/tools/external/arm-gnu-toolchain-15.2.rel1-x86_64-arm-none-eabi/bin:$PATH"
-meson setup build/h755 --cross-file meson/stm32h755.ini -Dexamples=true
+meson setup build/h755 --cross-file meson/stm32.ini -Dboard=h755 -Dexamples=true
 meson compile -C build/h755
 ```
 
-Outputs under `build/h755/examples/stm32h755_console/`:
+Outputs under `build/h755/examples/stm32_console/`:
 
 | Core | Image | Flash base |
 | --- | --- | --- |
-| M7 | `CM7/stm32h755-console-m7.elf` | `0x08000000` |
-| M4 | `CM4/stm32h755-sleep-m4.elf` | `0x08100000` |
+| M7 | `stm32-console.elf` | `0x08000000` |
+| M4 | `boards/h755/CM4/stm32h755-sleep-m4.elf` | `0x08100000` |
 
 Each image also has `.hex`, `.bin`, and `.map` outputs in its directory. Program
 both images and use the matching flash boot addresses with both cores enabled.
@@ -566,6 +590,23 @@ is valid; the existing direct `dispatcher.dispatch(line)` API remains available.
 
 For example, `meson configure build/h755 -Duart_console=false`, then rebuild.
 Disabled transports have no console module, input polling, or logger subscription.
+
+Meson selects `uart.cpp`, `usb/component.cpp` (plus USB middleware), and
+`network.cpp`; `tcp_console.hpp` is included only when both networking and TCP
+are enabled. The always-present board commands live in `board.h`. There are no
+`DAVEOS_UART_CONSOLE`, `DAVEOS_USB_CDC`, `DAVEOS_NETWORKING`, or
+`DAVEOS_TCP_CONSOLE` preprocessor branches in the application.
+
+`examples/stm32_console/meson.build` generates
+`build/<configuration>/examples/stm32_console/composition.hpp` from
+`composition.hpp.in`. This small header contains the selected component members,
+module/subscriber/source lists, statistics routing, and shutdown order. It owns
+no transport algorithms. `appmain.cpp` constructs the resulting `Components`
+aggregate; every constructor remains passive. Module initialization still runs
+all stage1 callbacks before any stage2 callback, and command sources bind in
+stage2. Shutdown stops TCP before its network service. To add a transport, add
+its ordinary source/header and its selection/registration in this Meson file;
+do not edit the generated header. The `logging` option remains independent.
 USB middleware is omitted when USB is disabled. CubeMX's existing USART3/DMA
 peripheral initialization remains, but no UART console RX/TX is started when UART
 is disabled. The same options apply to H563 using `build/arm`.
@@ -691,7 +732,7 @@ Start OpenOCD with both cores and hardware reset configured:
   -f interface/stlink-dap.cfg -c 'transport select dapdirect_swd' \
   -c 'set DUAL_BANK 1; set DUAL_CORE 1' -f target/stm32h7x.cfg \
   -c 'reset_config srst_only srst_nogate connect_assert_srst'
-arm-none-eabi-gdb build/h755/examples/stm32h755_console/CM7/stm32h755-console-m7.elf
+arm-none-eabi-gdb build/h755/examples/stm32_console/stm32-console.elf
 ```
 
 In GDB, use `target extended-remote localhost:3333`, `bt`, and `continue`.
@@ -756,9 +797,9 @@ Initialize the additional pinned submodules and build:
 
 ```sh
 git submodule update --init net/lwip platform/stm32/lan8742
-meson setup build/net-h755 --cross-file meson/stm32h755.ini -Dexamples=true -Dnetworking=true
+meson setup build/net-h755 --cross-file meson/stm32.ini -Dboard=h755 -Dexamples=true -Dnetworking=true
 meson compile -C build/net-h755
-# H563: use build/net-h563 and meson/stm32h563.ini instead.
+# H563: use build/net-h563 and meson/stm32.ini instead.
 ```
 
 Keep the regular HAL/CMSIS/USB dependency setup from the board sections above.
@@ -770,9 +811,10 @@ H563 needs JP6. Retain stock RMII solder bridges. The PHY supplies the 50 MHz RM
 reference, independently of the internal HSI CPU clock.
 
 The demo's configuration is passed to `net::Service` in
-`examples/stm32_console/appmain.cpp`. It defaults to DHCP and a locally
-administered MAC derived from the MCU UID. Set `network_config.dhcp = false` and
-set its `address`, `netmask`, and `gateway` arrays for static addressing; the
+`examples/stm32_console/network.cpp`, through a configuration factory invoked
+in stage1. It defaults to DHCP and a locally administered MAC derived from the
+MCU UID. For static addressing, supply a factory that sets `dhcp = false` and
+the `address`, `netmask`, and `gateway` arrays; the
 configuration defaults for static mode are 192.168.50.2/24 with no gateway.
 Override `mac` if the deployment assigns MAC addresses; the UID hash is a demo
 convention, not an assigned globally unique address. Hardware-init faults are
@@ -895,7 +937,7 @@ packet, and delivery of USB-originated command logs to the TCP subscriber.
 For the full H563 console matching the H755 configuration:
 
 ```sh
-meson setup build/net-h563 --cross-file meson/stm32h563.ini -Dexamples=true -Dnetworking=true
+meson setup build/net-h563 --cross-file meson/stm32.ini -Dexamples=true -Dnetworking=true
 meson compile -C build/net-h563
 meson compile -C build/net-h563 flash-openocd
 ```

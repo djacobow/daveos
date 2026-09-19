@@ -32,7 +32,9 @@ bool UsbBoardInitPcd(PCD_HandleTypeDef* pcd) {
   pcd->Init.low_power_enable = DISABLE;
   pcd->Init.vbus_sensing_enable = DISABLE;
   pcd->Init.bulk_doublebuffer_enable = DISABLE;
-  if (HAL_PCD_Init(pcd) != HAL_OK) return false;
+  if (HAL_PCD_Init(pcd) != HAL_OK) {
+    return false;
+  }
   // Single-buffer PMA allocations, each aligned to a 64-byte packet boundary.
   // EP0 OUT/IN, CDC data IN/OUT, CDC notification IN; well within 2 KiB PMA.
   return HAL_PCDEx_PMAConfig(pcd, 0x00, PCD_SNG_BUF, 0x40) == HAL_OK &&

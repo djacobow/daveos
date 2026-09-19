@@ -3,11 +3,25 @@ project('daveos', 'cpp', version: '0.1.0', meson_version: '>=1.3',
 
 python = import('python').find_installation('python3')
 platform = get_option('platform')
-if platform in ['stm32h5', 'stm32h7']
-  if not meson.is_cross_build()
-    error('STM32 platforms require a matching Meson cross file')
+board = get_option('board')
+if platform == 'stm32'
+  if not meson.is_cross_build() or host_machine.cpu_family() != 'arm'
+    error('STM32 requires the meson/stm32.ini ARM cross file')
   endif
   add_languages('c', native: false)
+  # Select one CPU/ABI consistently for all libraries and the application.
+  # The H755's sleeping M4 overrides these flags on its own target.
+  if board == 'h563'
+    platform = 'stm32h5'
+    cpu_flags = ['-mcpu=cortex-m33', '-mfpu=fpv5-sp-d16']
+  else
+    platform = 'stm32h7'
+    cpu_flags = ['-mcpu=cortex-m7', '-mfpu=fpv5-d16']
+  endif
+  cpu_flags += ['-mthumb', '-mfloat-abi=hard']
+  add_project_arguments(cpu_flags + ['-ffreestanding', '-ffunction-sections',
+    '-fdata-sections'], language: ['c', 'cpp'])
+  add_project_link_arguments(cpu_flags + ['--specs=nosys.specs'], language: ['c', 'cpp'])
 endif
 
 subdir('tools')

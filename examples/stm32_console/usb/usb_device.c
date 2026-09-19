@@ -13,14 +13,18 @@ static uint8_t rx_buffer[CDC_DATA_FS_MAX_PACKET_SIZE];
 static uint8_t line_coding[7] = {0x40, 0x42, 0x0f, 0, 0, 0, 8};
 
 void* UsbAllocate(uint32_t size) {
-  if (allocated || size > sizeof(class_storage)) return NULL;
+  if (allocated || size > sizeof(class_storage)) {
+    return NULL;
+  }
   allocated = true;
   memset(&class_storage, 0, sizeof(class_storage));
   return &class_storage;
 }
 
 void UsbFree(void* pointer) {
-  if (pointer == &class_storage) allocated = false;
+  if (pointer == &class_storage) {
+    allocated = false;
+  }
 }
 
 static void CloseSession(void) {
@@ -46,17 +50,23 @@ static int8_t CdcDeInit(void) {
 static int8_t Control(uint8_t command, uint8_t* bytes, uint16_t size) {
   switch (command) {
     case CDC_SET_LINE_CODING:
-      if (size != sizeof(line_coding)) return USBD_FAIL;
+      if (size != sizeof(line_coding)) {
+        return USBD_FAIL;
+      }
       memcpy(line_coding, bytes, sizeof(line_coding));
       break;
     case CDC_GET_LINE_CODING:
-      if (size != sizeof(line_coding)) return USBD_FAIL;
+      if (size != sizeof(line_coding)) {
+        return USBD_FAIL;
+      }
       memcpy(bytes, line_coding, sizeof(line_coding));
       break;
     case CDC_SET_CONTROL_LINE_STATE: {
       USBD_SetupReqTypedef* request = (USBD_SetupReqTypedef*)bytes;
       bool dtr = (request->wValue & 1U) != 0;
-      if (!dtr) CloseSession();
+      if (!dtr) {
+        CloseSession();
+      }
       opened = dtr;
       break;
     }
@@ -67,7 +77,9 @@ static int8_t Control(uint8_t command, uint8_t* bytes, uint16_t size) {
 }
 
 static int8_t Receive(uint8_t* bytes, uint32_t* size) {
-  if (opened) UsbReceive(bytes, *size);
+  if (opened) {
+    UsbReceive(bytes, *size);
+  }
   USBD_CDC_SetRxBuffer(&device, rx_buffer);
   return (int8_t)USBD_CDC_ReceivePacket(&device);
 }
@@ -129,8 +141,9 @@ static uint8_t* Serial(USBD_SpeedTypeDef speed, uint16_t* size) {
   const uint32_t words[] = {HAL_GetUIDw0(), HAL_GetUIDw1(), HAL_GetUIDw2()};
   char serial[25];
   const char hex[] = "0123456789ABCDEF";
-  for (uint32_t i = 0; i < 24; ++i)
+  for (uint32_t i = 0; i < 24; ++i) {
     serial[i] = hex[(words[i / 8] >> (28 - (i % 8) * 4)) & 15];
+  }
   serial[24] = 0;
   return String(serial, size);
 }
@@ -149,7 +162,9 @@ bool UsbDeviceReady(void) {
 }
 
 bool UsbDeviceTransmit(const uint8_t* bytes, uint32_t size) {
-  if (!UsbDeviceReady() || class_storage.TxState) return false;
+  if (!UsbDeviceReady() || class_storage.TxState) {
+    return false;
+  }
   USBD_CDC_SetTxBuffer(&device, (uint8_t*)bytes, size);
   return USBD_CDC_TransmitPacket(&device) == USBD_OK;
 }
@@ -159,11 +174,15 @@ bool UsbDeviceInit(void) {
   oscillator.OscillatorType = RCC_OSCILLATORTYPE_HSI48;
   oscillator.HSI48State = RCC_HSI48_ON;
   oscillator.PLL.PLLState = RCC_PLL_NONE;
-  if (HAL_RCC_OscConfig(&oscillator) != HAL_OK) return false;
+  if (HAL_RCC_OscConfig(&oscillator) != HAL_OK) {
+    return false;
+  }
   RCC_PeriphCLKInitTypeDef clocks = {0};
   clocks.PeriphClockSelection = RCC_PERIPHCLK_USB;
   clocks.UsbClockSelection = RCC_USBCLKSOURCE_HSI48;
-  if (HAL_RCCEx_PeriphCLKConfig(&clocks) != HAL_OK) return false;
+  if (HAL_RCCEx_PeriphCLKConfig(&clocks) != HAL_OK) {
+    return false;
+  }
   __HAL_RCC_CRS_CLK_ENABLE();
   RCC_CRSInitTypeDef crs = {0};
   crs.Prescaler = RCC_CRS_SYNC_DIV1;
@@ -173,15 +192,23 @@ bool UsbDeviceInit(void) {
   crs.ErrorLimitValue = RCC_CRS_ERRORLIMIT_DEFAULT;
   crs.HSI48CalibrationValue = RCC_CRS_HSI48CALIBRATION_DEFAULT;
   HAL_RCCEx_CRSConfig(&crs);
-  if (USBD_Init(&device, &descriptors, 0) != USBD_OK) return false;
-  if (USBD_RegisterClass(&device, USBD_CDC_CLASS) != USBD_OK) return false;
-  if (USBD_CDC_RegisterInterface(&device, &interface) != USBD_OK) return false;
+  if (USBD_Init(&device, &descriptors, 0) != USBD_OK) {
+    return false;
+  }
+  if (USBD_RegisterClass(&device, USBD_CDC_CLASS) != USBD_OK) {
+    return false;
+  }
+  if (USBD_CDC_RegisterInterface(&device, &interface) != USBD_OK) {
+    return false;
+  }
   return USBD_Start(&device) == USBD_OK;
 }
 
 void UsbDeviceStop(void) {
   // Clock setup can fail before the middleware has a low-level handle.
-  if (device.pData == NULL) return;
+  if (device.pData == NULL) {
+    return;
+  }
   USBD_Stop(&device);
   USBD_DeInit(&device);
   device.pData = NULL;

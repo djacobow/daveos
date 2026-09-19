@@ -143,9 +143,15 @@ TEST_CASE("interrupts serialize and retained notifications release idle") {
   auto handler = [](void* argument) {
     auto& context = *static_cast<Context*>(argument);
     int current = ++*context.active;
-    if (current > context.maximum->load()) *context.maximum = current;
-    if (context.started) context.started->release();
-    if (context.release) context.release->acquire();
+    if (current > context.maximum->load()) {
+      *context.maximum = current;
+    }
+    if (context.started) {
+      context.started->release();
+    }
+    if (context.release) {
+      context.release->acquire();
+    }
     --*context.active;
   };
   std::thread one([&] { platform.interrupt(handler, &first); });

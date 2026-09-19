@@ -3,7 +3,7 @@ foreach component : ['cortex', 'hsem', 'rcc', 'rcc_ex', 'flash', 'flash_ex',
                      'gpio', 'dma', 'dma_ex', 'pwr', 'pwr_ex', 'exti']
   firmware_deps += stm32h7_hal_components[component]
 endforeach
-# Override the M7 cross-file flags for every source and for the M4 link.
+# Override the M7 project flags for every source and for the M4 link.
 cm4_cpu = ['-mcpu=cortex-m4', '-mthumb', '-mfpu=fpv4-sp-d16', '-mfloat-abi=hard']
 linker_script = files('stm32h755xx_flash_CM4.ld')
 firmware = executable('stm32h755-sleep-m4',

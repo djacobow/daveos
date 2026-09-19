@@ -2,3 +2,5 @@ BasedOnStyle: Google
 KeepEmptyLinesAtTheStartOfBlocks: true
 MaxEmptyLinesToKeep: 2
 SeparateDefinitionBlocks: Always
+InsertBraces: true
+NamespaceIndentation: All

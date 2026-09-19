@@ -6,7 +6,7 @@ CompileFlags:
 # Use real device headers for STM32 sources, not the host test register model.
 If:
   PathMatch:
-    - examples/stm32h563_blinky/.*
+    - examples/stm32_console/.*
     - platform/stm32h5/.*
 CompileFlags:
   CompilationDatabase: build/arm
@@ -14,7 +14,7 @@ CompileFlags:
 ---
 If:
   PathMatch:
-    - examples/stm32h755_console/.*
+    - examples/stm32_console/boards/h755/.*
     - platform/stm32h7/.*
 CompileFlags:
   CompilationDatabase: build/h755

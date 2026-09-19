@@ -803,7 +803,17 @@ USB works in both USB-C orientations; USB/Ethernet recover after physical
 reconnection. Its
 Cortex-M33 stack reservation is 64 KiB, enforced by MSPLIM. Long-lived STM32
 application objects (modules, logger, scheduler, dispatcher, and transport
-buffers) have file-scope storage in `examples/stm32_console/appmain.cpp`. Both
+buffers) have file-scope storage rooted in `examples/stm32_console/appmain.cpp`.
+Optional UART, USB, networking, and TCP components live in separate files selected
+by Meson, with no application feature-selection preprocessor branches. A generated
+`composition.hpp` assembles only selected members and their registration lists,
+statistics routing, and shutdown calls; disabled components have no instances.
+Component constructors are passive; hardware setup remains in module init.
+Both boards build one `stm32-console` application target. `platform=stm32` and
+`board=h563` (default) or `board=h755` select board files under
+`examples/stm32_console/boards/`, the platform adapter, HAL, CPU/ABI flags, startup,
+and linker script. Both use `meson/stm32.ini`; H755 additionally builds its
+sleeping M4 image with separate CPU flags. Both
 generated `Core/Src/main.c` entry points include `appmain.h` and call `appmain()`
 after CubeMX peripheral setup; `appmain()` initializes the platform and calls
 `scheduler.run()`. Hardware setup waits for initialization;

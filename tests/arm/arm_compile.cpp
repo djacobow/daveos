@@ -6,29 +6,31 @@ namespace core = daveos::core;
 
 namespace {
 
-enum class Event { sample };
+  enum class Event { sample };
 
-struct Example : core::Module<Example, Event> {
-  static constexpr const char* name() { return "arm_compile"; }
+  struct Example : core::Module<Example, Event> {
+    static constexpr const char* name() { return "arm_compile"; }
 
-  static constexpr auto tasks() {
-    return std::array{core::TaskDescriptor<Example>{"tick", &Example::tick}};
-  }
+    static constexpr auto tasks() {
+      return std::array{core::TaskDescriptor<Example>{"tick", &Example::tick}};
+    }
 
-  static constexpr auto commands() {
-    return std::array{DAVEOS_COMMAND(Example, "run", Run, "Schedule tick")};
-  }
+    static constexpr auto commands() {
+      return std::array{DAVEOS_COMMAND(Example, "run", Run, "Schedule tick")};
+    }
 
-  core::Status Run(core::CommandArguments args) {
-    if (!args.empty()) return core::Status::invalid_argument;
-    return scheduler().schedule(*this, &Example::tick, 0);
-  }
+    core::Status Run(core::CommandArguments args) {
+      if (!args.empty()) {
+        return core::Status::invalid_argument;
+      }
+      return scheduler().schedule(*this, &Example::tick, 0);
+    }
 
-  void tick() {
-    scheduler().post(Event::sample, this);
-    scheduler().stop();
-  }
-};
+    void tick() {
+      scheduler().post(Event::sample, this);
+      scheduler().stop();
+    }
+  };
 }  // namespace
 
 // Declaration-only platform: exercise core templates without any host/OS

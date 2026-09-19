@@ -5,7 +5,7 @@
 namespace board {
 
 
-using Platform = daveos::platform::fake::Platform;
+  using Platform = daveos::platform::fake::Platform;
 
 
 }  // namespace board

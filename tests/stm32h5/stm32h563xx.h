@@ -5,60 +5,60 @@
 
 // Minimal register model for exercising the real adapter on the host.
 namespace hardware {
-inline std::uint32_t compare_latency = 0;
+  inline std::uint32_t compare_latency = 0;
 
-struct CompareRegister {
-  std::uint32_t value = 0;
+  struct CompareRegister {
+    std::uint32_t value = 0;
 
-  operator std::uint32_t() const { return value; }
+    operator std::uint32_t() const { return value; }
 
-  void operator=(std::uint32_t next);
-};
+    void operator=(std::uint32_t next);
+  };
 
-struct StatusRegister {
-  std::uint32_t flags = 0;
+  struct StatusRegister {
+    std::uint32_t flags = 0;
 
-  operator std::uint32_t() const { return flags; }
+    operator std::uint32_t() const { return flags; }
 
-  void operator=(std::uint32_t value) {
-    flags &= value;
-  }  // write zero to clear
-};
+    void operator=(std::uint32_t value) {
+      flags &= value;
+    }  // write zero to clear
+  };
 
-struct Timer {
-  std::uint32_t CR1 = 0, PSC = 0, ARR = 0, EGR = 0, DIER = 0, CNT = 0;
-  CompareRegister CCR1;
-  StatusRegister SR;
-};
+  struct Timer {
+    std::uint32_t CR1 = 0, PSC = 0, ARR = 0, EGR = 0, DIER = 0, CNT = 0;
+    CompareRegister CCR1;
+    StatusRegister SR;
+  };
 
-struct Clock {
-  std::uint32_t APB1LENR = 0, APB1LLPENR = 0, APB1LRSTR = 0;
-};
+  struct Clock {
+    std::uint32_t APB1LENR = 0, APB1LLPENR = 0, APB1LRSTR = 0;
+  };
 
-struct System {
-  std::uint32_t SCR = 0;
-};
+  struct System {
+    std::uint32_t SCR = 0;
+  };
 
-inline Timer timer;
+  inline Timer timer;
 
-inline void CompareRegister::operator=(std::uint32_t next) {
-  value = next;
-  timer.CNT += compare_latency;
-}
+  inline void CompareRegister::operator=(std::uint32_t next) {
+    value = next;
+    timer.CNT += compare_latency;
+  }
 
-inline Clock clock;
-inline System system;
-inline std::uint32_t mask = 0, ipsr = 0, sleeps = 0, sleep_mask = 0;
-inline bool pending = false, enabled = false;
+  inline Clock clock;
+  inline System system;
+  inline std::uint32_t mask = 0, ipsr = 0, sleeps = 0, sleep_mask = 0;
+  inline bool pending = false, enabled = false;
 
-inline void Reset() {
-  timer = Timer{};
-  clock = Clock{};
-  system = System{};
-  mask = ipsr = sleeps = sleep_mask = 0;
-  compare_latency = 0;
-  pending = enabled = false;
-}
+  inline void Reset() {
+    timer = Timer{};
+    clock = Clock{};
+    system = System{};
+    mask = ipsr = sleeps = sleep_mask = 0;
+    compare_latency = 0;
+    pending = enabled = false;
+  }
 }  // namespace hardware
 
 inline auto* TIM2 = &hardware::timer;
@@ -102,7 +102,7 @@ inline void __WFI() {
 
 // Model the non-returning hardware boundary without enabling exceptions.
 namespace hardware {
-inline std::jmp_buf reset_destination;
+  inline std::jmp_buf reset_destination;
 }
 
 [[noreturn]] inline void NVIC_SystemReset() {

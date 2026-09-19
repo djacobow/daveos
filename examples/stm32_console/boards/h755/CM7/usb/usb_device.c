@@ -40,12 +40,15 @@ bool UsbBoardInitPcd(PCD_HandleTypeDef* pcd) {
   pcd->Init.vbus_sensing_enable = ENABLE;
   pcd->Init.dma_enable = DISABLE;  // FIFO interrupt transfers; DTCM is safe.
   pcd->Init.low_power_enable = DISABLE;
-  if (HAL_PCD_Init(pcd) != HAL_OK) return false;
+  if (HAL_PCD_Init(pcd) != HAL_OK) {
+    return false;
+  }
   if (HAL_PCDEx_SetRxFiFo(pcd, 128) != HAL_OK ||
       HAL_PCDEx_SetTxFiFo(pcd, 0, 64) != HAL_OK ||
       HAL_PCDEx_SetTxFiFo(pcd, 1, 96) != HAL_OK ||
-      HAL_PCDEx_SetTxFiFo(pcd, 2, 16) != HAL_OK)
+      HAL_PCDEx_SetTxFiFo(pcd, 2, 16) != HAL_OK) {
     return false;
+  }
   return true;
 }
 

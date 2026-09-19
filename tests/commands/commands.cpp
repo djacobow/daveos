@@ -5,68 +5,70 @@ namespace core = daveos::core;
 namespace test = testing;
 
 namespace {
-template <test::TestName Name>
-struct Motor : core::Module<Motor<Name>, test::Event> {
-  static constexpr const char* name() { return Name.value; }
+  template <test::TestName Name>
+  struct Motor : core::Module<Motor<Name>, test::Event> {
+    static constexpr const char* name() { return Name.value; }
 
-  static constexpr auto commands() {
-    return std::array{
-        DAVEOS_COMMAND(Motor, "speed", SetSpeed, "Set motor speed"),
-        DAVEOS_COMMAND(Motor, "special", Special, "Special operation"),
-        DAVEOS_COMMAND(Motor, "set", Set, "Set value"),
-        DAVEOS_COMMAND(Motor, "settings", Settings, "Show settings")};
-  }
+    static constexpr auto commands() {
+      return std::array{
+          DAVEOS_COMMAND(Motor, "speed", SetSpeed, "Set motor speed"),
+          DAVEOS_COMMAND(Motor, "special", Special, "Special operation"),
+          DAVEOS_COMMAND(Motor, "set", Set, "Set value"),
+          DAVEOS_COMMAND(Motor, "settings", Settings, "Show settings")};
+    }
 
-  std::function<core::Status(core::CommandArguments)> action;
+    std::function<core::Status(core::CommandArguments)> action;
 
-  core::Status SetSpeed(core::CommandArguments args) {
-    I_("speed invoked");
-    return action ? action(args) : core::Status::ok;
-  }
+    core::Status SetSpeed(core::CommandArguments args) {
+      I_("speed invoked");
+      return action ? action(args) : core::Status::ok;
+    }
 
-  core::Status Special(core::CommandArguments) { return core::Status::full; }
+    core::Status Special(core::CommandArguments) { return core::Status::full; }
 
-  core::Status Set(core::CommandArguments) { return core::Status::empty; }
+    core::Status Set(core::CommandArguments) { return core::Status::empty; }
 
-  core::Status Settings(core::CommandArguments) {
-    return core::Status::truncated;
-  }
-};
+    core::Status Settings(core::CommandArguments) {
+      return core::Status::truncated;
+    }
+  };
 
-struct Fixture {
-  test::Fake platform;
-  test::TestModule input;
-  Motor<"motor"> motor;
-  Motor<"motorboat"> boat;
-  test::Sink sink;
-  using List =
-      core::ModuleList<test::TestModule, decltype(motor), decltype(boat)>;
-  List modules{&input, &motor, &boat};
-  decltype(core::make_logger(platform,
-                             core::SubscriberList{sink.subscriber()})) logger{
-      platform, core::SubscriberList{sink.subscriber()}};
-  decltype(core::make_scheduler<test::Event>(platform, modules,
-                                             logger)) scheduler =
-      core::make_scheduler<test::Event>(platform, modules, logger);
-  core::CommandDispatcher<test::Event, List> dispatcher{modules, scheduler};
+  struct Fixture {
+    test::Fake platform;
+    test::TestModule input;
+    Motor<"motor"> motor;
+    Motor<"motorboat"> boat;
+    test::Sink sink;
+    using List =
+        core::ModuleList<test::TestModule, decltype(motor), decltype(boat)>;
+    List modules{&input, &motor, &boat};
+    decltype(core::make_logger(platform,
+                               core::SubscriberList{sink.subscriber()})) logger{
+        platform, core::SubscriberList{sink.subscriber()}};
+    decltype(core::make_scheduler<test::Event>(platform, modules,
+                                               logger)) scheduler =
+        core::make_scheduler<test::Event>(platform, modules, logger);
+    core::CommandDispatcher<test::Event, List> dispatcher{modules, scheduler};
 
-  void Run(std::function<void()> action) {
-    input.first_action = [&] {
-      action();
-      scheduler.stop();
-    };
-    REQUIRE(scheduler.schedule(input, &test::TestModule::first, 0) ==
-            core::Status::ok);
-    REQUIRE(scheduler.run() == core::Status::ok);
-  }
-};
+    void Run(std::function<void()> action) {
+      input.first_action = [&] {
+        action();
+        scheduler.stop();
+      };
+      REQUIRE(scheduler.schedule(input, &test::TestModule::first, 0) ==
+              core::Status::ok);
+      REQUIRE(scheduler.run() == core::Status::ok);
+    }
+  };
 }  // namespace
 
 TEST_CASE("commands tokenize once and preserve argument spelling") {
   Fixture f;
   std::vector<std::string> received;
   f.motor.action = [&](core::CommandArguments args) {
-    for (auto arg : args) received.emplace_back(arg);
+    for (auto arg : args) {
+      received.emplace_back(arg);
+    }
     return core::Status::ok;
   };
   f.Run([&] {
@@ -87,14 +89,17 @@ TEST_CASE("malformed or overflowing lines never call handlers") {
   };
   f.Run([&] {
     for (auto text : {"motor speed \"unfinished", "motor speed ab\"cd\"",
-                      "motor speed \"ab\"cd", "motor speed \"a\"\"b\""})
+                      "motor speed \"ab\"cd", "motor speed \"a\"\"b\""}) {
       CHECK(f.dispatcher.dispatch(text) == core::Status::parse_error);
+    }
     CHECK(f.dispatcher.dispatch(std::string_view("motor speed a\0b", 15)) ==
           core::Status::parse_error);
     CHECK(f.dispatcher.dispatch(std::string(257, ' ')) ==
           core::Status::line_too_long);
     std::string text = "motor speed";
-    for (int i = 0; i < 15; ++i) text += " x";
+    for (int i = 0; i < 15; ++i) {
+      text += " x";
+    }
     CHECK(f.dispatcher.dispatch(text) == core::Status::too_many_arguments);
     CHECK(f.dispatcher.dispatch(" \t\r\n\v\f") == core::Status::ok);
   });
@@ -114,7 +119,9 @@ TEST_CASE("input and argument capacities include exactly their stated limits") {
           core::Status::ok);
     CHECK(length == 244);
     std::string text = "motor speed";
-    for (int i = 0; i < 14; ++i) text += " x";
+    for (int i = 0; i < 14; ++i) {
+      text += " x";
+    }
     CHECK(f.dispatcher.dispatch(text) == core::Status::ok);
     CHECK(count == 14);
     core::CommandDispatcher<test::Event, Fixture::List, 17, 3> small(
@@ -160,9 +167,12 @@ TEST_CASE("help dumps the tree and supports only the agreed forms") {
   for (const auto& record : f.sink.records) {
     CHECK(record.module == "core");
     CHECK(record.task == "command");
-    if (record.message == "motor:") ++headings;
-    if (record.message.find("Set motor speed") != std::string::npos)
+    if (record.message == "motor:") {
+      ++headings;
+    }
+    if (record.message.find("Set motor speed") != std::string::npos) {
       ++descriptions;
+    }
     CHECK(record.message != "module:");
   }
   CHECK(headings == 3);
@@ -254,8 +264,9 @@ TEST_CASE(
 TEST_CASE("logging overflow does not replace command results") {
   Fixture f;
   f.Run([&] {
-    for (int i = 0; i < 40; ++i)
+    for (int i = 0; i < 40; ++i) {
       CHECK(f.dispatcher.dispatch("help") == core::Status::ok);
+    }
     CHECK(f.dispatcher.dispatch("motor special") == core::Status::full);
   });
   CHECK((f.logger.counters().dropped > 0) == bool(DAVEOS_LOGGING));
@@ -270,7 +281,9 @@ TEST_CASE("Independent console sources share parsing and command dispatch") {
   dispatcher.bind_sources(core::CommandSourceList{uart, usb});
   std::vector<std::string> received;
   f.motor.action = [&](core::CommandArguments args) {
-    for (auto arg : args) received.emplace_back(arg);
+    for (auto arg : args) {
+      received.emplace_back(arg);
+    }
     return core::Status::ok;
   };
   f.Run([&] {

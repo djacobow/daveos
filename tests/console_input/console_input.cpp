@@ -6,17 +6,19 @@
 #include "platform/fake/platform.h"
 
 namespace {
-using Platform = daveos::platform::fake::Platform;
+  using Platform = daveos::platform::fake::Platform;
 
-template <std::size_t Capacity>
-void Feed(daveos::console::Input<Platform, Capacity>& input,
-          std::string_view bytes) {
-  for (auto byte : bytes) input.receive(byte);
-}
+  template <std::size_t Capacity>
+  void Feed(daveos::console::Input<Platform, Capacity>& input,
+            std::string_view bytes) {
+    for (auto byte : bytes) {
+      input.receive(byte);
+    }
+  }
 
-std::string_view View(const daveos::console::Line& line) {
-  return {line.bytes.data(), line.size};
-}
+  std::string_view View(const daveos::console::Line& line) {
+    return {line.bytes.data(), line.size};
+  }
 }  // namespace
 
 TEST_CASE("UART lines accept CR, LF and CRLF without duplicate commands") {
@@ -37,7 +39,9 @@ TEST_CASE("UART lines accept CR, LF and CRLF without duplicate commands") {
 TEST_CASE("UART overlength input remains one rejected line") {
   Platform platform;
   daveos::console::Input input(platform);
-  for (int i = 0; i < 400; ++i) input.receive('x');
+  for (int i = 0; i < 400; ++i) {
+    input.receive('x');
+  }
   Feed(input, "\nhelp\n");
   daveos::console::Line line;
   REQUIRE(input.pop(line));
@@ -95,9 +99,9 @@ TEST_CASE("UART preview tracks editing and clears after Return or error") {
 }
 
 namespace {
-std::string terminal_output;
+  std::string terminal_output;
 
-void TerminalWrite(std::string_view text) { terminal_output += text; }
+  void TerminalWrite(std::string_view text) { terminal_output += text; }
 }  // namespace
 
 TEST_CASE("UART echo clears on submit and preserves input around log output") {
