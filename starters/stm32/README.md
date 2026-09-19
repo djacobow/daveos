@@ -54,7 +54,8 @@ or networking also requires adding the desired modules and registrations to
 
 ## Program and use it
 
-`flash-plan` prints commands without contacting hardware. Use `flash-openocd`
+`flash-plan` prints commands without contacting hardware or requiring installed
+programming tools. Use `flash-openocd`
 for OpenOCD or `flash` for STM32CubeProgrammer. Configure `-Dopenocd=...`,
 `-Dcubeprogrammer=...`, and `-Dprobe_serial=...` as needed. H755 flashing includes
 both the application and sleeping M4 image.

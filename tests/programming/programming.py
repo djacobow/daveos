@@ -1,7 +1,11 @@
 """Check programming command construction without contacting hardware."""
 import importlib.util
+import contextlib
+import io
 from pathlib import Path
+import tempfile
 import unittest
+from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location("flash", Path(__file__).resolve().parents[2] / "tools/flash.py")
 flash = importlib.util.module_from_spec(spec)
@@ -9,6 +13,27 @@ spec.loader.exec_module(flash)
 
 
 class Programming(unittest.TestCase):
+    def test_plan_without_programming_tools(self):
+        with tempfile.TemporaryDirectory() as directory:
+            images = [Path(directory) / name for name in ('m4.elf', 'm7.elf')]
+            for image in images:
+                image.touch()
+            output = io.StringIO()
+            with patch('sys.argv', ['flash.py', '--backend', 'plan', '--family', 'stm32h7',
+                                    *map(str, images)]), \
+                    patch.object(flash.shutil, 'which', return_value=None), \
+                    patch.object(flash.subprocess, 'run') as run, \
+                    contextlib.redirect_stdout(output), contextlib.redirect_stderr(io.StringIO()):
+                flash.main()
+            commands = output.getvalue().splitlines()
+            self.assertEqual(len(commands), 2)
+            self.assertTrue(commands[0].startswith('STM32_Programmer_CLI '))
+            self.assertTrue(commands[1].startswith('openocd '))
+            for command in commands:
+                for image in images:
+                    self.assertIn(str(image), command)
+            run.assert_not_called()
+
     def test_cube_verifies_both_images_before_reset(self):
         images = [Path("m4.elf"), Path("m7.elf")]
         args = flash.command("cubeprogrammer", "cli", "stm32h7", images, "123")

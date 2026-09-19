@@ -79,7 +79,8 @@ def main():
             if args.backend != "plan":
                 parser.error(str(error))
             print(str(error), file=sys.stderr)
-            continue
+            # Preview is useful on CI and hosts without programming tools too.
+            executable = str(Path(getattr(args, backend)).expanduser()) if getattr(args, backend) else name
         invocation = command(backend, executable, args.family, images, args.serial)
         print(shlex.join(invocation), flush=True)
         if args.backend != "plan":

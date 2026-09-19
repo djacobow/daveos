@@ -772,7 +772,8 @@ meson configure build/h755 \
 ```
 
 OpenOCD needs ST's H5/H7 target scripts and the `stlink-dap` interface; use the
-installed ST distribution for H5 support. `flash-plan` never contacts hardware.
+installed ST distribution for H5 support. `flash-plan` never contacts hardware
+and prints both commands even when programming tools are not installed.
 Command construction is tested automatically. OpenOCD/GDB programming and image
 verification have been exercised on both boards; those checks do not certify
 every programmer backend or probe configuration.
