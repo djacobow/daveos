@@ -8,7 +8,7 @@
 - [x] Add passive Application composition with post-init command binding and declarative periodic tasks with compile-time intervals and explicit overrides.
 - [x] Pin both starters to the tested application/console API commit.
 - [x] Replace enum events with allocation-free std::variant payloads, typed DAVEOS_EVENT registration, and an explicit visitor fallback; preserve interrupt-safe copied broadcast delivery.
-- [ ] Advance both starter wrap pins to the variant-event implementation commit when releasing this change.
+- [x] Pin both starters to the variant-event implementation commit.
 - [x] Add clang-format configuration consistent with PROJECT.md and a formatting check.
 - [x] Add cppcheck configuration and a lint command; integrate both checks into CI.
 - [x] Implement the STM32H563 platform, CubeMX startup/linker integration, and DaveOS LED example.

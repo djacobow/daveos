@@ -5,11 +5,6 @@ repository's root. It contains one module, a real-time host executable, and a
 fake-time test of the same module. Application module constructors are passive;
 the scheduler runs stage1 for every module before any stage2 callback.
 
-The variant-event update in the current working tree requires the matching local
-DaveOS checkout. Until its release commit is pinned in `subprojects/daveos.wrap`,
-use that checkout as `subprojects/daveos` instead of downloading the older wrap
-revision (which still expects enum events).
-
 ```sh
 meson setup build/host
 meson compile -C build/host
@@ -17,9 +12,10 @@ meson test -C build/host --print-errorlogs
 ./build/host/my-app
 ```
 
-Place the matching checkout (or symlink) at `subprojects/daveos` before setup.
-Once the wrap pin is updated, setup can instead download that tested revision
-through `subprojects/daveos.wrap`; keep future upgrades pinned too. The real-time host platform starts its
+The first setup downloads DaveOS through `subprojects/daveos.wrap`. Its revision
+pins the tested variant-event API commit; keep future upgrades pinned too.
+For local development, place a checkout (or symlink) at `subprojects/daveos`
+before setup to skip the download. The real-time host platform starts its
 timer thread when constructed in `main()`; module initialization waits for `run()`.
 These commands need Meson, Ninja, and a C++20 compiler, but do not download
 DaveOS's own test dependencies.

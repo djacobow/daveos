@@ -127,9 +127,8 @@ DaveOS exports `daveos-core`, `daveos-console`, selected platform dependencies, 
 `daveos-network` when networking is enabled. Host builds also export the fake
 platform. The starter's `dependency(..., fallback: ...)` calls show how to consume
 them. Disable DaveOS's own examples/tests for a small consumer build; your own
-application tests can use the fake platform without Catch2. Starter wrap revisions must pin a compatible tested commit; keep upgrades pinned
-too. The variant-event update currently requires the local checkout until those
-pins advance, as described in the starter READMEs. For a device
+application tests can use the fake platform without Catch2. Starter wrap revisions
+pin the tested variant-event API commit; keep upgrades pinned too. For a device
 application, use [the STM32 starter](../starters/stm32/README.md):
 its board dependency supplies CPU/ABI flags, startup, linker, and HAL settings.
 Custom boards supply their own equivalents.
