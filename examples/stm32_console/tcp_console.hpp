@@ -17,14 +17,18 @@ class TcpConsole final
   TcpConsole(Platform& platform, daveos::net::Service& service,
              std::uint16_t port = 1000)
       : server_(service, port), input_(platform) {}
+
   static constexpr const char* name() { return "tcp"; }
+
   void output(const daveos::core::LogRecord& record) {
     daveos::core::LogPrefix prefix(record);
     const std::array<std::string_view, 3> pieces{prefix.view(), record.message,
                                                  "\r\n"};
     server_.write(pieces);
   }
+
   std::uint32_t take_dropped() { return input_.take_dropped(); }
+
   void stop() { server_.stop(); }
 
   bool poll_line(daveos::console::Line& line) {

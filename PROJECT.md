@@ -803,10 +803,13 @@ USB works in both USB-C orientations; USB/Ethernet recover after physical
 reconnection. Its
 Cortex-M33 stack reservation is 64 KiB, enforced by MSPLIM. Long-lived STM32
 application objects (modules, logger, scheduler, dispatcher, and transport
-buffers) have file-scope storage. Hardware setup waits for initialization;
+buffers) have file-scope storage in `examples/stm32_console/appmain.cpp`. Both
+generated `Core/Src/main.c` entry points include `appmain.h` and call `appmain()`
+after CubeMX peripheral setup; `appmain()` initializes the platform and calls
+`scheduler.run()`. Hardware setup waits for initialization;
 a dedicated application wiring module binds command sources in stage2. The
 64 KiB reservation addressed the old 34,216-byte application stack frame; the
-current debug `DaveOS_Run()` frame is 8 bytes. Total stack high-water usage has
+current debug `appmain()` frame is 8 bytes. Total stack high-water usage has
 not been measured, so the reservation is retained pending that measurement.
 Keep linker and CubeMX settings consistent when resizing it. H755 has build
 coverage only for the subsequent static-storage, initialization-wiring, and

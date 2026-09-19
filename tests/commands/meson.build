@@ -7,16 +7,16 @@ cpp = meson.get_compiler('cpp')
 registration_check = '''
   #include "core/command/command.hpp"
   enum class Event {};
-  using namespace daveos::core;
-  struct Example : Module<Example, Event> {
+  namespace core = daveos::core;
+  struct Example : core::Module<Example, Event> {
     static constexpr const char* name() { return "example"; }
-    Status Run(CommandArguments) { return Status::ok; }
+    core::Status Run(core::CommandArguments) { return core::Status::ok; }
     static constexpr auto commands() {
       return std::array{@0@};
     }
   };
-  using List = ModuleList<Example>;
-  static_assert(sizeof(CommandDispatcher<Event, List>) > 0);
+  using List = core::ModuleList<Example>;
+  static_assert(sizeof(core::CommandDispatcher<Event, List>) > 0);
 '''
 foreach descriptor, expected : {
   'DAVEOS_COMMAND(Example, "run", Run, "Run command")': true,
@@ -24,7 +24,7 @@ foreach descriptor, expected : {
   'DAVEOS_COMMAND(Example, "HELP", Run, "Reserved")': false,
   'DAVEOS_COMMAND(Example, "bad name", Run, "Invalid")': false,
   'DAVEOS_COMMAND(Example, "", Run, "Empty")': false,
-  'CommandDescriptor<Example>{"run", "Run", nullptr, "Run"}': false,
+  'core::CommandDescriptor<Example>{"run", "Run", nullptr, "Run"}': false,
   'DAVEOS_COMMAND(Example, "run", Run, "")': false,
 }
   if cpp.compiles(registration_check.format(descriptor), dependencies: core_dep,
@@ -35,18 +35,18 @@ endforeach
 names_check = '''
   #include "core/command/command.hpp"
   enum class Event {};
-  using namespace daveos::core;
-  template <int N> struct Example : Module<Example<N>, Event> {
+  namespace core = daveos::core;
+  template <int N> struct Example : core::Module<Example<N>, Event> {
     static constexpr const char* name() { return N == 0 ? "one" : @0@; }
     static constexpr const char* command_prefix() { return N == 0 ? "one" : @1@; }
-    Status Run(CommandArguments) { return Status::ok; }
+    core::Status Run(core::CommandArguments) { return core::Status::ok; }
     static constexpr auto commands() {
       return std::array{DAVEOS_COMMAND(Example, "run", Run, "Run")};
     }
   };
-  using List = ModuleList<Example<0>, Example<1>>;
+  using List = core::ModuleList<Example<0>, Example<1>>;
   static_assert(sizeof(List) > 0);
-  static_assert(sizeof(CommandDispatcher<Event, List>) > 0);
+  static_assert(sizeof(core::CommandDispatcher<Event, List>) > 0);
 '''
 foreach variant : [
   ['"two"', '"two"', true],
@@ -67,18 +67,18 @@ event_check = '''
   #include "core/command/command.hpp"
   #include "core/schedule/scheduler.hpp"
   #include "platform/fake/platform.h"
-  using namespace daveos::core;
+  namespace core = daveos::core;
   enum class Event {};
   enum class Other {};
-  struct Example : Module<Example, @0@> {
+  struct Example : core::Module<Example, @0@> {
     static constexpr const char* name() { return "example"; }
     void Task() {}
     static constexpr auto tasks() {
-      return std::array{TaskDescriptor<Example>{"task", &Example::Task}};
+      return std::array{core::TaskDescriptor<Example>{"task", &Example::Task}};
     }
   };
-  static_assert(!ModuleFor<int, Event>);
-  void check(SchedulerInterface<Event>& interface, Example& module,
+  static_assert(!core::ModuleFor<int, Event>);
+  void check(core::SchedulerInterface<Event>& interface, Example& module,
              daveos::platform::fake::Platform& platform) {
     @1@;
   }
@@ -86,8 +86,8 @@ event_check = '''
 foreach operation : [
     'interface.schedule(module, &Example::Task, 1)',
     'interface.cancel(module, &Example::Task)',
-    'auto scheduler = make_scheduler<Event>(platform, ModuleList{&module})',
-    'CommandDispatcher<Event, ModuleList<Example>> dispatcher(ModuleList{&module}, interface)']
+    'auto scheduler = core::make_scheduler<Event>(platform, core::ModuleList{&module})',
+    'core::CommandDispatcher<Event, core::ModuleList<Example>> dispatcher(core::ModuleList{&module}, interface)']
   foreach event_type, expected : {'Event': true, 'Other': false}
     if cpp.compiles(event_check.format(event_type, operation), dependencies: core_dep,
         name: 'module event ' + event_type + ': ' + operation) != expected

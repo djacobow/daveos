@@ -20,6 +20,7 @@ class CommandDispatcher<Event, ModuleList<Modules...>, LineCapacity,
                         ArgumentCapacity> {
   static_assert(LineCapacity > 0 && ArgumentCapacity >= 2);
   static_assert(LineCapacity <= std::numeric_limits<int>::max());
+
   template <typename M>
     requires ModuleFor<M, Event>
   static consteval bool ValidModule() {
@@ -38,6 +39,7 @@ class CommandDispatcher<Event, ModuleList<Modules...>, LineCapacity,
     }
     return true;
   }
+
   static_assert((ValidModule<Modules>() && ...), "invalid command metadata");
   static_assert(UniqueNames(std::array<const char*, sizeof...(Modules)>{(
                                 Modules::commands().empty()
@@ -45,6 +47,7 @@ class CommandDispatcher<Event, ModuleList<Modules...>, LineCapacity,
                                     : Modules::command_prefix())...},
                             true),
                 "command prefixes must be unique (case-insensitive)");
+
   struct Entry {
     const char* prefix;
     void* module;
@@ -59,12 +62,14 @@ class CommandDispatcher<Event, ModuleList<Modules...>, LineCapacity,
     std::apply([&](auto*... module) { (Register(module), ...); },
                modules.items);
   }
+
   // Bind sources during application initialization (normally stage2), after
   // all endpoints have been constructed. No polling or allocation is added.
   template <std::size_t Sources>
   void bind_sources(CommandSourceList<Sources> sources) {
     for (auto* source : sources.items) source->Bind(*this);
   }
+
   CommandDispatcher(const CommandDispatcher&) = delete;
   CommandDispatcher& operator=(const CommandDispatcher&) = delete;
 
@@ -76,6 +81,7 @@ class CommandDispatcher<Event, ModuleList<Modules...>, LineCapacity,
       CommandDispatcher* self;
       std::string_view line;
     };
+
     Request request{this, line};
     return scheduler_.Invoke(
         {"core", "command"},
@@ -93,6 +99,7 @@ class CommandDispatcher<Event, ModuleList<Modules...>, LineCapacity,
     return c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\v' ||
            c == '\f';
   }
+
   template <typename M>
   void Register(M* module) {
     if (!module) valid_ = false;
@@ -105,6 +112,7 @@ class CommandDispatcher<Event, ModuleList<Modules...>, LineCapacity,
           [](CommandDispatcher& self) { self.template Help<M>(); }};
     }
   }
+
   Status Parse(std::string_view line) {
     if (line.size() > LineCapacity) return Status::line_too_long;
     for (char c : line)
@@ -147,14 +155,19 @@ class CommandDispatcher<Event, ModuleList<Modules...>, LineCapacity,
     }
     return Status::ok;
   }
+
   Status Dispatch(std::string_view line) {
     if (busy_) return Status::busy;
     if (!valid_) return Status::invalid_argument;
+
     struct Active {
       bool& flag;
+
       explicit Active(bool& flag) : flag(flag) { flag = true; }
+
       ~Active() { flag = false; }
     } active(busy_);
+
     Status status = Parse(line);
     if (status != Status::ok || !argc_) return status;
     auto match = lazy_match(arguments_[0], count_ + 1, [&](std::size_t i) {
@@ -171,6 +184,7 @@ class CommandDispatcher<Event, ModuleList<Modules...>, LineCapacity,
     return entry.dispatch(*this, entry.module,
                           CommandArguments(arguments_.data() + 1, argc_ - 1));
   }
+
   template <typename M>
   void Help() {
 #if DAVEOS_LOGGING
@@ -180,6 +194,7 @@ class CommandDispatcher<Event, ModuleList<Modules...>, LineCapacity,
       scheduler_.log(Level::info, "  %s - %s", command.name, command.help);
 #endif
   }
+
   template <typename M>
   Status Handle(M& module, CommandArguments args) {
     constexpr auto commands = M::commands();
@@ -196,11 +211,13 @@ class CommandDispatcher<Event, ModuleList<Modules...>, LineCapacity,
       Help<M>();
       return Status::ok;
     }
+
     struct Call {
       M& module;
       Status (M::*callback)(CommandArguments);
       CommandArguments args;
     } call{module, commands[match.index].callback, args.subspan(1)};
+
     return scheduler_.Invoke(
         {M::name(), commands[match.index].handler},
         [](void* argument) {
@@ -209,6 +226,7 @@ class CommandDispatcher<Event, ModuleList<Modules...>, LineCapacity,
         },
         &call);
   }
+
   void Error([[maybe_unused]] Status status) {
 #if DAVEOS_LOGGING
     const char* message = "handler failed";
@@ -240,6 +258,7 @@ class CommandDispatcher<Event, ModuleList<Modules...>, LineCapacity,
     scheduler_.log(Level::error, "%s (status %s)", message, enum_name(status));
 #endif
   }
+
   SchedulerInterface<Event>& scheduler_;
   std::array<Entry, sizeof...(Modules)> entries_{};
   std::array<char, LineCapacity> buffer_{};

@@ -24,6 +24,7 @@ class Queue {
     ++count_;
     return Status::ok;
   }
+
   // Copy and remove the head; empty leaves the output untouched.
   Status pop(T& item) {
     if (empty()) return Status::empty;
@@ -32,17 +33,23 @@ class Queue {
     --count_;
     return Status::ok;
   }
+
   // Copy the head without removing it; empty leaves the output untouched.
   Status peek(T& item) const {
     if (empty()) return Status::empty;
     item = items_[head_];
     return Status::ok;
   }
+
   // Forget queued entries without destroying/resetting the backing objects.
   void clear() { head_ = count_ = 0; }
+
   std::size_t size() const { return count_; }
+
   static constexpr std::size_t capacity() { return Capacity; }
+
   bool empty() const { return count_ == 0; }
+
   bool full() const { return count_ == Capacity; }
 
  private:
@@ -56,6 +63,7 @@ template <typename T>
 struct Result {
   Status status;
   T value{};
+
   explicit operator bool() const { return status == Status::ok; }
 };
 
@@ -70,30 +78,38 @@ class ThreadSafeQueue {
  public:
   explicit ThreadSafeQueue(P& platform)
       : platform_(platform), mutex_(platform.queue_mutex()) {}
+
   Status push(const T& item) {
     return WithLock([&] { return queue_.push(item); });
   }
+
   Status pop(T& item) {
     return WithLock([&] { return queue_.pop(item); });
   }
+
   Status peek(T& item) {
     return WithLock([&] { return queue_.peek(item); });
   }
+
   Status clear() {
     return WithLock([&] {
       queue_.clear();
       return Status::ok;
     });
   }
+
   Result<std::size_t> size() {
     return Query<std::size_t>([&] { return queue_.size(); });
   }
+
   Result<bool> empty() {
     return Query<bool>([&] { return queue_.empty(); });
   }
+
   Result<bool> full() {
     return Query<bool>([&] { return queue_.full(); });
   }
+
   static constexpr std::size_t capacity() { return Capacity; }
 
  private:
@@ -108,6 +124,7 @@ class ThreadSafeQueue {
     Guard guard(platform_);
     return function();
   }
+
   template <typename Value, typename Function>
   Result<Value> Query(Function function) {
     Result<Value> result{Status::busy};
@@ -117,6 +134,7 @@ class ThreadSafeQueue {
     });
     return result;
   }
+
   P& platform_;
   decltype(std::declval<P&>().queue_mutex()) mutex_;
   Queue<T, Capacity> queue_;

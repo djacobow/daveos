@@ -11,34 +11,43 @@ using Platform = daveos::platform::fake::Platform;
 using Platform = daveos::platform::host::Platform;
 #endif
 
+namespace core = daveos::core;
+
 namespace app {
-using namespace daveos::core;
+
 enum class Event { hello };
-class Hello final : public Module<Hello, Event> {
+
+class Hello final : public core::Module<Hello, Event> {
  public:
   static constexpr const char* name() { return "hello"; }
+
   static constexpr auto tasks() {
-    return std::array{TaskDescriptor<Hello>{"greet", &Hello::greet}};
+    return std::array{core::TaskDescriptor<Hello>{"greet", &Hello::greet}};
   }
-  Status init(InitStage stage) {
-    if (stage == InitStage::stage1)
+
+  core::Status init(core::InitStage stage) {
+    if (stage == core::InitStage::stage1)
       return scheduler().schedule(*this, &Hello::greet, 1000);
-    return Status::ok;
+    return core::Status::ok;
   }
+
   void greet() {
     I_("Hello, DaveOS!");
     scheduler().stop();
   }
 };
-void Output(void*, const LogRecord& record) {
-  LogPrefix prefix(record);
+
+void Output(void*, const core::LogRecord& record) {
+  core::LogPrefix prefix(record);
   auto text = prefix.view();
   std::printf("%.*s%.*s\n", static_cast<int>(text.size()), text.data(),
               static_cast<int>(record.message.size()), record.message.data());
 }
+
 // Passive module construction; scheduler init() binds and initializes them.
 Hello hello;
 }  // namespace app
+
 int main() {
   Platform platform;
   auto logger = daveos::core::make_logger(

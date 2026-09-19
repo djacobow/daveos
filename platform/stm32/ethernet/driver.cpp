@@ -6,48 +6,60 @@
 #include "ethernet_board.h"
 #include "lan8742.h"
 
+namespace net = daveos::net;
+
 namespace {
-using namespace daveos::net;
+
 static_assert(ETH_RX_DESC_CNT == 8 && ETH_TX_DESC_CNT == 4);
+
 struct alignas(32) Rx {
   std::array<std::uint8_t, 1536> bytes;
   Rx* next;
   std::size_t size;
   bool used;
 };
+
 struct alignas(32) Tx {
   std::array<std::uint8_t, 1536> bytes;
   bool used;
 };
+
 struct alignas(32) Dma {
   ETH_DMADescTypeDef rx_desc[ETH_RX_DESC_CNT];
   ETH_DMADescTypeDef tx_desc[ETH_TX_DESC_CNT];
   Rx rx[16];  // Eight attached to DMA, eight available during RX replacement.
   Tx tx[ETH_TX_DESC_CNT];
 };
+
 Dma dma __attribute__((section(".eth_dma")));
 static_assert(sizeof(dma) <= 65536);
 ETH_HandleTypeDef eth;
 lan8742_Object_t phy;
-Mac mac;
-Link current = Link::down;
+net::Mac mac;
+net::Link current = net::Link::down;
 bool initialized = false, running = false;
 volatile std::uint32_t error_count = 0;
 volatile bool fault = false;
+
 std::int32_t IoInit() {
   HAL_ETH_SetMDIOClockRange(&eth);
   return 0;
 }
+
 std::int32_t IoDeInit() { return 0; }
+
 std::int32_t IoRead(std::uint32_t addr, std::uint32_t reg,
                     std::uint32_t* value) {
   return HAL_ETH_ReadPHYRegister(&eth, addr, reg, value) == HAL_OK ? 0 : -1;
 }
+
 std::int32_t IoWrite(std::uint32_t addr, std::uint32_t reg,
                      std::uint32_t value) {
   return HAL_ETH_WritePHYRegister(&eth, addr, reg, value) == HAL_OK ? 0 : -1;
 }
+
 std::int32_t IoTick() { return static_cast<std::int32_t>(HAL_GetTick()); }
+
 bool InitMac() {
   // No DMA is running here. Reset all descriptors and buffer ownership
   // together.
@@ -61,13 +73,15 @@ bool InitMac() {
   eth.Init.RxBuffLen = 1536;
   return HAL_ETH_Init(&eth) == HAL_OK;
 }
+
 void Stop(void*) {
   if (running) HAL_ETH_Stop_IT(&eth);
   if (initialized) HAL_ETH_DeInit(&eth);
   initialized = running = false;
-  current = Link::down;
+  current = net::Link::down;
 }
-bool Init(void*, const Mac& address) {
+
+bool Init(void*, const net::Mac& address) {
   mac = address;
   fault = false;
   error_count = 0;
@@ -85,25 +99,26 @@ bool Init(void*, const Mac& address) {
   }
   return true;
 }
-Link ReadLink(void*) {
-  if (!initialized || fault) return Link::fault;
+
+net::Link ReadLink(void*) {
+  if (!initialized || fault) return net::Link::fault;
   auto state = LAN8742_GetLinkState(&phy);
-  Link next = Link::down;
+  net::Link next = net::Link::down;
   switch (state) {
     case LAN8742_STATUS_100MBITS_FULLDUPLEX:
-      next = Link::full100;
+      next = net::Link::full100;
       break;
     case LAN8742_STATUS_100MBITS_HALFDUPLEX:
-      next = Link::half100;
+      next = net::Link::half100;
       break;
     case LAN8742_STATUS_10MBITS_FULLDUPLEX:
-      next = Link::full10;
+      next = net::Link::full10;
       break;
     case LAN8742_STATUS_10MBITS_HALFDUPLEX:
-      next = Link::half10;
+      next = net::Link::half10;
       break;
     default:
-      if (state < 0) next = Link::fault;
+      if (state < 0) next = net::Link::fault;
       break;
   }
   if (next == current) return current;
@@ -111,33 +126,35 @@ Link ReadLink(void*) {
     HAL_ETH_Stop_IT(&eth);
     running = false;
   }
-  if (next != Link::down && next != Link::fault) {
+  if (next != net::Link::down && next != net::Link::fault) {
     // Reset descriptor ownership on reconnect, discarding stale queued frames.
     HAL_ETH_DeInit(&eth);
     if (!InitMac()) {
       fault = true;
-      return Link::fault;
+      return net::Link::fault;
     }
     ETH_MACConfigTypeDef config{};
     HAL_ETH_GetMACConfig(&eth, &config);
-    config.Speed = (next == Link::full100 || next == Link::half100)
+    config.Speed = (next == net::Link::full100 || next == net::Link::half100)
                        ? ETH_SPEED_100M
                        : ETH_SPEED_10M;
-    config.DuplexMode = (next == Link::full100 || next == Link::full10)
-                            ? ETH_FULLDUPLEX_MODE
-                            : ETH_HALFDUPLEX_MODE;
+    config.DuplexMode =
+        (next == net::Link::full100 || next == net::Link::full10)
+            ? ETH_FULLDUPLEX_MODE
+            : ETH_HALFDUPLEX_MODE;
     config.ChecksumOffload =
         DISABLE;  // lwIP performs all checksums in software.
     if (HAL_ETH_SetMACConfig(&eth, &config) != HAL_OK ||
         HAL_ETH_Start_IT(&eth) != HAL_OK) {
       fault = true;
-      return Link::fault;
+      return net::Link::fault;
     }
     running = true;
   }
   current = next;
   return current;
 }
+
 void Poll(void*) {
   if (fault && running) {
     HAL_ETH_Stop_IT(&eth);
@@ -145,6 +162,7 @@ void Poll(void*) {
   }
   if (running) HAL_ETH_ReleaseTxPacket(&eth);
 }
+
 std::size_t Receive(void*, std::span<std::uint8_t> bytes) {
   if (!running) return 0;
   Rx* frame = nullptr;
@@ -163,6 +181,7 @@ std::size_t Receive(void*, std::span<std::uint8_t> bytes) {
   }
   return total;
 }
+
 bool Transmit(void*, std::span<const std::uint8_t> bytes) {
   if (!running || bytes.size() > 1536) return false;
   HAL_ETH_ReleaseTxPacket(&eth);
@@ -187,17 +206,19 @@ bool Transmit(void*, std::span<const std::uint8_t> bytes) {
   return false;
 }
 }  // namespace
+
 namespace daveos::net::stm32 {
 
 
-Driver ethernet_driver() {
+net::Driver ethernet_driver() {
   return {nullptr,  Init,
           Stop,     Poll,
           ReadLink, Receive,
           Transmit, [](void*) -> std::uint32_t { return error_count; }};
 }
-Config board_network_config() {
-  Config config;
+
+net::Config board_network_config() {
+  net::Config config;
   // Locally administered unicast MAC derived from all three UID words.
   const std::uint32_t words[]{HAL_GetUIDw0(), HAL_GetUIDw1(), HAL_GetUIDw2()};
   std::uint32_t hash = 2166136261U;
@@ -216,7 +237,9 @@ Config board_network_config() {
 
 
 }  // namespace daveos::net::stm32
+
 extern "C" void ETH_IRQHandler() { HAL_ETH_IRQHandler(&eth); }
+
 extern "C" void HAL_ETH_RxAllocateCallback(std::uint8_t** bytes) {
   *bytes = nullptr;
   for (auto& slot : dma.rx)
@@ -228,6 +251,7 @@ extern "C" void HAL_ETH_RxAllocateCallback(std::uint8_t** bytes) {
       return;
     }
 }
+
 extern "C" void HAL_ETH_RxLinkCallback(void** start, void** end,
                                        std::uint8_t* bytes,
                                        std::uint16_t size) {
@@ -242,9 +266,11 @@ extern "C" void HAL_ETH_RxLinkCallback(void** start, void** end,
     *start = slot;
   *end = slot;
 }
+
 extern "C" void HAL_ETH_TxFreeCallback(std::uint32_t* data) {
   static_cast<Tx*>(static_cast<void*>(data))->used = false;
 }
+
 extern "C" void HAL_ETH_ErrorCallback(ETH_HandleTypeDef*) {
   error_count = error_count + 1;
   // Fatal bus errors require a reset; RX-buffer-unavailable is recoverable.

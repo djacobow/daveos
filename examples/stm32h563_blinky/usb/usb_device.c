@@ -17,11 +17,13 @@ void HAL_PCD_MspInit(PCD_HandleTypeDef* pcd) {
   HAL_NVIC_SetPriority(USB_DRD_FS_IRQn, 6, 0);
   HAL_NVIC_EnableIRQ(USB_DRD_FS_IRQn);
 }
+
 void HAL_PCD_MspDeInit(PCD_HandleTypeDef* pcd) {
   (void)pcd;
   HAL_NVIC_DisableIRQ(USB_DRD_FS_IRQn);
   __HAL_RCC_USB_CLK_DISABLE();
 }
+
 bool UsbBoardInitPcd(PCD_HandleTypeDef* pcd) {
   pcd->Instance = USB_DRD_FS;
   pcd->Init.dev_endpoints = 8;
@@ -39,6 +41,7 @@ bool UsbBoardInitPcd(PCD_HandleTypeDef* pcd) {
          HAL_PCDEx_PMAConfig(pcd, CDC_OUT_EP, PCD_SNG_BUF, 0x100) == HAL_OK &&
          HAL_PCDEx_PMAConfig(pcd, CDC_CMD_EP, PCD_SNG_BUF, 0x140) == HAL_OK;
 }
+
 void UsbBoardAbortTransmit(PCD_HandleTypeDef* pcd) {
   HAL_PCD_EP_Abort(pcd, CDC_IN_EP);
   // Retire a pending completion before the shared output buffer is reused.

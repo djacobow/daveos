@@ -37,6 +37,7 @@ namespace daveos::core {
 
 // Ordered severity threshold; fatal has no special control-flow behavior.
 enum class Level { debug, info, warning, error, fatal };
+
 // Subscriber view of a buffered record. Timestamp is captured at the log call;
 // message storage is valid only for the duration of the subscriber callback.
 // Names are borrowed from registration or platform context. Outputters supply
@@ -48,6 +49,7 @@ struct LogRecord {
   const char* task;
   std::string_view message;
 };
+
 // Non-owning output callback/context pair. The context must outlive the
 // logger. Delivery occurs in scheduler context, never synchronously from the
 // log caller.
@@ -55,15 +57,19 @@ struct Subscriber {
   void* context;
   void (*write)(void*, const LogRecord&);
 };
+
 // Constructor arguments determine subscriber storage at compile time.
 template <std::size_t Size>
 struct SubscriberList {
   std::array<Subscriber, Size> items;
+
   template <typename... Items>
   explicit SubscriberList(Items... values) : items{values...} {}
 };
+
 template <typename... Items>
 SubscriberList(Items...) -> SubscriberList<sizeof...(Items)>;
+
 // Cumulative counts until reset: rejected full-buffer writes and stored
 // truncations.
 struct LogCounters {
@@ -74,25 +80,34 @@ struct LogCounters {
 // Empty scheduler policy: no storage, formatting, idle work or shutdown work.
 struct NoLogging {
   static Status write(Level, const char*, std::va_list) { return Status::ok; }
+
   static bool dispatch() { return false; }
+
   static void flush() {}
+
   static bool empty() { return true; }
 };
+
 // Statically typed, non-owning attachment. The logger and scheduler must use
 // the same platform; the logger must outlive scheduler shutdown/destruction.
 template <typename L>
 class LogService {
  public:
   explicit LogService(L& logger) : logger_(logger) {}
+
   template <typename P>
   bool uses_platform(const P& platform) const {
     return logger_.uses_platform(platform);
   }
+
   Status write(Level level, const char* format, std::va_list args) {
     return logger_.write(level, format, args);
   }
+
   bool dispatch() { return logger_.dispatch(); }
+
   void flush() { logger_.flush(); }
+
   bool empty() { return logger_.empty(); }
 
  private:

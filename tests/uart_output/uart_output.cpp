@@ -9,16 +9,19 @@ struct Driver {
   const std::uint8_t* bytes = nullptr;
   std::size_t size = 0;
   bool fail = false;
+
   bool start(const std::uint8_t* data, std::size_t length) {
     if (fail) return false;
     bytes = data;
     size = length;
     return true;
   }
+
   std::string sent() const {
     return {reinterpret_cast<const char*>(bytes), size};
   }
 };
+
 struct Fixture {
   daveos::platform::fake::Platform platform;
   Driver driver;
@@ -26,6 +29,7 @@ struct Fixture {
   daveos::console::BufferedOutput<decltype(platform), Driver, 8, 12> output{
       platform, driver, storage};
 };
+
 using daveos::core::Status;
 }  // namespace
 
@@ -57,6 +61,7 @@ TEST_CASE("UART DMA preserves active data while accumulating the next buffer") {
   CHECK(f.output.counters().sent_bytes == 13);
   CHECK(f.output.counters().transfers == 3);
 }
+
 TEST_CASE("UART DMA overflow drops whole frames and recovers") {
   Fixture f;
   f.output.write("active");
@@ -79,6 +84,7 @@ TEST_CASE("UART DMA overflow drops whole frames and recovers") {
   f.output.complete();
   CHECK(f.output.counters().transfers == 3);
 }
+
 TEST_CASE(
     "UART DMA start failures and transfer errors discard uncertain data") {
   Fixture f;

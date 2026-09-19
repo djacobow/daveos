@@ -23,6 +23,7 @@ template <std::size_t Capacity, std::size_t MessageSize,
 class Logger {
 #if DAVEOS_LOGGING
   static_assert(MessageSize > 0);
+
   struct Stored {
     Time timestamp{};
     Level severity{};
@@ -34,13 +35,16 @@ class Logger {
  public:
   Logger(P& platform, SubscriberList<Subscribers> subscribers)
       : platform_(platform), subscribers_(subscribers) {}
+
   Logger(const Logger&) = delete;
   Logger& operator=(const Logger&) = delete;
+
   // Checked by scheduler init before module callbacks. Types must match at
   // compile time; distinct instances of that type are rejected at runtime.
   bool uses_platform(const P& platform) const {
     return &platform_ == &platform;
   }
+
   // Filtered/no-subscriber calls return ok without queuing. full drops the new
   // record; truncated queues shortened text. Invalid formatting returns an
   // error.
@@ -70,6 +74,7 @@ class Logger {
     platform_.notify();
     return truncated ? Status::truncated : Status::ok;
   }
+
   // Deliver one record to all subscribers outside the lock; false means empty.
   bool dispatch() {
     Stored record;
@@ -88,26 +93,31 @@ class Logger {
     }
     return true;
   }
+
   // Drain records during shutdown/init failure. Subscriber callbacks must
   // finish.
   void flush() {
     while (dispatch()) {
     }
   }
+
   // Default is info. Changing the threshold does not discard buffered records.
   void minimum(Level level) {
     Guard guard(platform_);
     minimum_ = level;
   }
+
   bool empty() {
     Guard guard(platform_);
     return records_.empty();
   }
+
   // Return a synchronized copy; the caller owns the result.
   LogCounters counters() {
     Guard guard(platform_);
     return counters_;
   }
+
   // Reset diagnostic counts only; retain queued records and the level
   // threshold.
   void reset() {
@@ -124,16 +134,22 @@ class Logger {
 #else
  public:
   Logger(P&, SubscriberList<Subscribers>) {}
+
   Status write(Level, const char*, std::va_list) { return Status::ok; }
+
   bool dispatch() { return false; }
+
   void flush() {}
+
   void minimum(Level) {}
+
   bool empty() { return true; }
+
   LogCounters counters() { return {}; }
+
   void reset() {}
 #endif
 };
-
 
 // Deduce platform/subscriber types; sizes are records and bytes per message
 // (including terminating NUL). The disabled specialization has no storage.

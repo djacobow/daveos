@@ -2,37 +2,40 @@
 #include <thread>
 
 #include "support.hpp"
-using namespace testing;
+
+namespace core = daveos::core;
+namespace test = testing;
 
 TEST_CASE("timer replacement, cancellation, capacity and self-rearm") {
-  Fake platform;
-  TestModule module;
-  auto scheduler = make_scheduler<Event, 32, 1>(platform, ModuleList{&module});
+  test::Fake platform;
+  test::TestModule module;
+  auto scheduler = core::make_scheduler<test::Event, 32, 1>(
+      platform, core::ModuleList{&module});
   int calls = 0;
-  std::vector<Time> times;
-  timer_action = [&] {
+  std::vector<core::Time> times;
+  test::timer_action = [&] {
     CHECK(platform.in_interrupt());
     times.push_back(platform.now());
     if (++calls == 1)
-      CHECK(scheduler.timer(4, Timer) == Status::ok);
+      CHECK(scheduler.timer(4, test::Timer) == core::Status::ok);
     else
-      scheduler.schedule(module, &TestModule::second, 0);
+      scheduler.schedule(module, &test::TestModule::second, 0);
   };
   module.first_action = [&] {
-    CHECK(scheduler.timer(0, Timer) == Status::invalid_argument);
-    CHECK(scheduler.timer(20, Timer) == Status::ok);
-    CHECK(scheduler.timer(5, Timer) == Status::ok);
-    CHECK(scheduler.timer(1, OtherTimer) == Status::full);
-    CHECK(scheduler.cancel_timer(OtherTimer) == Status::not_found);
+    CHECK(scheduler.timer(0, test::Timer) == core::Status::invalid_argument);
+    CHECK(scheduler.timer(20, test::Timer) == core::Status::ok);
+    CHECK(scheduler.timer(5, test::Timer) == core::Status::ok);
+    CHECK(scheduler.timer(1, test::OtherTimer) == core::Status::full);
+    CHECK(scheduler.cancel_timer(test::OtherTimer) == core::Status::not_found);
   };
   module.second_action = [&] {
     CHECK_FALSE(platform.in_interrupt());
     scheduler.stop();
   };
-  CHECK(scheduler.timer(1, Timer) == Status::not_running);
-  scheduler.schedule(module, &TestModule::first, 0);
-  CHECK(scheduler.run() == Status::ok);
-  CHECK(times == std::vector<Time>{5, 9});
+  CHECK(scheduler.timer(1, test::Timer) == core::Status::not_running);
+  scheduler.schedule(module, &test::TestModule::first, 0);
+  CHECK(scheduler.run() == core::Status::ok);
+  CHECK(times == std::vector<core::Time>{5, 9});
   CHECK(scheduler.snapshot().timer_overflows == 1);
   CHECK(platform.sleeps() > 0);
 }
@@ -40,35 +43,38 @@ TEST_CASE("timer replacement, cancellation, capacity and self-rearm") {
 TEST_CASE(
     "timer callback can cancel another timer and shutdown discards remaining "
     "timers") {
-  Fake platform;
-  TestModule module;
-  auto scheduler = make_scheduler<Event>(platform, ModuleList{&module});
+  test::Fake platform;
+  test::TestModule module;
+  auto scheduler =
+      core::make_scheduler<test::Event>(platform, core::ModuleList{&module});
   int unwanted = 0;
-  other_timer_action = [&] { ++unwanted; };
-  timer_action = [&] {
-    CHECK(scheduler.cancel_timer(OtherTimer) == Status::ok);
-    CHECK(scheduler.cancel_timer(OtherTimer) == Status::not_found);
-    scheduler.timer(10, OtherTimer);
+  test::other_timer_action = [&] { ++unwanted; };
+  test::timer_action = [&] {
+    CHECK(scheduler.cancel_timer(test::OtherTimer) == core::Status::ok);
+    CHECK(scheduler.cancel_timer(test::OtherTimer) == core::Status::not_found);
+    scheduler.timer(10, test::OtherTimer);
     scheduler.stop();
   };
   module.first_action = [&] {
-    scheduler.timer(5, Timer);
-    scheduler.timer(10, OtherTimer);
+    scheduler.timer(5, test::Timer);
+    scheduler.timer(10, test::OtherTimer);
   };
-  scheduler.schedule(module, &TestModule::first, 0);
-  CHECK(scheduler.run() == Status::ok);
+  scheduler.schedule(module, &test::TestModule::first, 0);
+  CHECK(scheduler.run() == core::Status::ok);
   platform.advance(100);
   CHECK(unwanted == 0);
 }
 
 TEST_CASE(
     "fake advance delivers platform callbacks synchronously at deadlines") {
-  Fake platform;
+  test::Fake platform;
+
   struct State {
-    Fake* platform;
+    test::Fake* platform;
     int count = 0;
-    Time fired = 0;
+    core::Time fired = 0;
   } state{&platform};
+
   platform.arm(
       7,
       [](void* context) {
@@ -85,11 +91,12 @@ TEST_CASE(
 }
 
 TEST_CASE("manual fake sleep is released by time advancement") {
-  Fake platform(Fake::Advancement::manual);
-  TestModule module;
-  auto scheduler = make_scheduler<Event>(platform, ModuleList{&module});
+  test::Fake platform(test::Fake::Advancement::manual);
+  test::TestModule module;
+  auto scheduler =
+      core::make_scheduler<test::Event>(platform, core::ModuleList{&module});
   module.first_action = [&] { scheduler.stop(); };
-  scheduler.schedule(module, &TestModule::first, 10);
+  scheduler.schedule(module, &test::TestModule::first, 10);
   std::thread runner([&] { scheduler.run(); });
   while (!platform.sleeps()) std::this_thread::yield();
   platform.advance(10);
@@ -98,16 +105,17 @@ TEST_CASE("manual fake sleep is released by time advancement") {
 }
 
 TEST_CASE("indefinite fake sleep wakes on an interrupt") {
-  Fake platform;
-  TestModule module;
-  auto scheduler = make_scheduler<Event>(platform, ModuleList{&module});
+  test::Fake platform;
+  test::TestModule module;
+  auto scheduler =
+      core::make_scheduler<test::Event>(platform, core::ModuleList{&module});
   module.first_action = [&] { scheduler.stop(); };
   std::thread runner([&] { scheduler.run(); });
   while (!platform.sleeps()) std::this_thread::yield();
   platform.interrupt(
       [](void* context) {
-        auto& module = *static_cast<TestModule*>(context);
-        module.scheduler().schedule(module, &TestModule::first, 0);
+        auto& module = *static_cast<test::TestModule*>(context);
+        module.scheduler().schedule(module, &test::TestModule::first, 0);
       },
       &module);
   runner.join();
@@ -115,13 +123,14 @@ TEST_CASE("indefinite fake sleep wakes on an interrupt") {
 }
 
 TEST_CASE("can_sleep false takes awake-wait path") {
-  Fake platform;
-  TestModule module;
+  test::Fake platform;
+  test::TestModule module;
   module.sleep = false;
-  auto scheduler = make_scheduler<Event>(platform, ModuleList{&module});
+  auto scheduler =
+      core::make_scheduler<test::Event>(platform, core::ModuleList{&module});
   module.first_action = [&] { scheduler.stop(); };
-  scheduler.schedule(module, &TestModule::first, 10);
-  CHECK(scheduler.run() == Status::ok);
+  scheduler.schedule(module, &test::TestModule::first, 10);
+  CHECK(scheduler.run() == core::Status::ok);
   CHECK(platform.sleeps() == 0);
   CHECK(platform.awake_waits() > 0);
 }
@@ -129,27 +138,28 @@ TEST_CASE("can_sleep false takes awake-wait path") {
 TEST_CASE(
     "time spent in a fake timer callback does not nest interrupts or lose "
     "another expiry") {
-  Fake platform;
-  TestModule module;
-  auto scheduler = make_scheduler<Event>(platform, ModuleList{&module});
+  test::Fake platform;
+  test::TestModule module;
+  auto scheduler =
+      core::make_scheduler<test::Event>(platform, core::ModuleList{&module});
   int depth = 0, maximum = 0, calls = 0;
-  timer_action = [&] {
+  test::timer_action = [&] {
     maximum = std::max(maximum, ++depth);
     platform.advance(10);
     --depth;
   };
-  other_timer_action = [&] {
+  test::other_timer_action = [&] {
     maximum = std::max(maximum, ++depth);
     ++calls;
     --depth;
     scheduler.stop();
   };
   module.first_action = [&] {
-    scheduler.timer(5, Timer);
-    scheduler.timer(8, OtherTimer);
+    scheduler.timer(5, test::Timer);
+    scheduler.timer(8, test::OtherTimer);
   };
-  scheduler.schedule(module, &TestModule::first, 0);
-  CHECK(scheduler.run() == Status::ok);
+  scheduler.schedule(module, &test::TestModule::first, 0);
+  CHECK(scheduler.run() == core::Status::ok);
   CHECK(calls == 1);
   CHECK(maximum == 1);
 }

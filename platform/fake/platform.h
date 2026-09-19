@@ -15,10 +15,14 @@ class Platform final : public detail::Synchronized<Platform> {
   // advance. In either mode, indefinite idle requires an external
   // notification/interrupt.
   enum class Advancement { manual, automatic };
+
   explicit Platform(Advancement mode = Advancement::automatic) : mode_(mode) {}
+
   ~Platform() { quiesce(); }
+
   // Current simulated microseconds; reading the clock never advances it.
   core::Time now() const { return time_.load(); }
+
   // Replace the pending timer. Expiry waits for time advancement, even at delay
   // 0.
   void arm(core::Time delay, Callback callback, void* context);
@@ -34,8 +38,10 @@ class Platform final : public detail::Synchronized<Platform> {
   // can rearm themselves. Inside an ISR only move time; defer nested expiries
   // until a surrounding or later non-ISR advancement can dispatch them.
   void advance(core::Time amount);
+
   // Counts idle-path requests, including calls that return without waiting.
   std::uint64_t sleeps() const { return sleeps_.load(); }
+
   std::uint64_t awake_waits() const { return awake_waits_.load(); }
 
  private:

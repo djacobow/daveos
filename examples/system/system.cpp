@@ -12,24 +12,31 @@ using Platform = daveos::platform::fake::Platform;
 using Platform = daveos::platform::host::Platform;
 #endif
 
+namespace core = daveos::core;
+
 namespace app {
-using namespace daveos::core;
+
 enum class Event { pulse };
-class Producer final : public Module<Producer, Event> {
+
+class Producer final : public core::Module<Producer, Event> {
  public:
   static constexpr const char* name() { return "producer"; }
+
   static constexpr auto tasks() {
     return std::array{
-        TaskDescriptor<Producer>{"pulse", &Producer::pulse},
-        TaskDescriptor<Producer>{"complete", &Producer::complete}};
+        core::TaskDescriptor<Producer>{"pulse", &Producer::pulse},
+        core::TaskDescriptor<Producer>{"complete", &Producer::complete}};
   }
-  Status init(InitStage stage) {
-    if (stage == InitStage::stage1) {
+
+  core::Status init(core::InitStage stage) {
+    if (stage == core::InitStage::stage1) {
       active_ = this;
-      return scheduler().schedule(*this, &Producer::pulse, 1000, Mode::repeat);
+      return scheduler().schedule(*this, &Producer::pulse, 1000,
+                                  core::Mode::repeat);
     }
-    return Status::ok;
+    return core::Status::ok;
   }
+
   void pulse() {
     ++count_;
     I_("pulse %u", count_);
@@ -39,6 +46,7 @@ class Producer final : public Module<Producer, Event> {
       scheduler().timer(500, FinishTimer);
     }
   }
+
   void complete() {
     scheduler().log_statistics();
     scheduler().stop();
@@ -48,28 +56,37 @@ class Producer final : public Module<Producer, Event> {
   static void FinishTimer() {
     active_->scheduler().schedule(*active_, &Producer::complete, 0);
   }
+
   inline static Producer* active_ = nullptr;
   std::uint32_t count_ = 0;
 };
-class Consumer final : public Module<Consumer, Event> {
+
+class Consumer final : public core::Module<Consumer, Event> {
  public:
   static constexpr const char* name() { return "consumer"; }
+
   static constexpr auto tasks() {
-    return std::array{TaskDescriptor<Consumer>{"report", &Consumer::report}};
+    return std::array{
+        core::TaskDescriptor<Consumer>{"report", &Consumer::report}};
   }
+
   void on_event(Event) { scheduler().schedule(*this, &Consumer::report, 0); }
+
   void report() { I_("received pulse"); }
 };
-void Output(void*, const LogRecord& record) {
-  LogPrefix prefix(record);
+
+void Output(void*, const core::LogRecord& record) {
+  core::LogPrefix prefix(record);
   auto text = prefix.view();
   std::printf("%.*s%.*s\n", static_cast<int>(text.size()), text.data(),
               static_cast<int>(record.message.size()), record.message.data());
 }
+
 // Passive module construction; scheduler init() binds and initializes them.
 Producer producer;
 Consumer consumer;
 }  // namespace app
+
 int main() {
   Platform platform;
   auto logger = daveos::core::make_logger(

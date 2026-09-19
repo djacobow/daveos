@@ -2,13 +2,16 @@
 
 namespace daveos::platform::host {
 Platform::Platform() : timer_thread_([this] { TimerLoop(); }) {}
+
 Platform::~Platform() { quiesce(); }
+
 core::Time Platform::now() const {
   return static_cast<core::Time>(
       std::chrono::duration_cast<std::chrono::microseconds>(
           std::chrono::steady_clock::now() - epoch_)
           .count());
 }
+
 void Platform::arm(core::Time delay, Callback callback, void* context) {
   {
     std::lock_guard lock(timer_mutex_);
@@ -20,6 +23,7 @@ void Platform::arm(core::Time delay, Callback callback, void* context) {
   }
   timer_cv_.notify_all();
 }
+
 void Platform::disarm() {
   {
     std::lock_guard lock(timer_mutex_);
@@ -29,6 +33,7 @@ void Platform::disarm() {
   }
   timer_cv_.notify_all();
 }
+
 void Platform::quiesce() {
   {
     std::lock_guard lock(timer_mutex_);
@@ -42,6 +47,7 @@ void Platform::quiesce() {
   CloseInterrupts();
   notify();
 }
+
 void Platform::TimerLoop() {
   std::unique_lock lock(timer_mutex_);
   while (!quit_) {
@@ -67,6 +73,7 @@ void Platform::TimerLoop() {
     lock.lock();
   }
 }
+
 void Platform::idle(core::Time deadline, bool /*sleep*/,
                     std::uint64_t observed) {
   // Host blocking is not an MCU power state; both paths use retained

@@ -22,6 +22,7 @@ class LogUnsigned {
                   value > limit ? limit : static_cast<std::uint32_t>(value),
                   value > limit ? "+" : "");
   }
+
   const char* c_str() const { return bytes_.data(); }
 
  private:
@@ -63,6 +64,7 @@ class LogPrefix {
                       static_cast<int>(ContextWidth), context.data());
     if (written > 0) size_ = static_cast<std::size_t>(written);
   }
+
   std::string_view view() const { return {bytes_.data(), size_}; }
 
  private:

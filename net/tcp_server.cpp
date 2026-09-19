@@ -25,6 +25,7 @@ struct TcpCallbacks {
     tcp_nagle_disable(client);
     return ERR_OK;
   }
+
   static err_t Receive(void* context, tcp_pcb*, pbuf* packet, err_t) {
     auto& self = *static_cast<TcpServer*>(context);
     if (!packet) {
@@ -43,11 +44,14 @@ struct TcpCallbacks {
     pbuf_free(packet);
     return ERR_OK;
   }
+
   static void Error(void* context, err_t) {
     static_cast<TcpServer*>(context)->Disconnect(false);  // PCB already freed.
   }
 };
+
 TcpServer::~TcpServer() { stop(); }
+
 void TcpServer::Disconnect(bool abort) {
   if (client_) {
     auto* client = client_;
@@ -61,6 +65,7 @@ void TcpServer::Disconnect(bool abort) {
   }
   head_ = received_ = queued_ = 0;
 }
+
 void TcpServer::stop() {
   Disconnect(true);
   if (listener_) {
@@ -68,6 +73,7 @@ void TcpServer::stop() {
     listener_ = nullptr;
   }
 }
+
 void TcpServer::poll() {
   if (service_.snapshot().state != State::ready) {
     stop();
@@ -98,15 +104,18 @@ void TcpServer::poll() {
   std::memmove(tx_.data(), tx_.data() + size, queued_);
   tcp_output(client_);
 }
+
 std::span<const char> TcpServer::peek() const {
   return {rx_.data() + head_, std::min(received_, rx_.size() - head_)};
 }
+
 void TcpServer::consume(std::size_t size) {
   size = std::min(size, received_);
   head_ = (head_ + size) % rx_.size();
   received_ -= size;
   if (client_ && size) tcp_recved(client_, static_cast<u16_t>(size));
 }
+
 std::size_t TcpServer::read(std::span<char> bytes) {
   const auto size = std::min(bytes.size(), received_);
   std::size_t copied = 0;
@@ -118,6 +127,7 @@ std::size_t TcpServer::read(std::span<char> bytes) {
   }
   return size;
 }
+
 bool TcpServer::write(std::span<const std::string_view> pieces) {
   if (!client_) return false;
   auto available = tx_.size() - queued_;

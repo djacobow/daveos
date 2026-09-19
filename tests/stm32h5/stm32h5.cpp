@@ -5,13 +5,16 @@
 using daveos::core::Status;
 using daveos::core::Time;
 using daveos::platform::stm32h5::Platform;
+
 namespace {
 struct Fixture {
   Platform platform;
+
   Fixture() {
     hardware::Reset();
     REQUIRE(platform.init(125000000) == Status::ok);
   }
+
   void Interrupt() {
     hardware::ipsr = 16 + TIM2_IRQn;
     hardware::pending = false;
@@ -19,6 +22,7 @@ struct Fixture {
     hardware::ipsr = 0;
   }
 };
+
 void Count(void* context) { ++*static_cast<int*>(context); }
 }  // namespace
 
@@ -109,6 +113,7 @@ TEST_CASE_METHOD(Fixture, "STM32 callbacks can rearm in interrupt context") {
   struct State {
     Platform* platform;
     int count = 0;
+
     static void Fire(void* argument) {
       auto& state = *static_cast<State*>(argument);
       REQUIRE(state.platform->in_interrupt());
@@ -117,6 +122,7 @@ TEST_CASE_METHOD(Fixture, "STM32 callbacks can rearm in interrupt context") {
       if (++state.count == 1) state.platform->arm(5, Fire, argument);
     }
   } state{&platform};
+
   platform.context({"module", "task"});
   platform.arm(1, State::Fire, &state);
   TIM2->CNT = 1;

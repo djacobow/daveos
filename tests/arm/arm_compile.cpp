@@ -1,27 +1,36 @@
 #include "core/command/command.hpp"
 #include "core/logging/logger.hpp"
 #include "core/schedule/scheduler.hpp"
+
+namespace core = daveos::core;
+
 namespace {
-using namespace daveos::core;
+
 enum class Event { sample };
-struct Example : Module<Example, Event> {
+
+struct Example : core::Module<Example, Event> {
   static constexpr const char* name() { return "arm_compile"; }
+
   static constexpr auto tasks() {
-    return std::array{TaskDescriptor<Example>{"tick", &Example::tick}};
+    return std::array{core::TaskDescriptor<Example>{"tick", &Example::tick}};
   }
+
   static constexpr auto commands() {
     return std::array{DAVEOS_COMMAND(Example, "run", Run, "Schedule tick")};
   }
-  Status Run(CommandArguments args) {
-    if (!args.empty()) return Status::invalid_argument;
+
+  core::Status Run(core::CommandArguments args) {
+    if (!args.empty()) return core::Status::invalid_argument;
     return scheduler().schedule(*this, &Example::tick, 0);
   }
+
   void tick() {
     scheduler().post(Event::sample, this);
     scheduler().stop();
   }
 };
 }  // namespace
+
 // Declaration-only platform: exercise core templates without any host/OS
 // dependencies.
 struct CompilePlatform : daveos::core::Platform<CompilePlatform> {
@@ -38,11 +47,12 @@ struct CompilePlatform : daveos::core::Platform<CompilePlatform> {
   void notify();
   void idle(daveos::core::Time, bool, std::uint64_t);
 };
+
 void Instantiate(CompilePlatform& platform) {
   Example module;
   auto scheduler = daveos::core::make_scheduler<Event>(
       platform, daveos::core::ModuleList{&module});
-  CommandDispatcher dispatcher(ModuleList{&module}, scheduler);
+  core::CommandDispatcher dispatcher(core::ModuleList{&module}, scheduler);
   dispatcher.dispatch("arm_compile run");
   scheduler.run();
   scheduler.snapshot();
@@ -53,13 +63,14 @@ void Instantiate(CompilePlatform& platform) {
 // Also instantiate the optional service and formatting path for the MCU ABI.
 void InstantiateLogging(CompilePlatform& platform) {
   Example module;
-  auto logger = make_logger(
-      platform,
-      SubscriberList{Subscriber{nullptr, [](void*, const LogRecord&) {}}});
-  auto scheduler = make_scheduler<Event>(platform, ModuleList{&module}, logger);
-  scheduler.log(Level::info, "ARM log %d", 1);
+  auto logger = core::make_logger(
+      platform, core::SubscriberList{core::Subscriber{
+                    nullptr, [](void*, const core::LogRecord&) {}}});
+  auto scheduler =
+      core::make_scheduler<Event>(platform, core::ModuleList{&module}, logger);
+  scheduler.log(core::Level::info, "ARM log %d", 1);
   scheduler.log_statistics();
-  logger.minimum(Level::debug);
+  logger.minimum(core::Level::debug);
   logger.counters();
   logger.reset();
   scheduler.run();

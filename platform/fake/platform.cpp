@@ -8,11 +8,13 @@ void Platform::arm(core::Time delay, Callback callback, void* context) {
   callback_ = callback;
   argument_ = context;
 }
+
 void Platform::disarm() {
   std::lock_guard lock(timer_mutex_);
   due_ = core::kForever;
   callback_ = nullptr;
 }
+
 void Platform::quiesce() {
   {
     std::lock_guard lock(timer_mutex_);
@@ -23,6 +25,7 @@ void Platform::quiesce() {
   CloseInterrupts();
   notify();
 }
+
 void Platform::advance(core::Time amount) {
   std::lock_guard lock(advance_mutex_);
   if (in_interrupt()) {
@@ -34,6 +37,7 @@ void Platform::advance(core::Time amount) {
   }
   AdvanceTo(core::After(now(), amount));
 }
+
 void Platform::AdvanceTo(core::Time target) {
   while (true) {
     Callback callback = nullptr;
@@ -53,6 +57,7 @@ void Platform::AdvanceTo(core::Time target) {
   if (target > now()) time_ = target;
   notify();
 }
+
 void Platform::idle(core::Time deadline, bool sleep, std::uint64_t observed) {
   if (sleep)
     ++sleeps_;

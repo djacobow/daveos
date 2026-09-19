@@ -41,6 +41,7 @@ enum class InitStage { stage1, stage2 };
 enum class Mode { once, repeat };
 // Application timer callbacks run in interrupt context, with no payload.
 using TimerCallback = void (*)();
+
 // Borrowed names used for log attribution; strings must outlive their use.
 struct Context {
   const char* module = "core";
@@ -61,38 +62,47 @@ template <typename Derived>
 class Platform {
   struct NoMutex {
     bool try_lock() { return false; }
+
     void unlock() {}
   };
 
  public:
   using Callback = void (*)(void*);
+
   // Application-facing hardware reset, independent of scheduler lifecycle.
   // Supported targets reset immediately without returning or draining logs.
   // Host/fake defaults leave all state unchanged.
   Status reset() { return Status::unsupported; }
+
   // A false result forces awake waiting. True still requires every module to
   // agree.
   bool can_sleep() const { return true; }
+
   // False makes scheduler stop requests successful no-ops while running.
   bool can_stop() const { return true; }
+
   // nullptr selects critical sections; otherwise provide try_lock()/unlock().
   NoMutex* queue_mutex() { return nullptr; }
 
  protected:
   ~Platform() = default;
 };
+
 // Scope-bound critical section. Nesting is delegated to the platform.
 template <typename P>
 class Guard {
  public:
   explicit Guard(P& platform) : platform_(platform) { platform_.enter(); }
+
   ~Guard() { platform_.leave(); }
+
   Guard(const Guard&) = delete;
   Guard& operator=(const Guard&) = delete;
 
  private:
   P& platform_;
 };
+
 // Temporarily attribute callbacks/logs to a module and restore the prior
 // context.
 template <typename P>
@@ -102,12 +112,14 @@ class ContextGuard {
       : platform_(platform), previous_(platform.context()) {
     platform.context(context);
   }
+
   ~ContextGuard() { platform_.context(previous_); }
 
  private:
   P& platform_;
   Context previous_;
 };
+
 // Saturating deadline addition, reserving kForever for the no-deadline
 // sentinel.
 constexpr Time After(Time now, Time delay) {

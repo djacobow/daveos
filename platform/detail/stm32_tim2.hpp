@@ -17,7 +17,9 @@ class Stm32Tim2 : public core::Platform<Derived> {
  public:
   using Callback = typename core::Platform<Derived>::Callback;
   Stm32Tim2() = default;
+
   ~Stm32Tim2() { quiesce(); }
+
   Stm32Tim2(const Stm32Tim2&) = delete;
   Stm32Tim2& operator=(const Stm32Tim2&) = delete;
   // Start a 1 MHz counter after clock setup. timer_hz must divide exactly by
@@ -44,8 +46,10 @@ class Stm32Tim2 : public core::Platform<Derived> {
   void quiesce();
   // TIM2 IRQ entry point. Services rollover and invokes any due callback once.
   void interrupt();
+
   // Embedded run() is intended to continue indefinitely.
   bool can_stop() const { return false; }
+
   bool in_interrupt() const;
   // ISR attribution is always core/interrupt; thread context is saved
   // separately.

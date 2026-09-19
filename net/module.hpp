@@ -17,14 +17,18 @@ class Module final : public core::Module<Module<Event>, Event> {
   // Optional configuration factory runs in stage1, after platform setup.
   explicit Module(Service& service, Config (*configure)() = nullptr)
       : service_(service), configure_(configure) {}
+
   static constexpr const char* name() { return "net"; }
+
   static constexpr auto tasks() {
     return std::array{core::TaskDescriptor<Module>{"poll", &Module::Poll}};
   }
+
   static constexpr auto commands() {
     return std::array{DAVEOS_COMMAND(Module, "status", Status,
                                      "Ethernet link, IPv4, and counters")};
   }
+
   core::Status init(core::InitStage stage) {
     if (stage != core::InitStage::stage1) return core::Status::ok;
     if (!(configure_ ? service_.init(configure_()) : service_.init())) {
@@ -44,11 +48,13 @@ class Module final : public core::Module<Module<Event>, Event> {
       Report(current);
     previous_ = current;
   }
+
   core::Status Status(core::CommandArguments args) {
     if (!args.empty()) return core::Status::invalid_argument;
     Report(service_.snapshot());
     return core::Status::ok;
   }
+
   void Report([[maybe_unused]] const Snapshot& s) {
     I_("%s, link %s, IP %" PRIu32 ".%" PRIu32 ".%" PRIu32 ".%" PRIu32,
        state_name(s.state), link_name(s.link), std::uint32_t(s.address[0]),
@@ -69,6 +75,7 @@ class Module final : public core::Module<Module<Event>, Event> {
        " errors %" PRIu32,
        s.rx, s.tx, s.dropped_rx, s.dropped_tx, s.errors);
   }
+
   Service& service_;
   Config (*configure_)();
   Snapshot previous_{};

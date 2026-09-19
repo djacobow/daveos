@@ -21,6 +21,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "appmain.h"
 
 /* USER CODE END Includes */
 
@@ -55,7 +56,6 @@ static void MX_GPDMA1_Init(void);
 static void MX_ICACHE_Init(void);
 static void MX_USART3_UART_Init(void);
 /* USER CODE BEGIN PFP */
-void DaveOS_Run(void);
 
 /* USER CODE END PFP */
 
@@ -100,7 +100,7 @@ int main(void)
   MX_GPDMA1_Init();
   MX_USART3_UART_Init();
   /* USER CODE BEGIN 2 */
-  DaveOS_Run();
+  appmain();
 
   /* USER CODE END 2 */
 

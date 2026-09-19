@@ -24,12 +24,14 @@ void HAL_PCD_MspInit(PCD_HandleTypeDef* handle) {
   HAL_NVIC_SetPriority(OTG_FS_IRQn, 6, 0);
   HAL_NVIC_EnableIRQ(OTG_FS_IRQn);
 }
+
 void HAL_PCD_MspDeInit(PCD_HandleTypeDef* handle) {
   (void)handle;
   HAL_NVIC_DisableIRQ(OTG_FS_IRQn);
   __HAL_RCC_USB2_OTG_FS_CLK_DISABLE();
   HAL_GPIO_DeInit(GPIOA, GPIO_PIN_9 | GPIO_PIN_11 | GPIO_PIN_12);
 }
+
 bool UsbBoardInitPcd(PCD_HandleTypeDef* pcd) {
   pcd->Instance = USB2_OTG_FS;
   pcd->Init.dev_endpoints = 6;

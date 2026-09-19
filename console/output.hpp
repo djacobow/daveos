@@ -17,6 +17,7 @@ struct TxCounters {
   std::uint64_t sent_bytes = 0;
   std::uint32_t transfers = 0;
 };
+
 // Task-side write()/flush() collect a complete display/log frame, then copy it
 // atomically into the filling half of caller-owned storage (DMA-accessible
 // when required by the driver). The other half belongs exclusively to the
@@ -35,6 +36,7 @@ class BufferedOutput {
   BufferedOutput(P& platform, Driver& driver,
                  std::array<std::uint8_t, 2 * Capacity>& storage)
       : platform_(platform), driver_(driver), storage_(storage) {}
+
   void write(std::string_view text) {
     if (overflow_) return;
     if (text.size() > frame_.size() - frame_size_) {
@@ -44,6 +46,7 @@ class BufferedOutput {
     std::copy(text.begin(), text.end(), frame_.begin() + frame_size_);
     frame_size_ += text.size();
   }
+
   daveos::core::Status flush() {
     daveos::core::Guard guard(platform_);
     auto size = std::exchange(frame_size_, 0);
@@ -57,6 +60,7 @@ class BufferedOutput {
     return Start() ? daveos::core::Status::ok
                    : daveos::core::Status::initialization_failed;
   }
+
   void complete() {
     daveos::core::Guard guard(platform_);
     if (!active_) return;
@@ -65,6 +69,7 @@ class BufferedOutput {
     active_ = 0;
     Start();
   }
+
   // A failed transfer has uncertain progress. Discard the queued tail rather
   // than sending a fragment of an old frame; subsequent frames can start
   // afresh.
@@ -73,6 +78,7 @@ class BufferedOutput {
     ++counters_.errors;
     pending_ = active_ = 0;
   }
+
   // Transport teardown must release hardware ownership and suppress stale
   // completion callbacks before this call. Serialize against write() too.
   void discard() {
@@ -80,10 +86,12 @@ class BufferedOutput {
     frame_size_ = pending_ = active_ = 0;
     overflow_ = false;
   }
+
   TxCounters counters() {
     daveos::core::Guard guard(platform_);
     return counters_;
   }
+
   std::size_t queued() {
     daveos::core::Guard guard(platform_);
     return pending_ + active_;
@@ -100,6 +108,7 @@ class BufferedOutput {
     error();
     return false;
   }
+
   P& platform_;
   Driver& driver_;
   std::array<std::uint8_t, 2 * Capacity>& storage_;

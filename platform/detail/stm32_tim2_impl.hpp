@@ -10,16 +10,19 @@ template <typename Derived>
 [[noreturn]] core::Status Stm32Tim2<Derived>::reset() {
   NVIC_SystemReset();
 }
+
 template <typename Derived>
 void Stm32Tim2<Derived>::enter() {
   auto mask = __get_PRIMASK();
   __disable_irq();
   if (depth_++ == 0) saved_mask_ = mask;
 }
+
 template <typename Derived>
 void Stm32Tim2<Derived>::leave() {
   if (--depth_ == 0) __set_PRIMASK(saved_mask_);
 }
+
 template <typename Derived>
 core::Status Stm32Tim2<Derived>::init(std::uint32_t timer_hz) {
   core::Guard guard(*this);
@@ -46,6 +49,7 @@ core::Status Stm32Tim2<Derived>::init(std::uint32_t timer_hz) {
   TIM2->CR1 = TIM_CR1_CEN;
   return core::Status::ok;
 }
+
 template <typename Derived>
 core::Time Stm32Tim2<Derived>::now() {
   core::Guard guard(*this);
@@ -59,6 +63,7 @@ core::Time Stm32Tim2<Derived>::now() {
   }
   return epoch_ + low;
 }
+
 template <typename Derived>
 void Stm32Tim2<Derived>::ProgramCompare() {
   TIM2->DIER = TIM_DIER_UIE;
@@ -71,6 +76,7 @@ void Stm32Tim2<Derived>::ProgramCompare() {
   // The compare may have passed while programming it, including delay zero.
   if (now() >= target) NVIC_SetPendingIRQ(TIM2_IRQn);
 }
+
 template <typename Derived>
 void Stm32Tim2<Derived>::arm(core::Time delay, Callback callback,
                              void* argument) {
@@ -80,6 +86,7 @@ void Stm32Tim2<Derived>::arm(core::Time delay, Callback callback,
   due_ = core::After(now(), delay);
   ProgramCompare();
 }
+
 template <typename Derived>
 void Stm32Tim2<Derived>::disarm() {
   core::Guard guard(*this);
@@ -89,6 +96,7 @@ void Stm32Tim2<Derived>::disarm() {
   callback_ = nullptr;
   due_ = core::kForever;
 }
+
 template <typename Derived>
 void Stm32Tim2<Derived>::quiesce() {
   core::Guard guard(*this);
@@ -100,6 +108,7 @@ void Stm32Tim2<Derived>::quiesce() {
   TIM2->CR1 = 0;
   initialized_ = false;
 }
+
 template <typename Derived>
 void Stm32Tim2<Derived>::interrupt() {
   Callback callback = nullptr;
@@ -120,28 +129,34 @@ void Stm32Tim2<Derived>::interrupt() {
   if (callback) callback(argument);
   notify();
 }
+
 template <typename Derived>
 bool Stm32Tim2<Derived>::in_interrupt() const {
   return __get_IPSR() != 0;
 }
+
 template <typename Derived>
 core::Context Stm32Tim2<Derived>::context() const {
   return in_interrupt() ? core::Context{"core", "interrupt"} : context_;
 }
+
 template <typename Derived>
 void Stm32Tim2<Derived>::context(core::Context value) {
   if (!in_interrupt()) context_ = value;
 }
+
 template <typename Derived>
 std::uint64_t Stm32Tim2<Derived>::sequence() {
   core::Guard guard(*this);
   return sequence_;
 }
+
 template <typename Derived>
 void Stm32Tim2<Derived>::notify() {
   core::Guard guard(*this);
   ++sequence_;
 }
+
 template <typename Derived>
 void Stm32Tim2<Derived>::idle(core::Time deadline, bool sleep,
                               std::uint64_t observed) {

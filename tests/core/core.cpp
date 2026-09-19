@@ -3,90 +3,97 @@
 #include <thread>
 
 #include "support.hpp"
-using namespace testing;
+
+namespace core = daveos::core;
+namespace test = testing;
 
 TEST_CASE("scheduler construction does not require constructed modules") {
-  Fake platform;
-  alignas(TestModule) std::byte storage[sizeof(TestModule)];
-  auto* module = reinterpret_cast<TestModule*>(storage);
+  test::Fake platform;
+  alignas(test::TestModule) std::byte storage[sizeof(test::TestModule)];
+  auto* module = reinterpret_cast<test::TestModule*>(storage);
   // The scheduler may retain addresses and static descriptors, but must not
   // touch the module until init. This deliberately forms a pointer to aligned
   // storage before the object lifetime starts; construct_at starts that
   // lifetime before init() dereferences it. This models construction across
   // TUs.
-  auto scheduler = make_scheduler<Event>(platform, ModuleList{module});
-  auto destroy = [](TestModule* p) { std::destroy_at(p); };
-  std::unique_ptr<TestModule, decltype(destroy)> owned(
+  auto scheduler =
+      core::make_scheduler<test::Event>(platform, core::ModuleList{module});
+  auto destroy = [](test::TestModule* p) { std::destroy_at(p); };
+  std::unique_ptr<test::TestModule, decltype(destroy)> owned(
       std::construct_at(module), destroy);
-  std::vector<InitStage> stages;
-  owned->initializer = [&](InitStage stage) {
+  std::vector<core::InitStage> stages;
+  owned->initializer = [&](core::InitStage stage) {
     CHECK(&owned->scheduler() == &scheduler);
     stages.push_back(stage);
-    return Status::ok;
+    return core::Status::ok;
   };
-  CHECK(scheduler.init() == Status::ok);
-  CHECK(stages == std::vector{InitStage::stage1, InitStage::stage2});
+  CHECK(scheduler.init() == core::Status::ok);
+  CHECK(stages ==
+        std::vector{core::InitStage::stage1, core::InitStage::stage2});
 }
 
 TEST_CASE("startup is two passes; task deadlines start at run") {
-  Fake platform;
-  NamedModule<"one"> one;
-  NamedModule<"two"> two;
+  test::Fake platform;
+  test::NamedModule<"one"> one;
+  test::NamedModule<"two"> two;
   std::vector<int> stages;
-  auto scheduler = make_scheduler<Event>(platform, ModuleList{&one, &two});
-  one.initializer = [&](InitStage stage) {
-    stages.push_back(stage == InitStage::stage1 ? 1 : 3);
-    if (stage == InitStage::stage1) {
+  auto scheduler =
+      core::make_scheduler<test::Event>(platform, core::ModuleList{&one, &two});
+  one.initializer = [&](core::InitStage stage) {
+    stages.push_back(stage == core::InitStage::stage1 ? 1 : 3);
+    if (stage == core::InitStage::stage1) {
       CHECK(&one.scheduler() == &scheduler);
-      CHECK(scheduler.schedule(one, &decltype(one)::first, 10) == Status::ok);
+      CHECK(scheduler.schedule(one, &decltype(one)::first, 10) ==
+            core::Status::ok);
       platform.advance(100);
     }
-    return Status::ok;
+    return core::Status::ok;
   };
-  two.initializer = [&](InitStage stage) {
-    stages.push_back(stage == InitStage::stage1 ? 2 : 4);
-    return Status::ok;
+  two.initializer = [&](core::InitStage stage) {
+    stages.push_back(stage == core::InitStage::stage1 ? 2 : 4);
+    return core::Status::ok;
   };
-  Time fired = 0;
+  core::Time fired = 0;
   one.first_action = [&] {
     fired = platform.now();
     scheduler.stop();
   };
-  CHECK(scheduler.stop() == Status::not_running);
-  CHECK(scheduler.init() == Status::ok);
+  CHECK(scheduler.stop() == core::Status::not_running);
+  CHECK(scheduler.init() == core::Status::ok);
   CHECK(stages == std::vector<int>{1, 2, 3, 4});
-  CHECK(scheduler.init() == Status::already_initialized);
+  CHECK(scheduler.init() == core::Status::already_initialized);
   platform.advance(500);
-  CHECK(scheduler.run() == Status::ok);
+  CHECK(scheduler.run() == core::Status::ok);
   CHECK(fired == 610);
   CHECK(scheduler.snapshot().tasks[0].late_starts == 0);
-  CHECK(scheduler.run() == Status::already_run);
-  CHECK(scheduler.stop() == Status::not_running);
+  CHECK(scheduler.run() == core::Status::already_run);
+  CHECK(scheduler.stop() == core::Status::not_running);
 }
 
 TEST_CASE("initialization failure discards work and flushes diagnostics") {
-  Fake platform;
-  TestModule module;
-  NamedModule<"later"> later;
-  Sink sink;
+  test::Fake platform;
+  test::TestModule module;
+  test::NamedModule<"later"> later;
+  test::Sink sink;
   bool ran = false;
-  auto logger = make_logger(platform, SubscriberList{sink.subscriber()});
-  auto scheduler =
-      make_scheduler<Event>(platform, ModuleList{&module, &later}, logger);
+  auto logger =
+      core::make_logger(platform, core::SubscriberList{sink.subscriber()});
+  auto scheduler = core::make_scheduler<test::Event>(
+      platform, core::ModuleList{&module, &later}, logger);
   module.first_action = [&] { ran = true; };
-  module.initializer = [&](InitStage) {
-    scheduler.schedule(module, &TestModule::first, 0);
-    scheduler.post(Event::first);
-    scheduler.log(Level::error, "startup failed");
-    return Status::initialization_failed;
+  module.initializer = [&](core::InitStage) {
+    scheduler.schedule(module, &test::TestModule::first, 0);
+    scheduler.post(test::Event::first);
+    scheduler.log(core::Level::error, "startup failed");
+    return core::Status::initialization_failed;
   };
-  later.initializer = [&](InitStage) {
+  later.initializer = [&](core::InitStage) {
     ran = true;
-    return Status::ok;
+    return core::Status::ok;
   };
-  CHECK(scheduler.init() == Status::initialization_failed);
-  CHECK(scheduler.run() == Status::initialization_failed);
-  CHECK(scheduler.init() == Status::initialization_failed);
+  CHECK(scheduler.init() == core::Status::initialization_failed);
+  CHECK(scheduler.run() == core::Status::initialization_failed);
+  CHECK(scheduler.init() == core::Status::initialization_failed);
   CHECK_FALSE(ran);
 #if DAVEOS_LOGGING
   REQUIRE(sink.records.size() == 1);
@@ -94,28 +101,29 @@ TEST_CASE("initialization failure discards work and flushes diagnostics") {
 #else
   CHECK(sink.records.empty());
 #endif
-  CHECK(scheduler.post(Event::first) == Status::not_running);
+  CHECK(scheduler.post(test::Event::first) == core::Status::not_running);
 }
 
 TEST_CASE(
     "overdue repeats interleave by scheduled time and statistics measure "
     "duration") {
-  Fake platform;
-  TestModule module;
+  test::Fake platform;
+  test::TestModule module;
   std::vector<char> order;
-  auto scheduler = make_scheduler<Event>(platform, ModuleList{&module});
+  auto scheduler =
+      core::make_scheduler<test::Event>(platform, core::ModuleList{&module});
   int calls = 0;
   module.first_action = [&] {
     order.push_back('a');
     platform.advance(++calls == 1 ? 25 : 1);
-    if (calls == 4) scheduler.cancel(module, &TestModule::first);
+    if (calls == 4) scheduler.cancel(module, &test::TestModule::first);
   };
   module.second_action = [&] { order.push_back('b'); };
   module.third_action = [&] { scheduler.stop(); };
-  scheduler.schedule(module, &TestModule::first, 10, Mode::repeat);
-  scheduler.schedule(module, &TestModule::second, 25);
-  scheduler.schedule(module, &TestModule::third, 50);
-  CHECK(scheduler.run() == Status::ok);
+  scheduler.schedule(module, &test::TestModule::first, 10, core::Mode::repeat);
+  scheduler.schedule(module, &test::TestModule::second, 25);
+  scheduler.schedule(module, &test::TestModule::third, 50);
+  CHECK(scheduler.run() == core::Status::ok);
   CHECK(order == std::vector<char>{'a', 'a', 'b', 'a', 'a'});
   auto stats = scheduler.snapshot();
   CHECK(stats.tasks[0].executions == 4);
@@ -129,48 +137,51 @@ TEST_CASE(
 }
 
 TEST_CASE("replacement and self-rescheduling take precedence") {
-  Fake platform;
-  TestModule module;
-  auto scheduler = make_scheduler<Event>(platform, ModuleList{&module});
-  std::vector<Time> times;
+  test::Fake platform;
+  test::TestModule module;
+  auto scheduler =
+      core::make_scheduler<test::Event>(platform, core::ModuleList{&module});
+  std::vector<core::Time> times;
   module.first_action = [&] {
     times.push_back(platform.now());
     if (times.size() == 1)
-      scheduler.schedule(module, &TestModule::first, 7);
+      scheduler.schedule(module, &test::TestModule::first, 7);
     else
       scheduler.stop();
   };
-  CHECK(scheduler.cancel(module, &TestModule::first) == Status::not_found);
-  scheduler.schedule(module, &TestModule::first, 50);
-  CHECK(scheduler.schedule(module, &TestModule::first, 0, Mode::repeat) ==
-        Status::invalid_argument);
-  scheduler.schedule(module, &TestModule::first, 10, Mode::repeat);
-  CHECK(scheduler.run() == Status::ok);
-  CHECK(times == std::vector<Time>{10, 17});
+  CHECK(scheduler.cancel(module, &test::TestModule::first) ==
+        core::Status::not_found);
+  scheduler.schedule(module, &test::TestModule::first, 50);
+  CHECK(scheduler.schedule(module, &test::TestModule::first, 0,
+                           core::Mode::repeat) ==
+        core::Status::invalid_argument);
+  scheduler.schedule(module, &test::TestModule::first, 10, core::Mode::repeat);
+  CHECK(scheduler.run() == core::Status::ok);
+  CHECK(times == std::vector<core::Time>{10, 17});
 }
 
 TEST_CASE(
     "events preserve broadcasts, exclude sender and overflow explicitly") {
-  Fake platform;
-  NamedModule<"sender"> sender;
-  NamedModule<"one"> one;
-  NamedModule<"two"> two;
-  auto scheduler =
-      make_scheduler<Event, 1>(platform, ModuleList{&sender, &one, &two});
+  test::Fake platform;
+  test::NamedModule<"sender"> sender;
+  test::NamedModule<"one"> one;
+  test::NamedModule<"two"> two;
+  auto scheduler = core::make_scheduler<test::Event, 1>(
+      platform, core::ModuleList{&sender, &one, &two});
   std::vector<int> received;
-  sender.receiver = [&](Event) { received.push_back(0); };
-  one.receiver = [&](Event event) {
-    received.push_back(event == Event::first ? 1 : 3);
-    if (event == Event::first)
-      CHECK(scheduler.post(Event::second, &sender) == Status::ok);
+  sender.receiver = [&](test::Event) { received.push_back(0); };
+  one.receiver = [&](test::Event event) {
+    received.push_back(event == test::Event::first ? 1 : 3);
+    if (event == test::Event::first)
+      CHECK(scheduler.post(test::Event::second, &sender) == core::Status::ok);
   };
-  two.receiver = [&](Event event) {
-    received.push_back(event == Event::first ? 2 : 4);
-    if (event == Event::second) scheduler.stop();
+  two.receiver = [&](test::Event event) {
+    received.push_back(event == test::Event::first ? 2 : 4);
+    if (event == test::Event::second) scheduler.stop();
   };
-  CHECK(scheduler.post(Event::first, &sender) == Status::ok);
-  CHECK(scheduler.post(Event::second) == Status::full);
-  CHECK(scheduler.run() == Status::ok);
+  CHECK(scheduler.post(test::Event::first, &sender) == core::Status::ok);
+  CHECK(scheduler.post(test::Event::second) == core::Status::full);
+  CHECK(scheduler.run() == core::Status::ok);
   REQUIRE(received.size() == 4);
   // No promise about recipient order, only complete first broadcast before
   // second.
@@ -180,18 +191,18 @@ TEST_CASE(
 }
 
 TEST_CASE("queue wraparound, failure preservation and conveniences") {
-  Queue<int, 2> queue;
+  core::Queue<int, 2> queue;
   int out = 99;
-  CHECK(queue.pop(out) == Status::empty);
+  CHECK(queue.pop(out) == core::Status::empty);
   CHECK(out == 99);
-  CHECK(queue.push(1) == Status::ok);
-  CHECK(queue.push(2) == Status::ok);
-  CHECK(queue.push(3) == Status::full);
-  CHECK(queue.peek(out) == Status::ok);
+  CHECK(queue.push(1) == core::Status::ok);
+  CHECK(queue.push(2) == core::Status::ok);
+  CHECK(queue.push(3) == core::Status::full);
+  CHECK(queue.peek(out) == core::Status::ok);
   CHECK(out == 1);
   CHECK(queue.size() == 2);
-  CHECK(queue.pop(out) == Status::ok);
-  CHECK(queue.push(3) == Status::ok);
+  CHECK(queue.pop(out) == core::Status::ok);
+  CHECK(queue.push(3) == core::Status::ok);
   queue.pop(out);
   CHECK(out == 2);
   queue.pop(out);
@@ -204,8 +215,8 @@ TEST_CASE("queue wraparound, failure preservation and conveniences") {
 
 TEST_CASE(
     "thread-safe queue reports mutex contention without modifying output") {
-  Fake platform;
-  ThreadSafeQueue<int, 2, Fake> queue(platform);
+  test::Fake platform;
+  core::ThreadSafeQueue<int, 2, test::Fake> queue(platform);
   std::binary_semaphore locked(0), release(0);
   std::thread holder([&] {
     platform.queue_mutex()->try_lock();
@@ -215,58 +226,63 @@ TEST_CASE(
   });
   locked.acquire();
   int out = 42;
-  CHECK(queue.pop(out) == Status::busy);
-  CHECK(queue.peek(out) == Status::busy);
-  CHECK(queue.size().status == Status::busy);
+  CHECK(queue.pop(out) == core::Status::busy);
+  CHECK(queue.peek(out) == core::Status::busy);
+  CHECK(queue.size().status == core::Status::busy);
   CHECK(out == 42);
   release.release();
   holder.join();
-  CHECK(queue.push(9) == Status::ok);
-  CHECK(queue.peek(out) == Status::ok);
+  CHECK(queue.push(9) == core::Status::ok);
+  CHECK(queue.peek(out) == core::Status::ok);
   CHECK(out == 9);
 }
 
 TEST_CASE("interrupt scheduling during initialization uses dispatch epoch") {
-  Fake platform;
-  TestModule module;
-  auto scheduler = make_scheduler<Event>(platform, ModuleList{&module});
-  Time start = 0;
-  module.initializer = [&](InitStage stage) {
-    if (stage == InitStage::stage1) {
+  test::Fake platform;
+  test::TestModule module;
+  auto scheduler =
+      core::make_scheduler<test::Event>(platform, core::ModuleList{&module});
+  core::Time start = 0;
+  module.initializer = [&](core::InitStage stage) {
+    if (stage == core::InitStage::stage1) {
       platform.interrupt(
           [](void* context) {
-            auto& module = *static_cast<TestModule*>(context);
-            module.scheduler().schedule(module, &TestModule::first, 12);
+            auto& module = *static_cast<test::TestModule*>(context);
+            module.scheduler().schedule(module, &test::TestModule::first, 12);
           },
           &module);
       platform.advance(50);
     }
-    return Status::ok;
+    return core::Status::ok;
   };
   module.first_action = [&] {
     start = platform.now();
     scheduler.stop();
   };
-  CHECK(scheduler.run() == Status::ok);
+  CHECK(scheduler.run() == core::Status::ok);
   CHECK(start == 62);
 }
 
 TEST_CASE("CRTP modules and platforms have no virtual dispatch") {
-  STATIC_REQUIRE_FALSE(std::is_polymorphic_v<TestModule>);
-  STATIC_REQUIRE_FALSE(std::is_polymorphic_v<Fake>);
-  STATIC_REQUIRE_FALSE(std::is_polymorphic_v<SchedulerInterface<Event>>);
+  STATIC_REQUIRE_FALSE(std::is_polymorphic_v<test::TestModule>);
+  STATIC_REQUIRE_FALSE(std::is_polymorphic_v<test::Fake>);
+  STATIC_REQUIRE_FALSE(
+      std::is_polymorphic_v<core::SchedulerInterface<test::Event>>);
 }
 
 TEST_CASE("thread-safe queue falls back to critical sections without a mutex") {
   struct CriticalOnly : daveos::core::Platform<CriticalOnly> {
     unsigned depth = 0;
+
     void enter() { ++depth; }
+
     void leave() { --depth; }
   } platform;
-  ThreadSafeQueue<int, 2, CriticalOnly> queue(platform);
-  CHECK(queue.push(3) == Status::ok);
+
+  core::ThreadSafeQueue<int, 2, CriticalOnly> queue(platform);
+  CHECK(queue.push(3) == core::Status::ok);
   int value = 0;
-  CHECK(queue.pop(value) == Status::ok);
+  CHECK(queue.pop(value) == core::Status::ok);
   CHECK(value == 3);
   CHECK(platform.depth == 0);
 }
@@ -283,18 +299,20 @@ static_assert(std::string_view(enum_name(static_cast<Value>(99))) == "unknown");
 TEST_CASE(
     "enum names preserve scoped values and handle invalid representations") {
   CHECK(std::string_view(enum_name(enum_test::Value::sparse)) == "sparse");
-  CHECK(std::string_view(enum_name(Status::invalid_argument)) ==
+  CHECK(std::string_view(enum_name(core::Status::invalid_argument)) ==
         "invalid_argument");
-  CHECK(std::string_view(enum_name(Status::too_many_arguments)) ==
+  CHECK(std::string_view(enum_name(core::Status::too_many_arguments)) ==
         "too_many_arguments");
-  CHECK(std::string_view(enum_name(static_cast<Status>(-1))) == "unknown");
-  CHECK(std::string_view(enum_name(static_cast<Status>(999))) == "unknown");
+  CHECK(std::string_view(enum_name(static_cast<core::Status>(-1))) ==
+        "unknown");
+  CHECK(std::string_view(enum_name(static_cast<core::Status>(999))) ==
+        "unknown");
 }
 
 TEST_CASE(
     "Fake platform reports unsupported hardware reset without changing time") {
   daveos::platform::fake::Platform platform;
   platform.advance(123);
-  CHECK(platform.reset() == Status::unsupported);
+  CHECK(platform.reset() == core::Status::unsupported);
   CHECK(platform.now() == 123);
 }

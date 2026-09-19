@@ -15,62 +15,75 @@ extern "C" {
 #include "lwip/pbuf.h"
 }
 
-using namespace daveos::net;
+
+namespace net = daveos::net;
+namespace core = daveos::core;
+
 namespace {
 bool track_heap = false;
 unsigned heap_calls = 0;
+
 struct Packet {
   std::array<std::uint8_t, 1536> bytes{};
   std::size_t size = 0;
 };
+
 struct Fake {
   std::uint32_t now = 0;
-  Link state = Link::full100;
+  net::Link state = net::Link::full100;
   bool init_ok = true, tx_ok = true, stopped = false;
   std::array<Packet, 32> rx{}, tx{};
   std::size_t consumed = 0, received = 0, sent = 0;
-  Driver driver() {
-    return {this,
-            [](void* p, const Mac&) { return static_cast<Fake*>(p)->init_ok; },
-            [](void* p) { static_cast<Fake*>(p)->stopped = true; },
-            [](void*) {},
-            [](void* p) { return static_cast<Fake*>(p)->state; },
-            [](void* p, std::span<std::uint8_t> bytes) -> std::size_t {
-              auto& f = *static_cast<Fake*>(p);
-              if (f.consumed == f.received) return 0;
-              auto& packet = f.rx[f.consumed++];
-              if (packet.size <= bytes.size())
-                std::copy_n(packet.bytes.begin(), packet.size, bytes.begin());
-              return packet.size;
-            },
-            [](void* p, std::span<const std::uint8_t> bytes) {
-              auto& f = *static_cast<Fake*>(p);
-              if (!f.tx_ok || f.sent == f.tx.size()) return false;
-              auto& packet = f.tx[f.sent++];
-              packet.size = bytes.size();
-              std::copy(bytes.begin(), bytes.end(), packet.bytes.begin());
-              return true;
-            },
-            [](void*) -> std::uint32_t { return 0; }};
+
+  net::Driver driver() {
+    return {
+        this,
+        [](void* p, const net::Mac&) { return static_cast<Fake*>(p)->init_ok; },
+        [](void* p) { static_cast<Fake*>(p)->stopped = true; },
+        [](void*) {},
+        [](void* p) { return static_cast<Fake*>(p)->state; },
+        [](void* p, std::span<std::uint8_t> bytes) -> std::size_t {
+          auto& f = *static_cast<Fake*>(p);
+          if (f.consumed == f.received) return 0;
+          auto& packet = f.rx[f.consumed++];
+          if (packet.size <= bytes.size())
+            std::copy_n(packet.bytes.begin(), packet.size, bytes.begin());
+          return packet.size;
+        },
+        [](void* p, std::span<const std::uint8_t> bytes) {
+          auto& f = *static_cast<Fake*>(p);
+          if (!f.tx_ok || f.sent == f.tx.size()) return false;
+          auto& packet = f.tx[f.sent++];
+          packet.size = bytes.size();
+          std::copy(bytes.begin(), bytes.end(), packet.bytes.begin());
+          return true;
+        },
+        [](void*) -> std::uint32_t { return 0; }};
   }
-  Clock clock() {
+
+  net::Clock clock() {
     return {this, [](void* p) { return static_cast<Fake*>(p)->now; }};
   }
+
   void queue(const Packet& p) {
     REQUIRE(received < rx.size());
     rx[received++] = p;
   }
 };
-Config Static() {
-  Config c;
+
+net::Config Static() {
+  net::Config c;
   c.dhcp = false;
   return c;
 }
-constexpr Mac peer{2, 0, 0, 0, 0, 99};
+
+constexpr net::Mac peer{2, 0, 0, 0, 0, 99};
+
 void Put16(Packet& p, std::size_t i, unsigned value) {
   p.bytes[i] = value >> 8;
   p.bytes[i + 1] = value;
 }
+
 std::uint16_t Checksum(const std::uint8_t* p, std::size_t n) {
   std::uint32_t sum = 0;
   for (std::size_t i = 0; i < n; i += 2)
@@ -78,13 +91,15 @@ std::uint16_t Checksum(const std::uint8_t* p, std::size_t n) {
   while (sum >> 16) sum = (sum & 65535) + (sum >> 16);
   return static_cast<std::uint16_t>(~sum);
 }
-Packet Ethernet(unsigned type, const Mac& dest = Static().mac) {
+
+Packet Ethernet(unsigned type, const net::Mac& dest = Static().mac) {
   Packet p;
   std::copy(dest.begin(), dest.end(), p.bytes.begin());
   std::copy(peer.begin(), peer.end(), p.bytes.begin() + 6);
   Put16(p, 12, type);
   return p;
 }
+
 Packet Arp() {
   auto p = Ethernet(0x806, {255, 255, 255, 255, 255, 255});
   p.size = 42;
@@ -94,22 +109,24 @@ Packet Arp() {
   p.bytes[19] = 4;
   Put16(p, 20, 1);
   std::copy(peer.begin(), peer.end(), p.bytes.begin() + 22);
-  const Ipv4 ip{192, 168, 50, 1};
+  const net::Ipv4 ip{192, 168, 50, 1};
   std::copy(ip.begin(), ip.end(), p.bytes.begin() + 28);
   auto config = Static();
   std::copy(config.address.begin(), config.address.end(), p.bytes.begin() + 38);
   return p;
 }
-void Ip(Packet& p, unsigned protocol, const Ipv4& dest) {
+
+void Ip(Packet& p, unsigned protocol, const net::Ipv4& dest) {
   p.bytes[14] = 0x45;
   Put16(p, 16, p.size - 14);
   p.bytes[22] = 64;
   p.bytes[23] = protocol;
-  const Ipv4 ip{192, 168, 50, 1};
+  const net::Ipv4 ip{192, 168, 50, 1};
   std::copy(ip.begin(), ip.end(), p.bytes.begin() + 26);
   std::copy(dest.begin(), dest.end(), p.bytes.begin() + 30);
   Put16(p, 24, Checksum(p.bytes.data() + 14, 20));
 }
+
 Packet Ping() {
   auto p = Ethernet(0x800);
   p.size = 46;
@@ -124,6 +141,7 @@ Packet Ping() {
   Ip(p, 1, Static().address);
   return p;
 }
+
 Packet Dhcp(const Packet& request, unsigned type) {
   auto p = Ethernet(0x800);
   auto* b = p.bytes.data() + 42;
@@ -131,7 +149,7 @@ Packet Dhcp(const Packet& request, unsigned type) {
   b[1] = 1;
   b[2] = 6;
   std::copy_n(request.bytes.begin() + 46, 4, b + 4);
-  const Ipv4 offered{192, 168, 50, 23};
+  const net::Ipv4 offered{192, 168, 50, 23};
   std::copy(offered.begin(), offered.end(), b + 16);
   auto mac = Static().mac;
   std::copy(mac.begin(), mac.end(), b + 28);
@@ -155,18 +173,22 @@ extern "C" void* __real_malloc(std::size_t);
 extern "C" void* __real_calloc(std::size_t, std::size_t);
 extern "C" void* __real_realloc(void*, std::size_t);
 extern "C" void __real_free(void*);
+
 extern "C" void* __wrap_malloc(std::size_t n) {
   if (track_heap) ++heap_calls;
   return __real_malloc(n);
 }
+
 extern "C" void* __wrap_calloc(std::size_t n, std::size_t s) {
   if (track_heap) ++heap_calls;
   return __real_calloc(n, s);
 }
+
 extern "C" void* __wrap_realloc(void* p, std::size_t n) {
   if (track_heap) ++heap_calls;
   return __real_realloc(p, n);
 }
+
 extern "C" void __wrap_free(void* p) {
   if (track_heap) ++heap_calls;
   __real_free(p);
@@ -174,14 +196,14 @@ extern "C" void __wrap_free(void* p) {
 
 TEST_CASE("Static IPv4 answers ARP and ping without runtime allocation") {
   Fake f;
-  Service s(f.driver(), f.clock(), Static());
+  net::Service s(f.driver(), f.clock(), Static());
   heap_calls = 0;
   track_heap = true;
   const bool ok = s.init();
   s.poll();
   track_heap = false;
   REQUIRE(ok);
-  CHECK(s.snapshot().state == State::ready);
+  CHECK(s.snapshot().state == net::State::ready);
   f.sent = 0;
   f.queue(Arp());
   f.queue(Ping());
@@ -200,35 +222,37 @@ TEST_CASE("Static IPv4 answers ARP and ping without runtime allocation") {
   CHECK(heap_calls == 0);
   CHECK(f.stopped);
 }
+
 TEST_CASE("DHCP acquires an address and restarts after link loss") {
   Fake f;
-  Service s(f.driver(), f.clock());
+  net::Service s(f.driver(), f.clock());
   REQUIRE(s.init());
   s.poll();
   REQUIRE(f.sent > 0);
   auto discover = f.tx[0];
-  CHECK(s.snapshot().state == State::addressing);
+  CHECK(s.snapshot().state == net::State::addressing);
   f.queue(Dhcp(discover, 2));
   s.poll();
   REQUIRE(f.sent >= 2);
   f.queue(Dhcp(discover, 5));
   s.poll();
-  CHECK(s.snapshot().address == Ipv4{192, 168, 50, 23});
-  CHECK(s.snapshot().state == State::ready);
-  f.state = Link::down;
+  CHECK(s.snapshot().address == net::Ipv4{192, 168, 50, 23});
+  CHECK(s.snapshot().state == net::State::ready);
+  f.state = net::Link::down;
   f.now += 250;
   s.poll();
-  CHECK(s.snapshot().address == Ipv4{});
-  CHECK(s.snapshot().state == State::link_down);
-  f.state = Link::full100;
+  CHECK(s.snapshot().address == net::Ipv4{});
+  CHECK(s.snapshot().state == net::State::link_down);
+  f.state = net::Link::full100;
   f.now += 250;
   s.poll();
-  CHECK(s.snapshot().state == State::addressing);
+  CHECK(s.snapshot().state == net::State::addressing);
 }
+
 TEST_CASE("DHCP retries without incoming packets and across clock wrap") {
   Fake f;
   f.now = 0xfffff000U;
-  Service s(f.driver(), f.clock());
+  net::Service s(f.driver(), f.clock());
   REQUIRE(s.init());
   s.poll();
   auto count = f.sent;
@@ -237,11 +261,12 @@ TEST_CASE("DHCP retries without incoming packets and across clock wrap") {
     s.poll();
   }
   CHECK(f.sent > count);
-  CHECK(s.snapshot().state == State::addressing);
+  CHECK(s.snapshot().state == net::State::addressing);
 }
+
 TEST_CASE("RX is bounded and packet pool exhaustion recovers") {
   Fake f;
-  Service s(f.driver(), f.clock(), Static());
+  net::Service s(f.driver(), f.clock(), Static());
   REQUIRE(s.init());
   s.poll();
   for (unsigned i = 0; i < 9; ++i) f.queue(Arp());
@@ -263,9 +288,10 @@ TEST_CASE("RX is bounded and packet pool exhaustion recovers") {
   s.poll();
   CHECK(s.snapshot().dropped_tx > 0);
 }
+
 TEST_CASE("Invalid frames do not poison later input") {
   Fake f;
-  Service s(f.driver(), f.clock(), Static());
+  net::Service s(f.driver(), f.clock(), Static());
   REQUIRE(s.init());
   s.poll();
   Packet oversized;
@@ -279,12 +305,13 @@ TEST_CASE("Invalid frames do not poison later input") {
   CHECK(s.snapshot().dropped_rx >= 1);
   CHECK(f.tx[f.sent - 1].bytes[21] == 2);
 }
+
 TEST_CASE("Network configuration is acquired during stage1") {
-  using namespace daveos::core;
+
   enum class Event {};
   Fake driver;
   daveos::platform::fake::Platform platform;
-  Service service(driver.driver(), driver.clock());
+  net::Service service(driver.driver(), driver.clock());
   static int configured = 0;
   configured = 0;
   daveos::net::Module<Event> network(service, [] {
@@ -293,14 +320,15 @@ TEST_CASE("Network configuration is acquired during stage1") {
     config.mac = peer;
     return config;
   });
-  auto scheduler = make_scheduler<Event>(platform, ModuleList{&network});
+  auto scheduler =
+      core::make_scheduler<Event>(platform, core::ModuleList{&network});
   CHECK(configured == 0);
-  CHECK(scheduler.init() == Status::ok);
+  CHECK(scheduler.init() == core::Status::ok);
   CHECK(configured == 1);
   CHECK(service.snapshot().mac == peer);
   CHECK_FALSE(service.init(Static()));
   CHECK(service.snapshot().mac == peer);
-  CHECK(scheduler.init() == Status::already_initialized);
+  CHECK(scheduler.init() == core::Status::already_initialized);
   CHECK(configured == 1);
 }
 
@@ -308,28 +336,33 @@ TEST_CASE("Networking hardware failure leaves unrelated module running") {
   enum class Event {};
   Fake driver;
   driver.init_ok = false;
-  Service s(driver.driver(), driver.clock());
+  net::Service s(driver.driver(), driver.clock());
   daveos::platform::fake::Platform platform;
   daveos::net::Module<Event> network(s);
+
   struct Other : daveos::core::Module<Other, Event> {
     bool called = false;
+
     static constexpr const char* name() { return "other"; }
+
     static constexpr auto tasks() {
       return std::array{
           daveos::core::TaskDescriptor<Other>{"run", &Other::Run}};
     }
+
     void Run() {
       called = true;
       scheduler().stop();
     }
   } other;
+
   auto scheduler = daveos::core::make_scheduler<Event>(
       platform, daveos::core::ModuleList{&network, &other});
   REQUIRE(scheduler.schedule(other, &Other::Run, 1) ==
           daveos::core::Status::ok);
   REQUIRE(scheduler.run() == daveos::core::Status::ok);
   CHECK(other.called);
-  CHECK(s.snapshot().state == State::hardware_fault);
+  CHECK(s.snapshot().state == net::State::hardware_fault);
   CHECK_FALSE(s.init());
 }
 
@@ -341,10 +374,12 @@ std::uint32_t Get32(const Packet& p, std::size_t i) {
          (std::uint32_t(p.bytes[i + 1]) << 16) |
          (std::uint32_t(p.bytes[i + 2]) << 8) | p.bytes[i + 3];
 }
+
 void Put32(Packet& p, std::size_t i, std::uint32_t n) {
   Put16(p, i, n >> 16);
   Put16(p, i + 2, n & 65535);
 }
+
 Packet Tcp(std::uint16_t port, std::uint32_t seq, std::uint32_t ack,
            std::uint8_t flags, std::string_view text = {}) {
   auto p = Ethernet(0x800);
@@ -367,7 +402,8 @@ Packet Tcp(std::uint16_t port, std::uint32_t seq, std::uint32_t ack,
   Put16(p, 50, Checksum(pseudo.bytes.data(), p.size - 22));
   return p;
 }
-std::uint32_t Connect(Fake& f, Service& service, std::uint16_t port) {
+
+std::uint32_t Connect(Fake& f, net::Service& service, std::uint16_t port) {
   f.queue(Tcp(port, 100, 0, 2));
   service.poll();
   REQUIRE(f.sent != 0);
@@ -379,12 +415,13 @@ std::uint32_t Connect(Fake& f, Service& service, std::uint16_t port) {
   return seq + 1;
 }
 }  // namespace
+
 TEST_CASE("TCP server isolates clients and bounds session buffers") {
   Fake f;
-  Service service(f.driver(), f.clock(), Static());
+  net::Service service(f.driver(), f.clock(), Static());
   REQUIRE(service.init());
   service.poll();
-  TcpServer server(service);
+  net::TcpServer server(service);
   server.poll();
   f.queue(Arp());  // Teach the stack our test peer's MAC.
   service.poll();
@@ -427,12 +464,12 @@ TEST_CASE("TCP server isolates clients and bounds session buffers") {
   REQUIRE(server.read(input) == 0);
   REQUIRE(
       server.write(full));  // Previous session's queued output was discarded.
-  f.state = Link::down;
+  f.state = net::Link::down;
   f.now += 250;
   service.poll();
   server.poll();
   REQUIRE_FALSE(server.connected());
-  f.state = Link::full100;
+  f.state = net::Link::full100;
   f.now += 250;
   service.poll();
   server.poll();
@@ -461,27 +498,33 @@ TEST_CASE("TCP server isolates clients and bounds session buffers") {
 namespace {
 enum class ConsoleEvent {};
 using TestPlatform = daveos::platform::fake::Platform;
+
 struct Receiver : daveos::core::Module<Receiver, ConsoleEvent> {
   explicit Receiver(TestPlatform& p) : platform(p) {}
+
   static constexpr const char* name() { return "sink"; }
+
   static constexpr auto commands() {
     return std::array{
         DAVEOS_COMMAND(Receiver, "add", Add, "Record invocation")};
   }
+
   daveos::core::Status Add(daveos::core::CommandArguments) {
     times.at(count++) = platform.now();
     if (count == times.size()) scheduler().stop();
     return daveos::core::Status::ok;
   }
+
   TestPlatform& platform;
   std::array<daveos::core::Time, 3> times{};
   std::size_t count = 0;
 };
 }  // namespace
+
 TEST_CASE(
     "TCP console dispatches one command per tick and preserves burst tails") {
   Fake f;
-  Service service(f.driver(), f.clock(), Static());
+  net::Service service(f.driver(), f.clock(), Static());
   REQUIRE(service.init());
   service.poll();
   TestPlatform platform;
@@ -495,14 +538,14 @@ TEST_CASE(
   f.queue(Tcp(40000, 101, ack, 0x18, burst));
   service.poll();
   Receiver receiver(platform);
-  using namespace daveos::core;
-  auto modules = ModuleList{&console, &receiver};
-  auto scheduler = make_scheduler<ConsoleEvent>(platform, modules);
-  CommandDispatcher dispatcher(modules, scheduler);
-  dispatcher.bind_sources(CommandSourceList{console.command_source()});
-  REQUIRE(scheduler.run() == Status::ok);
+
+  auto modules = core::ModuleList{&console, &receiver};
+  auto scheduler = core::make_scheduler<ConsoleEvent>(platform, modules);
+  core::CommandDispatcher dispatcher(modules, scheduler);
+  dispatcher.bind_sources(core::CommandSourceList{console.command_source()});
+  REQUIRE(scheduler.run() == core::Status::ok);
   REQUIRE(receiver.count == 3);
-  CHECK(receiver.times == std::array<Time, 3>{1000, 2000, 3000});
+  CHECK(receiver.times == std::array<core::Time, 3>{1000, 2000, 3000});
   REQUIRE_FALSE(console.poll_line(line));  // Collect unfinished fourth command.
   f.queue(Tcp(40000, 101 + burst.size(), ack, 0x18, "add\n"));
   service.poll();

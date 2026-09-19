@@ -30,6 +30,7 @@ struct TaskDescriptor {
 
 // Parsed views borrow the dispatcher's buffer until the handler returns.
 using CommandArguments = std::span<const std::string_view>;
+
 // Command metadata is validated when constructing a dispatcher. Names/help
 // strings and the module object must outlive it; use DAVEOS_COMMAND below to
 // preserve the actual C++ handler identifier for log attribution.
@@ -40,6 +41,7 @@ struct CommandDescriptor {
   Status (M::*callback)(CommandArguments);
   const char* handler;
 };
+
 // Spell the C++ function identifier once for both invocation and attribution.
 #define DAVEOS_COMMAND(ModuleType, command, function, description) \
   ::daveos::core::CommandDescriptor<ModuleType> {                  \
@@ -58,6 +60,7 @@ class CommandDispatcher;
 template <typename Event>
 class SchedulerInterface {
   static_assert(std::is_enum_v<Event>);
+
   struct Operations {
     Status (*schedule)(void*, void*, std::size_t, Time, Mode);
     Status (*cancel)(void*, void*, std::size_t);
@@ -112,6 +115,7 @@ class SchedulerInterface {
     object_ = &implementation;
     operations_ = &operations;
   }
+
   // Schedule a registered module/task pair, replacing its pending request.
   // delay is in microseconds; repeat uses it as both initial delay and
   // interval. Zero is allowed only for once. Before run(), delays start at the
@@ -128,6 +132,7 @@ class SchedulerInterface {
     }
     return Status::not_found;
   }
+
   // Cancel pending execution (not an already executing callback). Returns
   // not_found for an unknown/inactive task; interrupt callers are rejected.
   template <typename M>
@@ -140,28 +145,35 @@ class SchedulerInterface {
     }
     return Status::not_found;
   }
+
   // Queue an enum-only broadcast, optionally excluding a registered sender.
   // Accepted before run() and from interrupts; full rejects the newest event.
   Status post(Event event, void* sender = nullptr) {
     return operations_->post(object_, event, sender);
   }
+
   // Interrupt-context one-shot, available only while running. Delay must be
   // positive and callback non-null. Reusing callback identity replaces its
   // timer.
   Status timer(Time delay, TimerCallback callback) {
     return operations_->timer(object_, delay, callback);
   }
+
   // Cancel by callback identity, including from interrupts; not_found if
   // absent.
   Status cancel_timer(TimerCallback callback) {
     return operations_->cancel_timer(object_, callback);
   }
+
   // Request cooperative stop if supported; returns not_running outside run().
   Status stop() { return operations_->stop(object_); }
+
   // Clear scheduler diagnostics/timing totals; logger counters are separate.
   void reset_statistics() { operations_->reset(object_); }
+
   // Queue an info-level table; normal filtering and log-buffer limits apply.
   void log_statistics() { operations_->log_statistics(object_); }
+
   // printf-style buffered logging, permitted from interrupts and during init.
   // Captures timestamp, context and formatted arguments now; delivers later.
   // Returns truncated for accepted shortened text, full for a dropped record.
@@ -189,10 +201,12 @@ class SchedulerInterface {
  private:
   template <typename, typename, std::size_t, std::size_t>
   friend class CommandDispatcher;
+
   // Dispatcher-only scope bridge; validates running state/interrupt context.
   Status Invoke(Context context, Status (*callback)(void*), void* argument) {
     return operations_->invoke(object_, context, callback, argument);
   }
+
   void* object_ = nullptr;
   const Operations* operations_ = nullptr;
 };
@@ -207,28 +221,39 @@ template <typename Derived, typename Event>
 class Module {
  public:
   using EventType = Event;
+
   static constexpr auto tasks() {
     return std::array<TaskDescriptor<Derived>, 0>{};
   }
+
   static constexpr auto commands() {
     return std::array<CommandDescriptor<Derived>, 0>{};
   }
+
   static constexpr const char* command_prefix() { return Derived::name(); }
+
   // stage1 is independent setup; stage2 may use other modules' stage1 results.
   Status init(InitStage) { return Status::ok; }
+
   // Broadcast reception order between modules is unspecified.
   void on_event(Event) {}
+
   // A veto prevents sleeping but does not prevent the scheduler from waiting.
   bool can_sleep() { return true; }
+
   // Bound by scheduler init() before any stage1 callback. Not available in
   // constructors; valid throughout both initialization stages and dispatch.
   SchedulerInterface<Event>& scheduler() { return *scheduler_; }
+
   void bind(SchedulerInterface<Event>& scheduler) { scheduler_ = &scheduler; }
+
   // CRTP forwarding keeps callback dispatch statically typed at registration.
   Status initialize(InitStage stage) {
     return static_cast<Derived*>(this)->init(stage);
   }
+
   void receive(Event event) { static_cast<Derived*>(this)->on_event(event); }
+
   bool permits_sleep() { return static_cast<Derived*>(this)->can_sleep(); }
 
  protected:
@@ -237,6 +262,7 @@ class Module {
  private:
   SchedulerInterface<Event>* scheduler_ = nullptr;
 };
+
 // Non-owning module pointers whose concrete types determine compile-time
 // storage.
 template <typename... Modules>
@@ -250,8 +276,10 @@ struct ModuleList {
                     Modules::name()...}),
                 "module names must be nonempty and unique (case-insensitive)");
   std::tuple<Modules*...> items;
+
   explicit ModuleList(Modules*... modules) : items(modules...) {}
 };
+
 template <typename... Modules>
 ModuleList(Modules*...) -> ModuleList<Modules...>;
 

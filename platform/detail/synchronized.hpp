@@ -24,6 +24,7 @@ class Synchronized : public core::Platform<Derived> {
   class QueueMutex final {
    public:
     bool try_lock() { return mutex_.try_lock(); }
+
     void unlock() { mutex_.unlock(); }
 
    private:
@@ -33,15 +34,22 @@ class Synchronized : public core::Platform<Derived> {
  public:
   // Nestable critical sections protecting core state across host threads.
   void enter() { state_mutex_.lock(); }
+
   void leave() { state_mutex_.unlock(); }
+
   // Queue operations share a try-lock mutex distinct from scheduler state.
   QueueMutex* queue_mutex() { return &queue_mutex_; }
+
   // Context is thread-local; a concurrent module retains its own attribution.
   bool in_interrupt() const { return interrupt_; }
+
   core::Context context() const { return context_; }
+
   void context(core::Context value) { context_ = value; }
+
   // Retained generation, sampled before checking work and passed to idle().
   std::uint64_t sequence() const { return sequence_.load(); }
+
   // Advance the generation and wake waiters without losing an early
   // notification.
   void notify() {
@@ -51,6 +59,7 @@ class Synchronized : public core::Platform<Derived> {
     }
     wait_cv_.notify_all();
   }
+
   // Synchronous trigger: handlers from different host threads are serialized.
   // Null callbacks and nested injection return invalid_argument. Once closed,
   // injection returns not_running. Callback/context must survive this call.
@@ -77,6 +86,7 @@ class Synchronized : public core::Platform<Derived> {
     core::Guard guard(*this);
     closed_ = true;
   }
+
   mutable std::mutex wait_mutex_;
   std::condition_variable wait_cv_;
 

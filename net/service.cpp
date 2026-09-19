@@ -30,6 +30,7 @@ const char* state_name(State state) {
   }
   return "unknown";
 }
+
 const char* link_name(Link link) {
   switch (link) {
     case Link::down:
@@ -47,12 +48,14 @@ const char* link_name(Link link) {
   }
   return "unknown";
 }
+
 struct NetworkState {
   Service* owner = nullptr;
   netif interface {};
   bool initialized = false;
   std::uint32_t random = 1;
   std::array<std::uint8_t, 1536> frame{};
+
   static err_t Transmit(netif* interface, pbuf* packet) {
     auto& self = *static_cast<NetworkState*>(interface->state);
     auto& service = *self.owner;
@@ -67,6 +70,7 @@ struct NetworkState {
     ++service.snapshot_.tx;
     return ERR_OK;
   }
+
   static err_t Init(netif* interface) {
     auto& self = *static_cast<NetworkState*>(interface->state);
     interface->name[0] = 'e';
@@ -81,28 +85,36 @@ struct NetworkState {
     interface->hostname = "daveos";
     return ERR_OK;
   }
+
   std::uint32_t Now() const {
     return owner ? owner->clock_.milliseconds(owner->clock_.context) : 0;
   }
 };
+
 static NetworkState stack;
+
 static ip4_addr_t Address(const Ipv4& bytes) {
   ip4_addr_t result;
   IP4_ADDR(&result, bytes[0], bytes[1], bytes[2], bytes[3]);
   return result;
 }
+
 static Ipv4 Bytes(const ip4_addr_t* value) {
   return {ip4_addr1(value), ip4_addr2(value), ip4_addr3(value),
           ip4_addr4(value)};
 }
+
 Service::Service(Driver driver, Clock clock, const Config& config)
     : driver_(driver), clock_(clock), config_(config) {}
+
 Service::~Service() { stop(); }
+
 bool Service::init(const Config& config) {
   if (attempted_) return false;
   config_ = config;
   return init();
 }
+
 bool Service::init() {
   if (attempted_) return false;
   attempted_ = true;
@@ -135,6 +147,7 @@ bool Service::init() {
   last_link_check_ = stack.Now() - 250;
   return true;
 }
+
 void Service::CheckLink() {
   const auto now = stack.Now();
   if (now - last_link_check_ < 250) return;
@@ -159,6 +172,7 @@ void Service::CheckLink() {
     if (dhcp_start(&stack.interface) != ERR_OK) ++stack_errors_;
   }
 }
+
 void Service::poll() {
   if (!active_) return;
   driver_.poll(driver_.context);
@@ -192,6 +206,7 @@ void Service::poll() {
                     : snapshot_.address == Ipv4{}         ? State::addressing
                                                           : State::ready;
 }
+
 void Service::stop() {
   if (!active_) return;
   dhcp_stop(&stack.interface);
@@ -206,7 +221,9 @@ void Service::stop() {
 
 
 }  // namespace daveos::net
+
 extern "C" std::uint32_t sys_now() { return daveos::net::stack.Now(); }
+
 extern "C" std::uint32_t daveos_net_random() {
   auto& x = daveos::net::stack.random;
   x ^= x << 13;

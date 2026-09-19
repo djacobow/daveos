@@ -12,19 +12,24 @@
 #include "core/schedule/scheduler.hpp"
 #include "platform/host/platform.h"
 
+namespace core = daveos::core;
+
 namespace app {
-using namespace daveos::core;
+
 enum class Event {};
+
 // Keep one extra byte to let the dispatcher diagnose overlength input. Once
 // full, discard bytes until newline instead of splitting one command into two.
 struct Line {
   std::array<char, 257> bytes{};
   std::size_t size = 0;
 };
+
 struct Input {
-  Queue<Line, 16> lines;
+  core::Queue<Line, 16> lines;
   std::mutex mutex;
 };
+
 // This thread only collects input. It never calls scheduler/module APIs.
 // Polling with a bounded timeout allows explicit exit to join a blocked reader.
 void Read(std::stop_token stop, Input& input) {
@@ -50,25 +55,30 @@ void Read(std::stop_token stop, Input& input) {
     while (!stop.stop_requested()) {
       {
         std::lock_guard lock(input.mutex);
-        if (input.lines.push(line) == Status::ok) break;
+        if (input.lines.push(line) == core::Status::ok) break;
       }
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
     line = {};
   }
 }
-class Console : public Module<Console, Event> {
+
+class Console : public core::Module<Console, Event> {
  public:
   explicit Console(Input& input) : input_(input) {}
+
   static constexpr const char* name() { return "console"; }
+
   static constexpr auto tasks() {
-    return std::array{TaskDescriptor<Console>{"input", &Console::Poll}};
+    return std::array{core::TaskDescriptor<Console>{"input", &Console::Poll}};
   }
+
   static constexpr auto commands() {
     return std::array{
         DAVEOS_COMMAND(Console, "echo", Echo, "Log the supplied arguments"),
         DAVEOS_COMMAND(Console, "exit", Exit, "Stop the host program")};
   }
+
   template <typename Dispatcher>
   void dispatcher(Dispatcher& dispatcher) {
     dispatcher_ = &dispatcher;
@@ -76,12 +86,14 @@ class Console : public Module<Console, Event> {
       return static_cast<Dispatcher*>(context)->dispatch(line);
     };
   }
-  Status init(InitStage stage) {
-    if (stage == InitStage::stage1) {
+
+  core::Status init(core::InitStage stage) {
+    if (stage == core::InitStage::stage1) {
       I_("Type help or console exit");
-      return scheduler().schedule(*this, &Console::Poll, 10000, Mode::repeat);
+      return scheduler().schedule(*this, &Console::Poll, 10000,
+                                  core::Mode::repeat);
     }
-    return Status::ok;
+    return core::Status::ok;
   }
 
  private:
@@ -89,45 +101,51 @@ class Console : public Module<Console, Event> {
     Line line;
     {
       std::lock_guard lock(input_.mutex);
-      if (input_.lines.pop(line) != Status::ok) return;
+      if (input_.lines.pop(line) != core::Status::ok) return;
     }
     dispatch_(dispatcher_, std::string_view(line.bytes.data(), line.size));
   }
-  Status Echo(CommandArguments args) {
+
+  core::Status Echo(core::CommandArguments args) {
     for ([[maybe_unused]] auto arg : args)
       I_("%.*s", static_cast<int>(arg.size()), arg.data());
-    return Status::ok;
+    return core::Status::ok;
   }
-  Status Exit(CommandArguments args) {
-    if (!args.empty()) return Status::invalid_argument;
+
+  core::Status Exit(core::CommandArguments args) {
+    if (!args.empty()) return core::Status::invalid_argument;
     I_("Exiting");
     return scheduler().stop();
   }
+
   Input& input_;
   void* dispatcher_ = nullptr;
-  Status (*dispatch_)(void*, std::string_view) = nullptr;
+  core::Status (*dispatch_)(void*, std::string_view) = nullptr;
 };
-void Output(void*, const LogRecord& record) {
-  LogPrefix prefix(record);
+
+void Output(void*, const core::LogRecord& record) {
+  core::LogPrefix prefix(record);
   auto text = prefix.view();
   std::printf("%.*s%.*s\n", static_cast<int>(text.size()), text.data(),
               static_cast<int>(record.message.size()), record.message.data());
   std::fflush(stdout);
 }
+
 // Passive application state; threads and scheduler execution begin in main.
 Input input;
 Console console(input);
 }  // namespace app
+
 int main() {
-  using namespace daveos::core;
+
   daveos::platform::host::Platform platform;
-  auto modules = ModuleList{&app::console};
-  auto logger =
-      make_logger(platform, SubscriberList{Subscriber{nullptr, app::Output}});
-  auto scheduler = make_scheduler<app::Event>(platform, modules, logger);
-  CommandDispatcher dispatcher(modules, scheduler);
+  auto modules = core::ModuleList{&app::console};
+  auto logger = core::make_logger(
+      platform, core::SubscriberList{core::Subscriber{nullptr, app::Output}});
+  auto scheduler = core::make_scheduler<app::Event>(platform, modules, logger);
+  core::CommandDispatcher dispatcher(modules, scheduler);
   app::console.dispatcher(dispatcher);
   std::jthread reader(
       [](std::stop_token stop) { app::Read(stop, app::input); });
-  return scheduler.run() == Status::ok ? 0 : 1;
+  return scheduler.run() == core::Status::ok ? 0 : 1;
 }

@@ -24,12 +24,14 @@ struct TaskStatistics {
   Time min_duration = 0;
   Time max_duration = 0;
   Time total_duration = 0;
+
   double average() const {
     return executions ? static_cast<double>(total_duration) /
                             static_cast<double>(executions)
                       : 0;
   }
 };
+
 // Copyable diagnostic snapshot; task entries remain in registration order.
 template <std::size_t Tasks>
 struct Statistics {
@@ -66,6 +68,7 @@ class Scheduler<Event, ModuleList<Modules...>, Logging, P, EventCapacity,
     stopped,
     failed
   };
+
   struct Registration {
     void* object = nullptr;
     const char* name = "";
@@ -74,6 +77,7 @@ class Scheduler<Event, ModuleList<Modules...>, Logging, P, EventCapacity,
     void (*event)(void*, Event) = nullptr;
     bool (*sleep)(void*) = nullptr;
   };
+
   struct Task {
     void* module = nullptr;
     const char* module_name = "";
@@ -86,11 +90,13 @@ class Scheduler<Event, ModuleList<Modules...>, Logging, P, EventCapacity,
     Time interval = 0;
     Time due = 0;
   };
+
   struct EventRecord {
     Event value{};
     void* sender{};
     Time due{};
   };
+
   struct Timer {
     bool active = false;
     Time due = 0;
@@ -106,8 +112,10 @@ class Scheduler<Event, ModuleList<Modules...>, Logging, P, EventCapacity,
     std::apply([&](auto*... module) { (Register(module), ...); },
                modules.items);
   }
+
   Scheduler(const Scheduler&) = delete;
   Scheduler& operator=(const Scheduler&) = delete;
+
   // Quiesce platform callbacks before releasing scheduler-owned storage.
   ~Scheduler() { platform_.quiesce(); }
 
@@ -298,6 +306,7 @@ class Scheduler<Event, ModuleList<Modules...>, Logging, P, EventCapacity,
     }
     return Status::ok;
   }
+
   // Queue a timestamped broadcast. sender, if supplied, must be registered and
   // is excluded from reception. Queue overflow increments event_overflows.
   Status post(Event value, void* sender = nullptr) {
@@ -312,6 +321,7 @@ class Scheduler<Event, ModuleList<Modules...>, Logging, P, EventCapacity,
     platform_.notify();
     return Status::ok;
   }
+
   // Multiplex a positive-delay callback over the one platform timer. Safe from
   // interrupts, but rejected before run(). Replacing a callback needs no new
   // slot; a new callback at capacity fails and increments timer_overflows.
@@ -336,6 +346,7 @@ class Scheduler<Event, ModuleList<Modules...>, Logging, P, EventCapacity,
     platform_.notify();
     return Status::ok;
   }
+
   // ISR-safe cancellation of a pending callback, identified by function
   // pointer.
   Status cancel_timer(TimerCallback callback) {
@@ -351,12 +362,14 @@ class Scheduler<Event, ModuleList<Modules...>, Logging, P, EventCapacity,
     }
     return Status::not_found;
   }
+
   // Synchronized copy, available in every lifecycle state, including from ISRs.
   // Callers own the values, but module/task name strings remain borrowed.
   Statistics<kTasks> snapshot() {
     Guard guard(platform_);
     return statistics_;
   }
+
   // Reset timing/counters while retaining names, pending work and buffered
   // logs. An in-progress task records its whole iteration when it subsequently
   // finishes.
@@ -368,6 +381,7 @@ class Scheduler<Event, ModuleList<Modules...>, Logging, P, EventCapacity,
       statistics_.tasks[index].task = tasks_[index].name;
     }
   }
+
   // Queue an info-level snapshot table; it may be filtered, truncated or
   // dropped.
   void log_statistics() {
@@ -391,15 +405,18 @@ class Scheduler<Event, ModuleList<Modules...>, Logging, P, EventCapacity,
 
  private:
   friend class SchedulerInterface<Event>;
+
   bool AcceptsWork() const {
     return state_ == State::fresh || state_ == State::initializing ||
            state_ == State::ready || state_ == State::running;
   }
+
   bool Contains(void* module) const {
     for (const auto& entry : modules_)
       if (entry.object == module) return true;
     return false;
   }
+
   template <typename M>
     requires ModuleFor<M, Event>
   void Register(M* module) {
@@ -438,6 +455,7 @@ class Scheduler<Event, ModuleList<Modules...>, Logging, P, EventCapacity,
       }
     }
   }
+
   Status Validate() {
     if constexpr (kHasLogging)
       if (!logging_.uses_platform(platform_)) return Status::invalid_argument;
@@ -453,6 +471,7 @@ class Scheduler<Event, ModuleList<Modules...>, Logging, P, EventCapacity,
     }
     return Status::ok;
   }
+
   Status ScheduleSlot(void* module, std::size_t index, Time delay, Mode mode) {
     Guard guard(platform_);
     if (!AcceptsWork()) return Status::not_running;
@@ -469,6 +488,7 @@ class Scheduler<Event, ModuleList<Modules...>, Logging, P, EventCapacity,
       }
     return Status::not_found;
   }
+
   Status CancelSlot(void* module, std::size_t index) {
     if (platform_.in_interrupt()) return Status::invalid_argument;
     Guard guard(platform_);
@@ -482,6 +502,7 @@ class Scheduler<Event, ModuleList<Modules...>, Logging, P, EventCapacity,
       }
     return Status::not_found;
   }
+
   Status Invoke(Context context, Status (*callback)(void*), void* argument) {
     if (platform_.in_interrupt()) return Status::invalid_argument;
     {
@@ -491,9 +512,11 @@ class Scheduler<Event, ModuleList<Modules...>, Logging, P, EventCapacity,
     ContextGuard guard(platform_, context);
     return callback(argument);
   }
+
   Status LogArgs(Level level, const char* format, std::va_list args) {
     return logging_.write(level, format, args);
   }
+
   // Called under the platform guard; the final slot is the scheduler's own wake
   // timer.
   void Rearm() {
@@ -509,6 +532,7 @@ class Scheduler<Event, ModuleList<Modules...>, Logging, P, EventCapacity,
         earliest > now ? earliest - now : 0,
         [](void* self) { static_cast<Scheduler*>(self)->Fire(); }, this);
   }
+
   // Platform interrupt callback: remove each due timer before invoking it so
   // callbacks can safely rearm/cancel timers. User code runs outside our guard.
   void Fire() {
@@ -538,6 +562,7 @@ class Scheduler<Event, ModuleList<Modules...>, Logging, P, EventCapacity,
       platform_.notify();
     }
   }
+
   P& platform_;
   [[no_unique_address]] Logging logging_;
   std::array<Registration, sizeof...(Modules)> modules_{};
@@ -560,6 +585,7 @@ auto make_scheduler(P& platform, ModuleList<Modules...> modules) {
   return Scheduler<Event, ModuleList<Modules...>, NoLogging, P, Events, Timers>(
       platform, modules);
 }
+
 template <typename Event, std::size_t Events = 32, std::size_t Timers = 16,
           typename P, typename... Modules, typename L>
 auto make_scheduler(P& platform, ModuleList<Modules...> modules, L& logger) {

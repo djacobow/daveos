@@ -18,6 +18,7 @@ class CommandSource {
   CommandSource() = default;
   CommandSource(const CommandSource&) = delete;
   CommandSource& operator=(const CommandSource&) = delete;
+
   Status dispatch(std::string_view line) {
     return dispatch_ ? dispatch_(context_, line) : Status::not_running;
   }
@@ -25,6 +26,7 @@ class CommandSource {
  private:
   template <typename, typename, std::size_t, std::size_t>
   friend class CommandDispatcher;
+
   template <typename Dispatcher>
   void Bind(Dispatcher& dispatcher) {
     context_ = &dispatcher;
@@ -32,17 +34,21 @@ class CommandSource {
       return static_cast<Dispatcher*>(context)->dispatch(line);
     };
   }
+
   void* context_ = nullptr;
   Status (*dispatch_)(void*, std::string_view) = nullptr;
 };
+
 // Initialization-time registration. References exclude null
 // sources; no allocation or source polling is added to the dispatcher.
 template <std::size_t Size>
 struct CommandSourceList {
   std::array<CommandSource*, Size> items;
+
   template <typename... Sources>
   explicit CommandSourceList(Sources&... sources) : items{&sources...} {}
 };
+
 template <typename... Sources>
 CommandSourceList(Sources&...) -> CommandSourceList<sizeof...(Sources)>;
 

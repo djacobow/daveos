@@ -87,6 +87,10 @@ meson compile -C build/host lint         # cppcheck; diagnostics fail the target
 
 These targets are available in every configuration. They also work without Meson:
 `python3 tools/check.py format-check` and `python3 tools/check.py lint`.
+Formatting uses Google style with blank lines between function and class
+definitions (`SeparateDefinitionBlocks: Always`), including inline methods.
+Use short namespace aliases (for example, `namespace core = daveos::core;`)
+and qualified names instead of namespace-wide using directives.
 The helper prefers `clang-format-15`, falling back to `clang-format`. Lint checks
 production code and examples, including both platform configurations. The
 `duplInheritedMember` diagnostic is suppressed because CRTP intentionally hides
@@ -186,9 +190,11 @@ Meson owns the build. After CubeMX regeneration, update the example's HAL depend
 selection if enabled peripherals change. Run builds through Meson to keep all outputs
 under the repository's `build/` directory.
 
-The generated `main.c` calls `DaveOS_Run()` from a CubeMX USER CODE section after
-peripheral initialization. Shared commands, logging, input, and IRQ bridges live
-in `examples/stm32_console/`; each target supplies `board_config.h` and `console.cpp`
+The generated `Core/Src/main.c` includes the C-compatible `appmain.h` and calls
+`appmain()` from a CubeMX USER CODE section after peripheral initialization.
+The shared `examples/stm32_console/appmain.cpp` defines the application modules,
+instantiates the file-scope objects, and calls `scheduler.run()`. Its implementation
+is C++ because it constructs DaveOS objects. Each target supplies `board_config.h` and `console.cpp`
 for its platform, LED/button access, DMA storage/cache handling, and timer clock.
 The modules, logger, scheduler, dispatcher, and transport buffers live at file
 scope. Their constructors store references and metadata; UART/USB/network setup
@@ -197,7 +203,7 @@ stage2, after every stage1 completes; `Board` only provides board commands.
 The platform timer is initialized after CubeMX peripheral setup and before
 scheduler initialization. The `.ioc` and FLASH linker script retain a 64 KiB
 stack reservation, enforced by MSPLIM. This was raised to accommodate the old
-34,216-byte application frame; `DaveOS_Run()` now uses 8 bytes in the debug
+34,216-byte application frame; `appmain()` now uses 8 bytes in the debug
 build. That frame size is not a whole-program high-water mark. The reservation
 is retained pending measurement of nested calls and interrupts; keep the linker
 and CubeMX settings consistent when it is resized. GCC's `.su` reports are
@@ -236,22 +242,26 @@ There are no virtual methods in DaveOS. Modules receive a non-owning
 so module types do not depend on all other modules or scheduler capacities.
 
 ```cpp
-using namespace daveos::core;
+namespace core = daveos::core;
 enum class Event { ready };
 
-class Blinker : public Module<Blinker, Event> {
+class Blinker : public core::Module<Blinker, Event> {
  public:
   static constexpr const char* name() { return "blinker"; }
+
   static constexpr auto tasks() {
-    return std::array{TaskDescriptor<Blinker>{"tick", &Blinker::tick}};
+    return std::array{core::TaskDescriptor<Blinker>{"tick", &Blinker::tick}};
   }
-  Status init(InitStage stage) {
-    if (stage == InitStage::stage1)
-      return scheduler().schedule(*this, &Blinker::tick, 1000, Mode::repeat);
-    return Status::ok;
+
+  core::Status init(core::InitStage stage) {
+    if (stage == core::InitStage::stage1)
+      return scheduler().schedule(*this, &Blinker::tick, 1000,
+                                  core::Mode::repeat);
+    return core::Status::ok;
   }
+
   void tick() {
-    scheduler().log(Level::info, "tick");
+    scheduler().log(core::Level::info, "tick");
     scheduler().cancel(*this, &Blinker::tick);
     scheduler().stop();
   }
@@ -267,8 +277,9 @@ To attach logging, include `core/logging/logger.hpp` and construct an applicatio
 logger before the scheduler:
 
 ```cpp
-auto logger = make_logger(platform, SubscriberList{Subscriber{nullptr, Output}});
-auto scheduler = make_scheduler<Event>(platform, modules, logger);
+auto logger = core::make_logger(
+    platform, core::SubscriberList{core::Subscriber{nullptr, Output}});
+auto scheduler = core::make_scheduler<Event>(platform, modules, logger);
 ```
 
 The logger and scheduler must use the same platform.
@@ -355,17 +366,20 @@ requests return `not_running`; pre-run *task* schedules are retained instead.
 Include `core/command/command.hpp` and expose a constexpr descriptor array:
 
 ```cpp
-class Motor : public Module<Motor, Event> {
+class Motor : public core::Module<Motor, Event> {
  public:
   static constexpr const char* name() { return "motor"; }
+
   static constexpr auto commands() {
     return std::array{
         DAVEOS_COMMAND(Motor, "speed", SetSpeed, "Set motor speed")};
   }
-  Status SetSpeed(CommandArguments args) {
-    if (args.size() != 1) return Status::invalid_argument;
-    I_("requested speed: %.*s", static_cast<int>(args[0].size()), args[0].data());
-    return Status::ok;
+
+  core::Status SetSpeed(core::CommandArguments args) {
+    if (args.size() != 1) return core::Status::invalid_argument;
+    I_("requested speed: %.*s", static_cast<int>(args[0].size()),
+       args[0].data());
+    return core::Status::ok;
   }
 };
 ```
@@ -535,13 +549,13 @@ Select transports independently (both default to enabled on H563 and H755):
 Application wiring uses parallel lists:
 
 ```cpp
-auto subscribers = SubscriberList{uart.subscriber(), usb.subscriber()};
-auto logger = make_logger(platform, subscribers);
-auto scheduler = make_scheduler<Event>(platform, modules, logger);
-CommandDispatcher dispatcher(modules, scheduler);
+auto subscribers = core::SubscriberList{uart.subscriber(), usb.subscriber()};
+auto logger = core::make_logger(platform, subscribers);
+auto scheduler = core::make_scheduler<Event>(platform, modules, logger);
+core::CommandDispatcher dispatcher(modules, scheduler);
 // During application initialization, normally stage2:
-dispatcher.bind_sources(
-    CommandSourceList{uart.command_source(), usb.command_source()});
+dispatcher.bind_sources(core::CommandSourceList{uart.command_source(),
+                                                usb.command_source()});
 ```
 
 `CommandSource` submits complete lines through `dispatch()`; the dispatcher owns
@@ -756,7 +770,7 @@ H563 needs JP6. Retain stock RMII solder bridges. The PHY supplies the 50 MHz RM
 reference, independently of the internal HSI CPU clock.
 
 The demo's configuration is passed to `net::Service` in
-`examples/stm32_console/console.cpp`. It defaults to DHCP and a locally
+`examples/stm32_console/appmain.cpp`. It defaults to DHCP and a locally
 administered MAC derived from the MCU UID. Set `network_config.dhcp = false` and
 set its `address`, `netmask`, and `gateway` arrays for static addressing; the
 configuration defaults for static mode are 192.168.50.2/24 with no gateway.

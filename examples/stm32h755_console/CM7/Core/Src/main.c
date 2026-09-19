@@ -21,6 +21,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "appmain.h"
 
 /* USER CODE END Includes */
 
@@ -66,7 +67,6 @@ static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
 static void MX_USART3_UART_Init(void);
 /* USER CODE BEGIN PFP */
-void DaveOS_Run(void);
 
 /* USER CODE END PFP */
 
@@ -145,7 +145,7 @@ Error_Handler();
   MX_DMA_Init();
   MX_USART3_UART_Init();
   /* USER CODE BEGIN 2 */
-  DaveOS_Run();
+  appmain();
 
   /* USER CODE END 2 */
 

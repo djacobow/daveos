@@ -26,6 +26,7 @@ extern "C" void HAL_ETH_MspInit(ETH_HandleTypeDef*) {
   HAL_NVIC_SetPriority(ETH_IRQn, 6, 0);
   HAL_NVIC_EnableIRQ(ETH_IRQn);
 }
+
 extern "C" void HAL_ETH_MspDeInit(ETH_HandleTypeDef*) {
   HAL_NVIC_DisableIRQ(ETH_IRQn);
   // Leave clocks/pins configured so MDIO link polling works with MAC stopped.

@@ -7,10 +7,12 @@
 #include "service.h"
 
 struct tcp_pcb;
+
 namespace daveos::net {
 
 
 struct TcpCallbacks;
+
 // One-client, nonblocking byte stream. No DaveOS dependency or runtime heap.
 // Call only from the same context as Service::poll(). Service must be
 // initialized first and outlive this object; stop the server before stopping
@@ -20,6 +22,7 @@ class TcpServer {
  public:
   explicit TcpServer(Service& service, std::uint16_t port = 1000)
       : service_(service), port_(port) {}
+
   ~TcpServer();
   TcpServer(const TcpServer&) = delete;
   TcpServer& operator=(const TcpServer&) = delete;
@@ -27,9 +30,13 @@ class TcpServer {
   // loss, retry automatically when the service is ready again.
   void poll();
   void stop();
+
   bool connected() const { return client_ != nullptr; }
+
   std::uint32_t session() const { return session_; }
+
   std::uint32_t dropped_output() const { return dropped_; }
+
   std::size_t read(std::span<char> bytes);
   // Borrow the next contiguous RX range; valid until consumption, disconnect,
   // or another service/server call. consume() releases bytes and opens the TCP

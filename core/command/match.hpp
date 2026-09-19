@@ -13,12 +13,14 @@ namespace daveos::core {
 constexpr char Fold(char c) {
   return c >= 'A' && c <= 'Z' ? static_cast<char>(c + ('a' - 'A')) : c;
 }
+
 constexpr bool EqualName(std::string_view a, std::string_view b) {
   if (a.size() != b.size()) return false;
   for (std::size_t i = 0; i < a.size(); ++i)
     if (Fold(a[i]) != Fold(b[i])) return false;
   return true;
 }
+
 // Validate static registration names; optional null entries represent modules
 // with no commands when checking prefixes.
 constexpr bool UniqueNames(std::span<const char* const> names,
@@ -34,6 +36,7 @@ constexpr bool UniqueNames(std::span<const char* const> names,
   }
   return true;
 }
+
 // Routing names are nonempty ASCII identifiers, with hyphens permitted.
 constexpr bool ValidCommandName(const char* name) {
   if (!name || !*name) return false;
@@ -45,10 +48,12 @@ constexpr bool ValidCommandName(const char* name) {
   }
   return true;
 }
+
 struct NameMatch {
   Status status = Status::not_found;
   std::size_t index = 0;
 };
+
 // Exact match wins; otherwise accept one unique prefix. name(index) returns
 // a string view for each candidate. Registration must reject duplicate names.
 // An empty query never matches, including an explicitly quoted empty token.

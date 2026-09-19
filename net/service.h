@@ -13,6 +13,7 @@ enum class Link { down, half10, full10, half100, full100, fault };
 enum class State { stopped, link_down, addressing, ready, hardware_fault };
 const char* state_name(State state);
 const char* link_name(Link link);
+
 struct Config {
   Mac mac{0x02, 0, 0, 0, 0, 1};
   bool dhcp = true;
@@ -20,6 +21,7 @@ struct Config {
   Ipv4 netmask{255, 255, 255, 0};
   Ipv4 gateway{};
 };
+
 struct Snapshot {
   State state = State::stopped;
   Link link = Link::down;
@@ -27,6 +29,7 @@ struct Snapshot {
   Mac mac{};
   std::uint32_t rx = 0, tx = 0, dropped_rx = 0, dropped_tx = 0, errors = 0;
 };
+
 // Borrowed driver and clock. All methods run in one caller context; no lwIP
 // calls may originate from interrupts. receive() consumes at most one frame,
 // copies it, and releases DMA ownership; 0 means empty. Oversize frames return
@@ -42,11 +45,13 @@ struct Driver {
   bool (*transmit)(void*, std::span<const std::uint8_t>);
   std::uint32_t (*errors)(void*);
 };
+
 struct Clock {
   void* context;
   std::uint32_t (*milliseconds)(void*);
 };
 struct NetworkState;
+
 // One active service per process (lwIP NO_SYS global state). No DaveOS
 // dependencies, runtime heap, or worker thread. Driver/clock outlive Service.
 // Initialization is single-use; failure requires a new application run/reset.
@@ -61,6 +66,7 @@ class Service {
   bool init(const Config& config);
   void poll();
   void stop();
+
   // Return an independent copy so later polling cannot change a saved sample.
   // cppcheck-suppress returnByReference
   Snapshot snapshot() const { return snapshot_; }

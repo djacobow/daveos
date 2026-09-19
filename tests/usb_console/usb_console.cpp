@@ -5,21 +5,26 @@
 namespace {
 bool init_ok = true, ready = false;
 std::size_t starts = 0, stops = 0;
+
 void Feed(const char* text) {
   auto bytes = std::string_view(text);
   UsbReceive(reinterpret_cast<const std::uint8_t*>(bytes.data()), bytes.size());
 }
 }  // namespace
+
 extern "C" bool UsbDeviceInit() {
   ++starts;
   ready = init_ok;
   return init_ok;
 }
+
 extern "C" void UsbDeviceStop() {
   ++stops;
   ready = false;
 }
+
 extern "C" bool UsbDeviceReady() { return ready; }
+
 extern "C" bool UsbDeviceTransmit(const std::uint8_t*, std::uint32_t) {
   return ready;
 }
@@ -54,6 +59,7 @@ TEST_CASE("USB callback routing borrows one live application-owned transport") {
   second.stop();
   CHECK(stops == 2);
 }
+
 TEST_CASE("USB initialization failure releases the callback route") {
   board::Platform platform;
   init_ok = false;

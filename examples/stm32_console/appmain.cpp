@@ -1,3 +1,5 @@
+#include "appmain.h"
+
 #include <inttypes.h>
 
 #include <charconv>
@@ -24,11 +26,13 @@
 #endif
 #endif
 
+namespace core = daveos::core;
+namespace console = daveos::console;
+
 extern "C" UART_HandleTypeDef huart3;
 
 namespace app {
-using namespace daveos::core;
-using namespace daveos::console;
+
 using Platform = board::Platform;
 Platform* active_platform = nullptr;
 #if DAVEOS_UART_CONSOLE
@@ -41,8 +45,9 @@ struct TxDriver {
     return board::StartTransmit(bytes, size);
   }
 };
-using Tx = BufferedOutput<Platform, TxDriver, 4096>;
-using UartInput = Input<Platform, 16>;
+
+using Tx = console::BufferedOutput<Platform, TxDriver, 4096>;
+using UartInput = console::Input<Platform, 16>;
 #endif
 enum class Event {};
 
@@ -51,7 +56,8 @@ enum class Event {};
 class CommandWiring final : public daveos::core::Module<CommandWiring, Event> {
  public:
   static constexpr const char* name() { return "commands"; }
-  Status init(InitStage stage);
+
+  core::Status init(core::InitStage stage);
 };
 
 class Board final : public daveos::core::Module<Board, Event> {
@@ -77,7 +83,9 @@ class Board final : public daveos::core::Module<Board, Event> {
 #endif
   {
   }
+
   static constexpr const char* name() { return "board"; }
+
   static constexpr auto commands() {
     return std::array{
         DAVEOS_COMMAND(Board, "led", Led, "led <1|2|3> <on|off|toggle>"),
@@ -86,70 +94,79 @@ class Board final : public daveos::core::Module<Board, Event> {
         DAVEOS_COMMAND(Board, "timer", Timer, "timer <microseconds>"),
         DAVEOS_COMMAND(Board, "reset", Reset, "Reset the MCU immediately")};
   }
-  Status init(InitStage stage) {
-    if (stage == InitStage::stage1) I_("DaveOS %s; type help", board::kName);
-    return Status::ok;
+
+  core::Status init(core::InitStage stage) {
+    if (stage == core::InitStage::stage1)
+      I_("DaveOS %s; type help", board::kName);
+    return core::Status::ok;
   }
 
  private:
-  Status Timer(CommandArguments args) {
-    if (args.size() != 1 || args[0].empty()) return Status::invalid_argument;
-    Time delay = 0;
+  core::Status Timer(core::CommandArguments args) {
+    if (args.size() != 1 || args[0].empty())
+      return core::Status::invalid_argument;
+    core::Time delay = 0;
     const auto text = args[0];
     const auto end = text.data() + text.size();
     const auto parsed = std::from_chars(text.data(), end, delay);
     if (parsed.ec != std::errc{} || parsed.ptr != end || !delay)
-      return Status::invalid_argument;
+      return core::Status::invalid_argument;
     // DaveOS timers take plain callbacks; route completion to this app-owned
     // board.
     timer_owner_ = this;
     return scheduler().timer(delay, [] { timer_owner_->TimerFired(); });
   }
+
   void TimerFired() { I_("Timer fired"); }
-  Status Reset(CommandArguments args) {
-    if (!args.empty()) return Status::invalid_argument;
+
+  core::Status Reset(core::CommandArguments args) {
+    if (!args.empty()) return core::Status::invalid_argument;
     return platform_.reset();
   }
-  Status Led(CommandArguments args) {
+
+  core::Status Led(core::CommandArguments args) {
     if (args.size() != 2 || args[0].size() != 1 || args[0][0] < '1' ||
         args[0][0] > '3')
-      return Status::invalid_argument;
+      return core::Status::invalid_argument;
     auto index = static_cast<std::size_t>(args[0][0] - '1');
     if (args[1] == "toggle")
       board::ToggleLed(index);
     else if (args[1] == "on" || args[1] == "off")
       board::SetLed(index, args[1] == "on");
     else
-      return Status::invalid_argument;
+      return core::Status::invalid_argument;
     I_("LED %c %.*s", args[0][0], static_cast<int>(args[1].size()),
        args[1].data());
-    return Status::ok;
+    return core::Status::ok;
   }
-  Status Button(CommandArguments args) {
-    if (!args.empty()) return Status::invalid_argument;
+
+  core::Status Button(core::CommandArguments args) {
+    if (!args.empty()) return core::Status::invalid_argument;
     [[maybe_unused]] auto state = board::ReadButton();
     I_("BTN1: %s", state ? "high" : "low");
-    return Status::ok;
+    return core::Status::ok;
   }
-  Status Stats(CommandArguments args) {
-    if (!args.empty()) return Status::invalid_argument;
+
+  core::Status Stats(core::CommandArguments args) {
+    if (!args.empty()) return core::Status::invalid_argument;
     scheduler().log_statistics();
 #if DAVEOS_UART_CONSOLE
     [[maybe_unused]] auto tx = tx_.counters();
     I_("TX DMA: %s bytes, %" PRIu32 " transfers, %" PRIu32
        " dropped frames, %" PRIu32 " errors",
-       LogUnsigned(tx.sent_bytes).c_str(), tx.transfers, tx.dropped_frames,
-       tx.errors);
+       core::LogUnsigned(tx.sent_bytes).c_str(), tx.transfers,
+       tx.dropped_frames, tx.errors);
 #endif
 #if DAVEOS_USB_CDC
     [[maybe_unused]] auto usb = usb_.counters();
     I_("USB TX: %s bytes, %" PRIu32 " transfers, %" PRIu32
        " dropped frames, %" PRIu32 " errors",
-       LogUnsigned(usb.sent_bytes).c_str(), usb.transfers, usb.dropped_frames,
-       usb.errors);
+       core::LogUnsigned(usb.sent_bytes).c_str(), usb.transfers,
+       usb.dropped_frames, usb.errors);
 #endif
-    return Status::ok;
+    return core::Status::ok;
   }
+
   inline static Board* timer_owner_ = nullptr;
   Platform& platform_;
 #if DAVEOS_UART_CONSOLE
@@ -168,20 +185,23 @@ class UartConsole final : public daveos::console::Module<UartConsole, Event> {
         display_(this, [](void* context, std::string_view text) {
           static_cast<UartConsole*>(context)->output_.write(text);
         }) {}
-  Status init(InitStage stage) {
-    if (stage == InitStage::stage1) {
+
+  core::Status init(core::InitStage stage) {
+    if (stage == core::InitStage::stage1) {
       // Keep received bytes in hardware while short critical sections mask
       // IRQs. One-byte IT reception still handles partial lines immediately.
       if (HAL_UARTEx_EnableFifoMode(&huart3) != HAL_OK)
-        return Status::initialization_failed;
+        return core::Status::initialization_failed;
       active_uart = this;
       start_receive();
     }
     return daveos::console::Module<UartConsole, Event>::init(stage);
   }
+
   void start_receive() {
     if (HAL_UART_Receive_IT(&huart3, &rx_byte_, 1) != HAL_OK) Error_Handler();
   }
+
   void received() {
     if (huart3.ErrorCode & ~HAL_UART_ERROR_DMA)
       input_.error();
@@ -189,25 +209,31 @@ class UartConsole final : public daveos::console::Module<UartConsole, Event> {
       input_.receive(static_cast<char>(rx_byte_));
     start_receive();
   }
+
   void complete() { output_.complete(); }
+
   void error() {
     if (huart3.ErrorCode & HAL_UART_ERROR_DMA) output_.error();
     if (huart3.ErrorCode & ~HAL_UART_ERROR_DMA) input_.error();
     // Overrun ends reception; other line errors can leave it active.
     if (huart3.RxState == HAL_UART_STATE_READY) start_receive();
   }
+
   static constexpr const char* name() { return "uart"; }
+
   std::uint32_t take_dropped() { return input_.take_dropped(); }
-  void output(const LogRecord& record) {
+
+  void output(const core::LogRecord& record) {
     display_.before_log();
-    LogPrefix prefix(record);
+    core::LogPrefix prefix(record);
     output_.write(prefix.view());
     output_.write(record.message);
     output_.write("\r\n");
     display_.after_log();
     output_.flush();
   }
-  bool poll_line(Line& line) {
+
+  bool poll_line(console::Line& line) {
     const bool pending = input_.pop(line);
     if (pending)
       display_.clear();
@@ -220,7 +246,7 @@ class UartConsole final : public daveos::console::Module<UartConsole, Event> {
  private:
   UartInput& input_;
   Tx& output_;
-  LineDisplay display_;
+  console::LineDisplay display_;
   std::uint8_t rx_byte_ = 0;
 };
 #endif
@@ -234,9 +260,11 @@ extern "C" void TIM2_IRQHandler() {
 extern "C" void HAL_UART_RxCpltCallback(UART_HandleTypeDef* uart) {
   if (uart == &huart3 && app::active_uart) app::active_uart->received();
 }
+
 extern "C" void HAL_UART_TxCpltCallback(UART_HandleTypeDef* uart) {
   if (uart == &huart3 && app::active_uart) app::active_uart->complete();
 }
+
 extern "C" void HAL_UART_ErrorCallback(UART_HandleTypeDef* uart) {
   if (uart == &huart3 && app::active_uart) app::active_uart->error();
 }
@@ -281,7 +309,7 @@ app::Board board_module(platform
 #endif
 );
 CommandWiring command_wiring;
-auto modules = ModuleList {
+auto modules = core::ModuleList {
   &command_wiring, &board_module,
 #if DAVEOS_NETWORKING
       &network_module,
@@ -296,7 +324,7 @@ auto modules = ModuleList {
       &usb,
 #endif
 };
-auto subscribers = SubscriberList {
+auto subscribers = core::SubscriberList {
 #if DAVEOS_NETWORKING && DAVEOS_TCP_CONSOLE
   tcp.subscriber(),
 #endif
@@ -307,13 +335,13 @@ auto subscribers = SubscriberList {
       usb.subscriber(),
 #endif
 };
-auto logger = make_logger(platform, subscribers);
-auto scheduler = make_scheduler<app::Event>(platform, modules, logger);
-CommandDispatcher dispatcher(modules, scheduler);
+auto logger = core::make_logger(platform, subscribers);
+auto scheduler = core::make_scheduler<app::Event>(platform, modules, logger);
+core::CommandDispatcher dispatcher(modules, scheduler);
 
-Status CommandWiring::init(InitStage stage) {
-  if (stage != InitStage::stage2) return Status::ok;
-  auto sources = CommandSourceList {
+core::Status CommandWiring::init(core::InitStage stage) {
+  if (stage != core::InitStage::stage2) return core::Status::ok;
+  auto sources = core::CommandSourceList {
 #if DAVEOS_NETWORKING && DAVEOS_TCP_CONSOLE
     tcp.command_source(),
 #endif
@@ -325,23 +353,23 @@ Status CommandWiring::init(InitStage stage) {
 #endif
   };
   dispatcher.bind_sources(sources);
-  return Status::ok;
+  return core::Status::ok;
 }
 }  // namespace app
 
-extern "C" void DaveOS_Run() {
-  using namespace app;
-  active_platform = &platform;
-  if (platform.init(board::TimerClock()) != Status::ok) Error_Handler();
-  scheduler.run();
+extern "C" void appmain() {
+  app::active_platform = &app::platform;
+  if (app::platform.init(board::TimerClock()) != core::Status::ok)
+    Error_Handler();
+  app::scheduler.run();
 #if DAVEOS_NETWORKING
 #if DAVEOS_TCP_CONSOLE
-  tcp.stop();
+  app::tcp.stop();
 #endif
-  network.stop();
+  app::network.stop();
 #endif
 #if DAVEOS_USB_CDC
-  usb_transport.stop();
+  app::usb_transport.stop();
 #endif
   // Initialization failure is terminal; detach ISR state before halting.
 #if DAVEOS_UART_CONSOLE
@@ -351,7 +379,7 @@ extern "C" void DaveOS_Run() {
   HAL_UART_AbortReceive(&huart3);
   app::active_uart = nullptr;
 #endif
-  platform.quiesce();
+  app::platform.quiesce();
   app::active_platform = nullptr;
   Error_Handler();
 }
