@@ -790,7 +790,12 @@ addressing, and counters. Meson `networking` defaults to false and disabled buil
 need no networking submodules. Both STM32 demos use ST HAL and LAN8742, with
 fixed DMA buffers and board-specific RMII wiring. H755 hardware validation
 passed for DHCP/static IPv4, ping, cable reconnection, and USB console
-responsiveness. H563 hardware validation is pending.
+responsiveness. H563 initial hardware validation passed for UART/USB commands,
+TX DMA, LEDs/button, timer completion, reset, DHCP, ping, and TCP commands.
+USB works in both USB-C orientations; USB/Ethernet recover after physical
+reconnection. Its
+Cortex-M33 stack reservation is 64 KiB, enforced by MSPLIM; preserve this
+setting in the linker script and CubeMX project.
 
 
 The optional TCP console is an independent log subscriber and command source,

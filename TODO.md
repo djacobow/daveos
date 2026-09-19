@@ -4,7 +4,8 @@
 - [x] Add cppcheck configuration and a lint command; integrate both checks into CI.
 - [x] Implement the STM32H563 platform, CubeMX startup/linker integration, and DaveOS LED example.
 - [x] Bring H563 to H755 console parity with shared commands, UART echo, TX DMA, and reset.
-- [ ] Validate H563 HSI boot, LED/button commands, UART RX/error recovery, TX DMA/overflow, reset, timer timing, and sleep/wake on NUCLEO-H563ZI hardware.
+- [x] Validate H563 HSI boot, physical LEDs/button, UART commands, TX DMA, software reset, and 200 ms timer completion on NUCLEO-H563ZI.
+- [ ] Stress H563 UART error recovery, DMA overflow, timing accuracy, and extended sleep/wake behavior.
 - [ ] Explore a MISRA-friendly alternative to printf-style log formatting.
 - [x] Add STM32 UART command input using application-owned line buffering (H755 M7).
 - [x] Add STM32H755 support with pinned CubeH7 HAL, M7 console, and sleeping M4 image.
@@ -18,11 +19,18 @@
 - [ ] Validate H755 USB sustained backpressure recovery on hardware.
 - [x] Add shared board timer command and verify 200 ms completion on H755 hardware.
 - [x] Bring H563 USB console to H755 feature parity using shared CDC middleware and transport code.
-- [ ] Validate H563 USB-C attachment in both orientations, enumeration, commands, logs, suspend/resume, and reconnect on hardware.
+- [x] Validate H563 USB enumeration, commands/logging, DTR reopen, and recovery after software reset.
+- [x] Validate H563 USB-C attachment in both orientations and command recovery after physical reconnect.
+- [ ] Stress H563 USB backpressure and host suspend/resume on hardware.
 - [x] Add standalone lwIP IPv4 service, STM32 Ethernet drivers, and optional net module.
 - [x] Validate H755 DHCP/static addressing, ping, cable reconnect, and USB console responsiveness on hardware.
-- [ ] Validate H563 Ethernet on hardware.
+- [x] Validate H563 DHCP, large-packet ping, and single-client TCP console on hardware.
+- [x] Validate H563 DHCP/TCP recovery after Ethernet cable reconnection.
+- [ ] Validate H563 static IPv4 on hardware.
 - [x] Add a single-client TCP console on port 1000 with independent command/log registration.
 - [ ] Generalize the standalone TCP API for multiple application listeners/connections.
 
 - [x] Extract shared console helpers and CRTP module; make USB application-owned and consume TCP input in bounded chunks.
+
+- [x] Fix H563 startup stack-overflow fault: reserve 64 KiB for the application-owned console and nested calls.
+- [ ] Revisit H755 stack reservation after the application-owned console refactor; its Cortex-M7 has no MSPLIM guard.

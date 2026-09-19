@@ -172,9 +172,12 @@ board's Type-C attachment circuitry. See ST's
 
 Unlike H755 OTG FS, H563 DRD FS has no VBUS disconnect interrupt. Suspend clears
 unfinished input and queued output; DTR is retained for normal host resume.
-Bus reset and DTR deassertion also clear session buffers. Reconnect and USB-C
-attachment in both cable orientations still need hardware validation.
-The H563 firmware is cross-compiled but has not been tested on hardware.
+Bus reset and DTR deassertion also clear session buffers. Physical reconnect and USB-C
+attachment in both cable orientations have passed hardware checks.
+H563 hardware bring-up has verified HSI boot, UART/USB commands and logging,
+TX DMA, all three LEDs, button press/release, the 200 ms timer command, DHCP,
+large-packet ping, and the TCP console. Software reset recovers UART/USB and
+DHCP/TCP operation.
 
 The CubeMX source project is `examples/stm32h563_blinky/blinky_demo.ioc`, selecting
 STM32H563ZIT6. Keep generated Core sources, the startup assembly, and the FLASH
@@ -188,7 +191,11 @@ peripheral initialization. Shared commands, logging, input, and IRQ bridges live
 in `examples/stm32_console/`; each target supplies `board_config.h` and `console.cpp`
 for its platform, LED/button access, DMA storage/cache handling, and timer clock.
 The scheduler lives on the main stack; the `.ioc` and FLASH linker script reserve
-16 KiB for it and interrupt frames. GCC's `.su` stack reports are emitted beside
+64 KiB for application-owned console objects, nested calls, and interrupt frames.
+The Cortex-M33 startup programs `MSPLIM` from this reservation. The full debug
+build uses 34,216 bytes in `DaveOS_Run()` alone; the former 16 KiB reservation
+caused a stack-overflow HardFault before USB or the scheduler could start. Keep
+the 64 KiB setting when regenerating with CubeMX. GCC's `.su` reports are emitted beside
 the example's object files. C++ exceptions and RTTI are disabled. The example
 allows hosted headers because ST's umbrella header includes `math.h`; the core
 and STM32 adapter remain compiled in freestanding mode. The firmware disables
@@ -780,7 +787,10 @@ the configuration in RAM before service initialization, using the board's
 current DHCP lease address; a reset restored the default DHCP configuration.
 The RX adapter treats a null chain head as a new packet: ST's HAL retains the
 previous tail after delivery, so testing that tail would leak receive buffers.
-H563 Ethernet builds successfully; its hardware validation remains pending.
+H563 Ethernet has passed hardware checks for DHCP, 100 Mbit full-duplex link,
+1,400-byte ping payloads, TCP commands, rejection of a second client, and TCP
+reconnection, including DHCP recovery after physically unplugging Ethernet.
+Static IPv4 remains to validate on H563 hardware.
 
 
 With networking enabled, both STM32 demos also register an independent TCP log
@@ -815,8 +825,8 @@ H755 hardware checks passed for TCP `help`, `net status`, asynchronous timer
 logs, rejection of a second client, and reconnect after an unfinished command.
 Packet tests also cover a full receive window, complete-record output overflow,
 peer FIN/reset, and link-loss recovery. H563 has build coverage, including TCP
-without UART/USB/logging and networking without the TCP console; hardware
-validation remains pending.
+without UART/USB/logging and networking without the TCP console. Its UART,
+USB, Ethernet, and TCP console also pass initial hardware bring-up checks.
 
 
 Shared console helpers live in `console/` under `daveos::console`, with an
@@ -844,3 +854,18 @@ callback ownership across failed initialization, stop, and a new instance.
 After the console refactor, H755 hardware checks passed for USB commands,
 multiple TCP commands in one burst, completion of a partial command in a later
 packet, and delivery of USB-originated command logs to the TCP subscriber.
+
+
+For the full H563 console matching the H755 configuration:
+
+```sh
+meson setup build/net-h563 --cross-file meson/stm32h563.ini -Dexamples=true -Dnetworking=true
+meson compile -C build/net-h563
+meson compile -C build/net-h563 flash-openocd
+```
+
+Keep ST-LINK connected, connect CN13 USB-C for the independent USB console,
+and CN14 to a DHCP LAN. `net status` reports the address for `nc <address> 1000`.
+When switching boards, stop any OpenOCD process still configured for the H755;
+use `target/stm32h5x.cfg` for H563. If GDB attachment cannot halt the old firmware,
+issue `reset halt` through OpenOCD before attaching.
