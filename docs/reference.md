@@ -468,7 +468,7 @@ type, and inclusive-range validation. Declare one `core::arg("name")` per
 parameter; add `.min(value)`, `.max(value)`, or `.range(low, high)` for numeric
 constraints. Trailing `std::optional<T>` arguments become `std::nullopt` when
 omitted. Metadata mismatches fail compilation. The adapter supports integral
-types, `float`, `double`, `bool`, and borrowed `std::string_view`, plus trailing
+types, `float`, `double`, `bool`, enum choices, and borrowed `std::string_view`, plus trailing
 optional forms. It consumes whole tokens and rejects numeric overflow, floating
 underflow, NaN, and infinity. Integers accept decimal and explicit `0x`/`0b`
 prefixes; leading zeros stay decimal. Floats accept decimal/scientific notation.
@@ -476,6 +476,20 @@ prefixes; leading zeros stay decimal. Floats accept decimal/scientific notation.
 Strict booleans accept exactly `true` and `false`. `.friendly()` accepts
 case-insensitive `true/false`, `1/0`, `on/off`, `yes/no`, `enable/disable`,
 `high/low`, and `set/clear`; unknown values are rejected.
+
+Enums declared with `DAVEOS_ENUM` automatically provide choices for
+`core::arg("mode")`, including `std::optional<Enum>` parameters. To customize
+labels or select a subset, declare a static constexpr `std::array` of
+`core::EnumChoice{"label", Enum::value}` and use `.choices<table>()` on the
+argument. Actual enum values are preserved, including sparse/negative values.
+Tables must be nonempty and names must be nonempty and unique ignoring case;
+table/handler enum mismatches are compile errors. Distinct labels may alias the
+same value. Matching uses the routing lazy matcher: exact matches win, otherwise
+one unique case-insensitive prefix is accepted. Unknown choices return
+`not_found`, ambiguous ones return `ambiguous_match`, and neither invokes the
+handler. Quoted empty strings do not count as omitted optional arguments.
+Help shows the choices and errors identify the failing argument. See the
+[typed command examples](02-logging-and-commands.md).
 
 Handlers needing custom syntax can instead receive `CommandArguments`, a
 `std::span<const std::string_view>` valid only until they return, and validate
@@ -825,7 +839,8 @@ formatter; subscribers still choose the transport and line ending.
 
 ### Named enums
 
-`core/enum/enum.h` generates scoped enums and `constexpr enum_name()` overloads
+`core/enum/enum.h` generates scoped enums, `constexpr enum_name()` overloads,
+and `enum_choices()` name/value tables
 from a single list, with no allocation or separate string table to maintain:
 
 ```cpp

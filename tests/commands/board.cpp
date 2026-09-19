@@ -27,14 +27,24 @@ TEST_CASE(
       CHECK_FALSE(board::leds[i - 1]);
     }
     const auto writes = board::writes;
-    for (auto line :
-         {"board led", "board led 1", "board led 1 on extra", "board led 0 on",
-          "board led 4 on", "board led -1 on", "board led 256 on",
-          "board led 1.5 on", "board led 1 unknown", "board led 1 \"\"",
-          "board led 1 \"on off\""}) {
+    for (auto line : {"board led", "board led 1", "board led 1 on extra",
+                      "board led 0 on", "board led 4 on", "board led -1 on",
+                      "board led 256 on", "board led 1.5 on"}) {
       CHECK(dispatcher.dispatch(line) == core::Status::invalid_argument);
       CHECK(board::writes == writes);
     }
+    for (auto line : {"board led 1 unknown", R"(board led 1 "")",
+                      R"(board led 1 "on off")"}) {
+      CHECK(dispatcher.dispatch(line) == core::Status::not_found);
+      CHECK(board::writes == writes);
+    }
+    CHECK(dispatcher.dispatch("board led 1 o") ==
+          core::Status::ambiguous_match);
+    CHECK(board::writes == writes);
+    CHECK(dispatcher.dispatch("board led 1 ON") == core::Status::ok);
+    CHECK(board::leds[0]);
+    CHECK(dispatcher.dispatch("board led 1 t") == core::Status::ok);
+    CHECK_FALSE(board::leds[0]);
     CHECK(dispatcher.dispatch("board led 0x2 on") == core::Status::ok);
     CHECK(board::leds[1]);
     CHECK(dispatcher.dispatch("board button") == core::Status::ok);

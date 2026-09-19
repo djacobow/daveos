@@ -8,6 +8,11 @@ namespace core = daveos::core;
 namespace {
 
   enum class Event { sample };
+#define ARM_MODES(X) X(start, -1) X(stop, 7)
+  DAVEOS_ENUM(Mode, std::int8_t, ARM_MODES)
+#undef ARM_MODES
+  inline constexpr std::array modes{core::EnumChoice{"start", Mode::start},
+                                    core::EnumChoice{"stop", Mode::stop}};
 
   struct Example : core::Module<Example, Event> {
     static constexpr const char* name() { return "arm_compile"; }
@@ -21,14 +26,17 @@ namespace {
       return std::array{DAVEOS_COMMAND(Example, Run, "run", "Schedule tick"),
                         DAVEOS_COMMAND(Example, Sample, "sample", "Sample",
                                        core::arg("rate").range(0.5f, 100.0f),
-                                       core::arg("enabled").friendly())};
+                                       core::arg("enabled").friendly(),
+                                       core::arg("mode").choices<modes>())};
     }
 
     core::Status Run() {
       return scheduler().schedule(*this, &Example::tick, 0);
     }
 
-    core::Status Sample(float, std::optional<bool>) { return core::Status::ok; }
+    core::Status Sample(float, std::optional<bool>, std::optional<Mode>) {
+      return core::Status::ok;
+    }
 
     void tick() {
       scheduler().post(Event::sample, this);
@@ -38,7 +46,7 @@ namespace {
 
   static_assert(std::string_view(core::command<&Example::Sample>(
                                      "sample", "Sample", core::arg("rate"),
-                                     core::arg("enabled"))
+                                     core::arg("enabled"), core::arg("mode"))
                                      .handler) == "Sample");
 }  // namespace
 

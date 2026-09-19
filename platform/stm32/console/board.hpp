@@ -9,6 +9,10 @@ namespace daveos::platform::stm32 {
   namespace core = daveos::core;
   using Platform = board::Platform;
 
+#define DAVEOS_LED_ACTIONS(X) X(on) X(off) X(toggle)
+  DAVEOS_ENUM(LedAction, std::uint8_t, DAVEOS_LED_ACTIONS)
+#undef DAVEOS_LED_ACTIONS
+
   template <typename Event>
   class Board final : public daveos::core::Module<Board<Event>, Event> {
    public:
@@ -45,17 +49,15 @@ namespace daveos::platform::stm32 {
 
     core::Status Reset() { return platform_.reset(); }
 
-    core::Status Led(std::uint8_t led, std::string_view action) {
+    core::Status Led(std::uint8_t led, LedAction action) {
       const auto index = static_cast<std::size_t>(led - 1);
-      if (action == "toggle") {
+      if (action == LedAction::toggle) {
         board::ToggleLed(index);
-      } else if (action == "on" || action == "off") {
-        board::SetLed(index, action == "on");
       } else {
-        return core::Status::invalid_argument;
+        board::SetLed(index, action == LedAction::on);
       }
-      I_("LED %" PRIu32 " %.*s", static_cast<std::uint32_t>(led),
-         static_cast<int>(action.size()), action.data());
+      I_("LED %" PRIu32 " %s", static_cast<std::uint32_t>(led),
+         enum_name(action));
       return core::Status::ok;
     }
 

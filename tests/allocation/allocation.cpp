@@ -10,6 +10,9 @@ namespace core = daveos::core;
 namespace test = testing;
 
 namespace {
+#define TEST_ALLOCATION_CHOICES(X) X(on) X(off) X(toggle)
+  DAVEOS_ENUM(Choice, std::uint8_t, TEST_ALLOCATION_CHOICES)
+#undef TEST_ALLOCATION_CHOICES
   thread_local bool counting = false;
   std::atomic<unsigned> allocations = 0;
 }  // namespace
@@ -76,10 +79,17 @@ TEST_CASE(
     static constexpr auto commands() {
       return std::array{
           DAVEOS_COMMAND(Commands, Run, "run", "Run command"),
+          DAVEOS_COMMAND(Commands, Choose, "choose", "Choose mode",
+                         core::arg("mode")),
           DAVEOS_COMMAND(Commands, Typed, "typed", "Typed command",
                          core::arg("rate").range(0.5f, 100.0f),
                          core::arg("count").min(1u),
                          core::arg("enabled").friendly())};
+    }
+
+    core::Status Choose(Choice value) {
+      return value == Choice::toggle ? core::Status::ok
+                                     : core::Status::invalid_argument;
     }
 
     core::Status Typed(float rate, std::uint32_t count,
@@ -107,10 +117,11 @@ TEST_CASE(
   auto scheduler = core::make_scheduler<test::Event>(platform, modules, logger);
   core::CommandDispatcher dispatcher(modules, scheduler);
   core::Status command_status{}, help_status{}, invalid_status{},
-      typed_status{};
+      typed_status{}, choice_status{};
   input.first_action = [&] {
     command_status = dispatcher.dispatch("commands run \"one two\"");
     typed_status = dispatcher.dispatch("commands typed 1.25 0x10 high");
+    choice_status = dispatcher.dispatch("commands choose tog");
     help_status = dispatcher.dispatch("help");
     invalid_status = dispatcher.dispatch("unknown");
     scheduler.stop();
@@ -123,6 +134,7 @@ TEST_CASE(
   CHECK(status == core::Status::ok);
   CHECK(command_status == core::Status::ok);
   CHECK(typed_status == core::Status::ok);
+  CHECK(choice_status == core::Status::ok);
   CHECK(help_status == core::Status::ok);
   CHECK(invalid_status == core::Status::not_found);
   CHECK(allocations == 0);

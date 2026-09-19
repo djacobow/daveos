@@ -61,6 +61,44 @@ std::optional<std::string_view> suffix)` receives borrowed tokens after the norm
 quote/escape processing. An omitted suffix is `std::nullopt`; `""` supplies an
 empty string. Neither view should be retained after the handler returns.
 
+Enum parameters can use named choices with the same lazy matching as command
+names. Declare the enum at namespace scope:
+
+```cpp
+#define APP_ACTIONS(X) X(on) X(off) X(toggle)
+DAVEOS_ENUM(Action, std::uint8_t, APP_ACTIONS)
+#undef APP_ACTIONS
+```
+
+Then declare a typed handler and its command inside the module:
+
+```cpp
+core::Status Led(std::uint8_t index, Action action);
+
+// In commands():
+DAVEOS_COMMAND(Board, Led, "led", "Control a LED",
+               core::arg("index").range(1u, 3u), core::arg("action"))
+```
+
+`on` matches exactly, `t` selects `toggle`, and `o` is ambiguous. Matching ignores
+ASCII case. `std::optional<Action>` works too. Unknown and ambiguous choices
+return `not_found` and `ambiguous_match` without calling the handler.
+
+For different labels or a subset, provide a static constexpr table:
+
+```cpp
+inline constexpr std::array actions{
+    core::EnumChoice{"enable", Action::on},
+    core::EnumChoice{"disable", Action::off}};
+
+// Argument declaration:
+core::arg("action").choices<actions>()
+```
+
+Table enum types must match the handler; empty tables and duplicate/empty labels
+fail compilation. Help displays available labels. An explicit table also works
+with an ordinary `enum class` that was not declared through `DAVEOS_ENUM`.
+
 For unusual syntax, retain a `core::CommandArguments` handler and omit argument
 metadata. It validates its own input. Raw argument views and typed
 `std::string_view` parameters are borrowed only during the callback.

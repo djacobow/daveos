@@ -242,6 +242,11 @@ namespace daveos::core {
           scheduler_.log(Level::info, "    %c%s%c: %s",
                          argument.optional ? '[' : '<', argument.name,
                          argument.optional ? ']' : '>', argument.type);
+          for (std::size_t choice = 0; choice < argument.choice_count;
+               ++choice) {
+            scheduler_.log(Level::info, "      %s",
+                           argument.choice_name(choice));
+          }
         }
       }
 #endif
@@ -287,11 +292,17 @@ namespace daveos::core {
 #if DAVEOS_LOGGING
       if (call.error.reason) {
         if (call.error.argument) {
-          scheduler_.log(
-              Level::error,
-              "%s %s: argument '%s' must be %s and within its bounds",
-              M::command_prefix(), call.descriptor.name,
-              call.error.argument->name, call.error.argument->type);
+          if (call.error.argument->choice_count) {
+            scheduler_.log(Level::error, "%s %s: argument '%s': %s",
+                           M::command_prefix(), call.descriptor.name,
+                           call.error.argument->name, call.error.reason);
+          } else {
+            scheduler_.log(
+                Level::error,
+                "%s %s: argument '%s' must be %s and within its bounds",
+                M::command_prefix(), call.descriptor.name,
+                call.error.argument->name, call.error.argument->type);
+          }
         } else {
           scheduler_.log(Level::error,
                          "%s %s: expected %" PRIu32 " to %" PRIu32
@@ -314,10 +325,10 @@ namespace daveos::core {
           message = "malformed command line";
           break;
         case Status::ambiguous_match:
-          message = "ambiguous command";
+          message = "ambiguous command or choice";
           break;
         case Status::not_found:
-          message = "unknown command";
+          message = "unknown command or choice";
           break;
         case Status::line_too_long:
           message = "command line too long";

@@ -13,6 +13,7 @@
 #include <type_traits>
 #include <utility>
 
+#include "core/enum/choices.hpp"
 #include "match.hpp"
 
 namespace daveos::core {
@@ -23,11 +24,21 @@ namespace daveos::core {
 
   namespace detail {
     struct NoBound {};
+
+    template <auto& Table>
+    struct Choices {
+      static constexpr auto& entries = Table;
+    };
+
+    template <typename E>
+    inline constexpr auto EnumChoices = enum_choices(E{});
+
   }  // namespace detail
 
   // Fluent, constexpr argument declarations retain bound types for validation.
   template <typename Minimum = detail::NoBound,
-            typename Maximum = detail::NoBound, bool Friendly = false>
+            typename Maximum = detail::NoBound, bool Friendly = false,
+            typename ChoiceSet = void>
   struct Argument {
     const char* name;
     Minimum minimum{};
@@ -35,12 +46,12 @@ namespace daveos::core {
 
     template <typename T>
     constexpr auto min(T value) const {
-      return Argument<T, Maximum, Friendly>{name, value, maximum};
+      return Argument<T, Maximum, Friendly, ChoiceSet>{name, value, maximum};
     }
 
     template <typename T>
     constexpr auto max(T value) const {
-      return Argument<Minimum, T, Friendly>{name, minimum, value};
+      return Argument<Minimum, T, Friendly, ChoiceSet>{name, minimum, value};
     }
 
     template <typename L, typename H>
@@ -48,8 +59,18 @@ namespace daveos::core {
       return min(low).max(high);
     }
 
+    // Table must have static constexpr storage. Labels can differ from enum
+    // identifiers or select a subset; its enum must match the handler
+    // parameter.
+    template <auto& Table>
+    constexpr auto choices() const {
+      return Argument<Minimum, Maximum, Friendly, detail::Choices<Table>>{
+          name, minimum, maximum};
+    }
+
     constexpr auto friendly() const {
-      return Argument<Minimum, Maximum, true>{name, minimum, maximum};
+      return Argument<Minimum, Maximum, true, ChoiceSet>{name, minimum,
+                                                         maximum};
     }
   };
 
@@ -115,12 +136,16 @@ namespace daveos::core {
     bool has_maximum = false;
     bool friendly = false;
     bool optional = false;
+    std::size_t choice_count = 0;
+    const char* (*choice_name)(std::size_t) = nullptr;
+    Status (*parse_choice)(std::string_view, void*) = nullptr;
   };
 
   // Set only for adapter failures, not for errors returned by a handler.
   struct ArgumentError {
     const ArgumentMetadata* argument = nullptr;
     const char* reason = nullptr;
+    Status status = Status::invalid_argument;
   };
 
   namespace detail {
@@ -147,15 +172,48 @@ namespace daveos::core {
       return static_cast<T>(value);
     }
 
-    template <typename P, typename L, typename H, bool F>
-    constexpr ArgumentMetadata Metadata(Argument<L, H, F> declaration) {
+    template <typename E, auto& Table>
+    constexpr void ChoiceMetadata(ArgumentMetadata& result) {
+      using Value = std::remove_cvref_t<decltype(Table[0].value)>;
+      static_assert(std::is_same_v<E, Value>,
+                    "choice table enum must match the handler parameter");
+      if (Table.empty()) {
+        std::abort();
+      }
+      for (std::size_t i = 0; i < Table.size(); ++i) {
+        if (!Table[i].name || !*Table[i].name) {
+          std::abort();
+        }
+        for (std::size_t j = 0; j < i; ++j) {
+          if (EqualName(Table[i].name, Table[j].name)) {
+            std::abort();
+          }
+        }
+      }
+      result.type = "enum choice";
+      result.choice_count = Table.size();
+      result.choice_name = [](std::size_t i) { return Table[i].name; };
+      result.parse_choice = [](std::string_view text, void* output) {
+        auto match = lazy_match(text, Table.size(),
+                                [](std::size_t i) { return Table[i].name; });
+        if (match.status == Status::ok) {
+          *static_cast<E*>(output) = Table[match.index].value;
+        }
+        return match.status;
+      };
+    }
+
+    template <typename P, typename L, typename H, bool F, typename C>
+    constexpr ArgumentMetadata Metadata(Argument<L, H, F, C> declaration) {
       using T = typename Optional<P>::Value;
-      static_assert(std::is_integral_v<T> || std::is_same_v<T, float> ||
-                        std::is_same_v<T, double> ||
+      static_assert(std::is_enum_v<T> || std::is_integral_v<T> ||
+                        std::is_same_v<T, float> || std::is_same_v<T, double> ||
                         std::is_same_v<T, std::string_view>,
                     "unsupported command parameter type");
       static_assert(!F || std::is_same_v<T, bool>,
                     "friendly requires a boolean parameter");
+      static_assert(std::is_same_v<C, void> || std::is_enum_v<T>,
+                    "choices require an enum parameter");
       constexpr bool low = !std::is_same_v<L, NoBound>;
       constexpr bool high = !std::is_same_v<H, NoBound>;
       static_assert(!(low || high) ||
@@ -170,7 +228,18 @@ namespace daveos::core {
       result.friendly = F;
       result.has_minimum = low;
       result.has_maximum = high;
-      if constexpr (std::is_same_v<T, bool>) {
+      if constexpr (std::is_enum_v<T>) {
+        if constexpr (!std::is_same_v<C, void>) {
+          ChoiceMetadata<T, C::entries>(result);
+        } else {
+          static_assert(
+              requires { enum_choices(T{}); },
+              "enum parameters need DAVEOS_ENUM or an explicit choices table");
+          if constexpr (requires { enum_choices(T{}); }) {
+            ChoiceMetadata<T, EnumChoices<T>>(result);
+          }
+        }
+      } else if constexpr (std::is_same_v<T, bool>) {
         result.type = F ? "boolean alias" : "true or false";
       } else if constexpr (std::is_integral_v<T>) {
         result.type =
@@ -264,14 +333,19 @@ namespace daveos::core {
     }
 
     template <typename P>
-    bool Parse(std::string_view text, const ArgumentMetadata& metadata,
-               P& output) {
+    Status Parse(std::string_view text, const ArgumentMetadata& metadata,
+                 P& output) {
       using T = typename Optional<P>::Value;
       T value{};
-      if constexpr (std::is_same_v<T, bool>) {
+      if constexpr (std::is_enum_v<T>) {
+        auto status = metadata.parse_choice(text, &value);
+        if (status != Status::ok) {
+          return status;
+        }
+      } else if constexpr (std::is_same_v<T, bool>) {
         if (!metadata.friendly) {
           if (text != "true" && text != "false") {
-            return false;
+            return Status::invalid_argument;
           }
           value = text == "true";
         } else {
@@ -288,7 +362,7 @@ namespace daveos::core {
             }
           }
           if (!found) {
-            return false;
+            return Status::invalid_argument;
           }
         }
       } else if constexpr (std::is_same_v<T, std::string_view>) {
@@ -297,11 +371,11 @@ namespace daveos::core {
         if (!Number(text, value) ||
             (metadata.has_minimum && value < Load<T>(metadata.minimum)) ||
             (metadata.has_maximum && value > Load<T>(metadata.maximum))) {
-          return false;
+          return Status::invalid_argument;
         }
       }
       output = value;
-      return true;
+      return Status::ok;
     }
 
     // GCC/Clang expose the selected function in their template signature. This
@@ -368,15 +442,25 @@ namespace daveos::core {
             descriptor,
         ArgumentError& error, std::index_sequence<I...>) {
       Tuple values{};
-      bool valid =
-          ((I >= args.size() ||
-            Parse(args[I], descriptor.arguments[I], std::get<I>(values)) ||
-            (error = {&descriptor.arguments[I],
-                      "invalid value or outside allowed range"},
-             false)) &&
-           ...);
-      if (!valid) {
-        return Status::invalid_argument;
+      [[maybe_unused]] auto parse = [&]<std::size_t Index>() {
+        if (Index >= args.size()) {
+          return true;
+        }
+        auto status = Parse(args[Index], descriptor.arguments[Index],
+                            std::get<Index>(values));
+        if (status == Status::ok) {
+          return true;
+        }
+        error = {&descriptor.arguments[Index],
+                 status == Status::ambiguous_match ? "ambiguous choice"
+                 : status == Status::not_found
+                     ? "unknown choice"
+                     : "invalid value or outside allowed range",
+                 status};
+        return false;
+      };
+      if (!(parse.template operator()<I>() && ...)) {
+        return error.status;
       }
       return std::apply(
           [&](auto... value) { return (owner.*Function)(value...); }, values);

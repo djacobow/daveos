@@ -1,4 +1,4 @@
-exe = executable('test-commands', ['commands.cpp', 'typed.cpp', 'argument_matrix.cpp', 'board.cpp'], dependencies: test_support_dep,
+exe = executable('test-commands', ['commands.cpp', 'typed.cpp', 'argument_matrix.cpp', 'board.cpp', 'choices.cpp'], dependencies: test_support_dep,
   include_directories: include_directories('.'))
 test('commands', exe, suite: 'unit', timeout: 20)
 
@@ -159,5 +159,47 @@ foreach count, expected : {'16': true, '17': false}
   if cpp.compiles(capacity_check.format(count), dependencies: core_dep,
       name: 'typed parameter capacity ' + count) != expected
     error('Typed parameter capacity check did not behave as expected')
+  endif
+endforeach
+
+choices_check = '''
+  #include "core/command/arguments.hpp"
+  #define MODES(X) X(on, -7) X(once, 10) X(off, 50)
+  DAVEOS_ENUM(Mode, std::int16_t, MODES)
+  #undef MODES
+  enum class Plain { one, two };
+  inline constexpr std::array labels{daveos::core::EnumChoice{"start", Mode::on}};
+  inline constexpr std::array wrong{daveos::core::EnumChoice{"one", Plain::one}};
+  inline constexpr std::array duplicate{daveos::core::EnumChoice{"on", Mode::on}, daveos::core::EnumChoice{"ON", Mode::off}};
+  inline constexpr std::array empty_name{daveos::core::EnumChoice{"", Mode::on}};
+  inline constexpr std::array null_name{daveos::core::EnumChoice<Mode>{nullptr, Mode::on}};
+  inline constexpr std::array<daveos::core::EnumChoice<Mode>, 0> empty{};
+  struct Receiver { daveos::core::Status Apply(@0@) { return daveos::core::Status::ok; } };
+  constexpr auto descriptor = daveos::core::command<&Receiver::Apply>("apply", "Apply", daveos::core::arg("mode")@1@);
+'''
+foreach variant : [
+  ['Mode', '', true],
+  ['std::optional<Mode>', '', true],
+  ['Mode', '.choices<labels>()', true],
+  ['std::optional<Mode>', '.choices<labels>()', true],
+  ['Plain', '.choices<wrong>()', true],
+  ['Mode', '.choices<wrong>()', false],
+  ['std::optional<Mode>', '.choices<wrong>()', false],
+  ['Mode', '.choices<duplicate>()', false],
+  ['Mode', '.choices<empty_name>()', false],
+  ['Mode', '.choices<null_name>()', false],
+  ['Mode', '.choices<empty>()', false],
+  ['Mode', '.min(0)', false],
+  ['Mode', '.friendly()', false],
+  ['std::optional<Mode>', '.choices<labels>().max(1)', false],
+  ['Mode', '.friendly().choices<labels>()', false],
+  ['int', '.choices<labels>()', false],
+  ['bool', '.choices<labels>()', false],
+  ['std::string_view', '.choices<labels>()', false],
+  ['Plain', '', false],
+]
+  if cpp.compiles(choices_check.format(variant[0], variant[1]), dependencies: core_dep,
+      name: 'enum choices ' + variant[0] + variant[1]) != variant[2]
+    error('Enum choice declaration validation did not behave as expected')
   endif
 endforeach
