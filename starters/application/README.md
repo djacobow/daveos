@@ -5,9 +5,6 @@ repository's root. It contains one module, a real-time host executable, and a
 fake-time test of the same module. Application module constructors are passive;
 the scheduler runs stage1 for every module before any stage2 callback.
 
-The current NoEvent update requires a local checkout at `subprojects/daveos`
-before setup; see [updating the dependency pin](#updating-the-dependency-pin).
-
 ```sh
 meson setup build/host
 meson compile -C build/host
@@ -16,7 +13,7 @@ meson test -C build/host --print-errorlogs
 ```
 
 The first setup downloads DaveOS through `subprojects/daveos.wrap`. Its revision
-pins the tested variant-event API commit; keep future upgrades pinned too.
+pins the tested NoEvent and compact-command API commit; keep future upgrades pinned too.
 For local development, place a checkout (or symlink) at `subprojects/daveos`
 before setup to skip the download. The real-time host platform starts its
 timer thread when constructed in `main()`; module initialization waits for `run()`.
@@ -37,9 +34,7 @@ this starter intentionally supplies only host/fake build targets.
 
 ## Updating the dependency pin
 
-The current NoEvent defaults require the local DaveOS checkout until the next
-implementation commit is pinned. For a release, commit the framework changes
-first, then set `revision` in both starter `subprojects/daveos.wrap` files to that
+For a release, commit the framework changes first, then set `revision` in both starter `subprojects/daveos.wrap` files to that
 full commit hash (`git rev-parse HEAD`). Commit the pin updates separately and
 publish both commits. Rebuild both starters against the selected revision; keep
 pins fixed to commits rather than moving branches.
