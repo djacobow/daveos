@@ -11,10 +11,10 @@ namespace {
 
     static constexpr auto commands() {
       return std::array{
-          DAVEOS_COMMAND(Motor, "speed", SetSpeed, "Set motor speed"),
-          DAVEOS_COMMAND(Motor, "special", Special, "Special operation"),
-          DAVEOS_COMMAND(Motor, "set", Set, "Set value"),
-          DAVEOS_COMMAND(Motor, "settings", Settings, "Show settings")};
+          DAVEOS_COMMAND(Motor, SetSpeed, "speed", "Set motor speed"),
+          DAVEOS_COMMAND(Motor, Special, "special", "Special operation"),
+          DAVEOS_COMMAND(Motor, Set, "set", "Set value"),
+          DAVEOS_COMMAND(Motor, Settings, "settings", "Show settings")};
     }
 
     std::function<core::Status(core::CommandArguments)> action;
@@ -237,7 +237,7 @@ TEST_CASE(
     static constexpr const char* command_prefix() { return "console"; }
 
     static constexpr auto commands() {
-      return std::array{DAVEOS_COMMAND(OnlyCommands, "exit", Exit, "Stop")};
+      return std::array{DAVEOS_COMMAND(OnlyCommands, Exit, "exit", "Stop")};
     }
 
     std::function<void()> action;

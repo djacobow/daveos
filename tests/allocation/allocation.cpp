@@ -74,7 +74,19 @@ TEST_CASE(
     static constexpr const char* name() { return "commands"; }
 
     static constexpr auto commands() {
-      return std::array{DAVEOS_COMMAND(Commands, "run", Run, "Run command")};
+      return std::array{
+          DAVEOS_COMMAND(Commands, Run, "run", "Run command"),
+          DAVEOS_COMMAND(Commands, Typed, "typed", "Typed command",
+                         core::arg("rate").range(0.5f, 100.0f),
+                         core::arg("count").min(1u),
+                         core::arg("enabled").friendly())};
+    }
+
+    core::Status Typed(float rate, std::uint32_t count,
+                       std::optional<bool> enabled) {
+      return rate == 1.25f && count == 16 && enabled == true
+                 ? core::Status::ok
+                 : core::Status::invalid_argument;
     }
 
     core::Status Run(core::CommandArguments args) {
@@ -94,9 +106,11 @@ TEST_CASE(
                     nullptr, [](void*, const core::LogRecord&) {}}});
   auto scheduler = core::make_scheduler<test::Event>(platform, modules, logger);
   core::CommandDispatcher dispatcher(modules, scheduler);
-  core::Status command_status{}, help_status{}, invalid_status{};
+  core::Status command_status{}, help_status{}, invalid_status{},
+      typed_status{};
   input.first_action = [&] {
     command_status = dispatcher.dispatch("commands run \"one two\"");
+    typed_status = dispatcher.dispatch("commands typed 1.25 0x10 high");
     help_status = dispatcher.dispatch("help");
     invalid_status = dispatcher.dispatch("unknown");
     scheduler.stop();
@@ -108,6 +122,7 @@ TEST_CASE(
   counting = false;
   CHECK(status == core::Status::ok);
   CHECK(command_status == core::Status::ok);
+  CHECK(typed_status == core::Status::ok);
   CHECK(help_status == core::Status::ok);
   CHECK(invalid_status == core::Status::not_found);
   CHECK(allocations == 0);
@@ -172,7 +187,7 @@ TEST_CASE(
     }
 
     static constexpr auto commands() {
-      return std::array{DAVEOS_COMMAND(Worker, "go", Go, "record invocation")};
+      return std::array{DAVEOS_COMMAND(Worker, Go, "go", "record invocation")};
     }
 
     core::Status Go(core::CommandArguments) {

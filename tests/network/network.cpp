@@ -364,6 +364,8 @@ TEST_CASE("Networking hardware failure leaves unrelated module running") {
 
   struct Other : daveos::core::Module<Other, Event> {
     bool called = false;
+    core::CommandSource source;
+    core::Status status_result{}, extra_result{};
 
     static constexpr const char* name() { return "other"; }
 
@@ -374,16 +376,22 @@ TEST_CASE("Networking hardware failure leaves unrelated module running") {
 
     void Run() {
       called = true;
+      status_result = source.dispatch("net status");
+      extra_result = source.dispatch("net status extra");
       scheduler().stop();
     }
   } other;
 
-  auto scheduler = daveos::core::make_scheduler<Event>(
-      platform, daveos::core::ModuleList{&network, &other});
+  auto modules = core::ModuleList{&network, &other};
+  auto scheduler = core::make_scheduler<Event>(platform, modules);
+  core::CommandDispatcher dispatcher(modules, scheduler);
+  dispatcher.bind_sources(core::CommandSourceList{other.source});
   REQUIRE(scheduler.schedule(other, &Other::Run, 1) ==
           daveos::core::Status::ok);
   REQUIRE(scheduler.run() == daveos::core::Status::ok);
   CHECK(other.called);
+  CHECK(other.status_result == core::Status::ok);
+  CHECK(other.extra_result == core::Status::invalid_argument);
   CHECK(s.snapshot().state == net::State::hardware_fault);
   CHECK_FALSE(s.init());
 }
@@ -528,7 +536,7 @@ namespace {
 
     static constexpr auto commands() {
       return std::array{
-          DAVEOS_COMMAND(Receiver, "add", Add, "Record invocation")};
+          DAVEOS_COMMAND(Receiver, Add, "add", "Record invocation")};
     }
 
     daveos::core::Status Add(daveos::core::CommandArguments) {

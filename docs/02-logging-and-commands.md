@@ -24,13 +24,10 @@ Declare commands on the module that implements them:
 
 ```cpp
 static constexpr auto commands() {
-  return std::array{DAVEOS_COMMAND(Greeter, "hello", Hello, "Print a greeting")};
+  return std::array{DAVEOS_COMMAND(Greeter, Hello, "hello", "Print a greeting")};
 }
 
-core::Status Hello(core::CommandArguments args) {
-  if (!args.empty()) {
-    return core::Status::invalid_argument;
-  }
+core::Status Hello() {
   I_("Hello!");
   return core::Status::ok;
 }
@@ -38,7 +35,35 @@ core::Status Hello(core::CommandArguments args) {
 
 If the module name is `greeter`, the command is `greeter hello`. The dispatcher
 handles tokenization, quoting, abbreviated names, and the complete `help` tree.
-Handlers receive argument views valid only during that callback.
+A zero-parameter handler rejects extra arguments automatically. For typed input:
+
+```cpp
+core::Status Sample(float rate, std::optional<std::uint32_t> count) {
+  return StartSampling(rate, count.value_or(100));
+}
+
+// In commands():
+DAVEOS_COMMAND(Sampler, Sample, "sample", "Collect samples",
+               core::arg("rate").range(0.5f, 1000.0f),
+               core::arg("count").min(1u))
+```
+
+The dispatcher checks count, conversion, and inclusive bounds before calling the
+handler. Only trailing parameters may be optional. Booleans accept `true/false`;
+`core::arg("enabled").friendly()` also accepts `1/0`, `on/off`, `yes/no`,
+`enable/disable`, `high/low`, and `set/clear`, ignoring ASCII case. Unknown values
+are errors. Integers accept decimal and explicit `0x`/`0b` prefixes; floats accept
+finite decimal/scientific values. Metadata mismatches fail at compile time.
+
+For unconverted text, use `std::string_view` with `core::arg("text")`.
+For example, `Status Label(std::string_view text,
+std::optional<std::string_view> suffix)` receives borrowed tokens after the normal
+quote/escape processing. An omitted suffix is `std::nullopt`; `""` supplies an
+empty string. Neither view should be retained after the handler returns.
+
+For unusual syntax, retain a `core::CommandArguments` handler and omit argument
+metadata. It validates its own input. Raw argument views and typed
+`std::string_view` parameters are borrowed only during the callback.
 
 A transport owns a `core::CommandSource`. Pass its source to Application:
 

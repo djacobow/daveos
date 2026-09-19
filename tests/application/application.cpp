@@ -150,7 +150,7 @@ TEST_CASE("application logging and command sources are independent") {
     static constexpr const char* name() { return "commands"; }
 
     static constexpr auto commands() {
-      return std::array{DAVEOS_COMMAND(Commands, "go", Go, "record a command")};
+      return std::array{DAVEOS_COMMAND(Commands, Go, "go", "record a command")};
     }
 
     core::Status Go(core::CommandArguments) {

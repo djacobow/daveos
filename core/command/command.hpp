@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <cinttypes>
 #include <limits>
 
 #include "core/schedule/module.hpp"
@@ -233,15 +234,22 @@ namespace daveos::core {
 #if DAVEOS_LOGGING
       scheduler_.log(Level::info, "%s:", M::command_prefix());
       scheduler_.log(Level::info, "  help - list module commands");
-      for (const auto& command : M::commands()) {
+      static constexpr auto commands = M::commands();
+      for (const auto& command : commands) {
         scheduler_.log(Level::info, "  %s - %s", command.name, command.help);
+        for (std::size_t i = 0; i < command.count; ++i) {
+          const auto& argument = command.arguments[i];
+          scheduler_.log(Level::info, "    %c%s%c: %s",
+                         argument.optional ? '[' : '<', argument.name,
+                         argument.optional ? ']' : '>', argument.type);
+        }
       }
 #endif
     }
 
     template <typename M>
     Status Handle(M& module, CommandArguments args) {
-      constexpr auto commands = M::commands();
+      static constexpr auto commands = M::commands();
       if (args.empty()) {
         Help<M>();
         return Status::ok;
@@ -263,17 +271,39 @@ namespace daveos::core {
 
       struct Call {
         M& module;
-        Status (M::*callback)(CommandArguments);
+        const CommandDescriptor<M>& descriptor;
+        ArgumentError error{};
         CommandArguments args;
-      } call{module, commands[match.index].callback, args.subspan(1)};
+      } call{module, commands[match.index], {}, args.subspan(1)};
 
-      return scheduler_.Invoke(
+      auto status = scheduler_.Invoke(
           {M::name(), commands[match.index].handler},
           [](void* argument) {
             auto& c = *static_cast<Call*>(argument);
-            return (c.module.*c.callback)(c.args);
+            return c.descriptor.callback(c.module, c.args, c.descriptor,
+                                         c.error);
           },
           &call);
+#if DAVEOS_LOGGING
+      if (call.error.reason) {
+        if (call.error.argument) {
+          scheduler_.log(
+              Level::error,
+              "%s %s: argument '%s' must be %s and within its bounds",
+              M::command_prefix(), call.descriptor.name,
+              call.error.argument->name, call.error.argument->type);
+        } else {
+          scheduler_.log(Level::error,
+                         "%s %s: expected %" PRIu32 " to %" PRIu32
+                         " arguments, received %" PRIu32,
+                         M::command_prefix(), call.descriptor.name,
+                         static_cast<std::uint32_t>(call.descriptor.required),
+                         static_cast<std::uint32_t>(call.descriptor.count),
+                         static_cast<std::uint32_t>(call.args.size()));
+        }
+      }
+#endif
+      return status;
     }
 
     void Error([[maybe_unused]] Status status) {

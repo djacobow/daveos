@@ -25,7 +25,7 @@ namespace daveos::net {
     }
 
     static constexpr auto commands() {
-      return std::array{DAVEOS_COMMAND(Module, "status", Status,
+      return std::array{DAVEOS_COMMAND(Module, Status, "status",
                                        "Ethernet link, IPv4, and counters")};
     }
 
@@ -52,10 +52,7 @@ namespace daveos::net {
       previous_ = current;
     }
 
-    core::Status Status(core::CommandArguments args) {
-      if (!args.empty()) {
-        return core::Status::invalid_argument;
-      }
+    core::Status Status() {
       Report(service_.snapshot());
       return core::Status::ok;
     }

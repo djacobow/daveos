@@ -9,7 +9,7 @@
 #include <tuple>
 #include <type_traits>
 
-#include "core/command/match.hpp"
+#include "core/command/arguments.hpp"
 #include "core/logging/log.hpp"
 #include "duration.hpp"
 
@@ -71,26 +71,6 @@ namespace daveos::core {
     static_assert(index < tasks.size(),
                   "task callback must be registered in tasks()");
     return index;
-  }
-
-  // Parsed views borrow the dispatcher's buffer until the handler returns.
-  using CommandArguments = std::span<const std::string_view>;
-
-  // Command metadata is validated when constructing a dispatcher. Names/help
-  // strings and the module object must outlive it; use DAVEOS_COMMAND below to
-  // preserve the actual C++ handler identifier for log attribution.
-  template <typename M>
-  struct CommandDescriptor {
-    const char* name;
-    const char* help;
-    Status (M::*callback)(CommandArguments);
-    const char* handler;
-  };
-
-// Spell the C++ function identifier once for both invocation and attribution.
-#define DAVEOS_COMMAND(ModuleType, command, function, description) \
-  ::daveos::core::CommandDescriptor<ModuleType> {                  \
-    command, description, &ModuleType::function, #function         \
   }
 
   template <typename Event, typename Modules, std::size_t LineCapacity = 256,

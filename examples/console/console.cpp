@@ -91,8 +91,8 @@ namespace app {
 
     static constexpr auto commands() {
       return std::array{
-          DAVEOS_COMMAND(Console, "echo", Echo, "Log the supplied arguments"),
-          DAVEOS_COMMAND(Console, "exit", Exit, "Stop the host program")};
+          DAVEOS_COMMAND(Console, Echo, "echo", "Log the supplied arguments"),
+          DAVEOS_COMMAND(Console, Exit, "exit", "Stop the host program")};
     }
 
     core::CommandSource& command_source() { return source_; }
@@ -116,6 +116,7 @@ namespace app {
       source_.dispatch(std::string_view(line.bytes.data(), line.size));
     }
 
+    // Echo deliberately accepts any number of tokens.
     core::Status Echo(core::CommandArguments args) {
       for ([[maybe_unused]] auto arg : args) {
         I_("%.*s", static_cast<int>(arg.size()), arg.data());
@@ -123,10 +124,7 @@ namespace app {
       return core::Status::ok;
     }
 
-    core::Status Exit(core::CommandArguments args) {
-      if (!args.empty()) {
-        return core::Status::invalid_argument;
-      }
+    core::Status Exit() {
       I_("Exiting");
       return scheduler().stop();
     }

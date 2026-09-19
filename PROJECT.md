@@ -678,6 +678,86 @@ interfaces must keep this specification and the application examples consistent.
 
 ## Command System
 
+### Typed argument adapters
+
+Add typed handler registration in the command layer, independent of scheduler
+internals. Keep raw `CommandArguments` handlers available for unusual syntax.
+The dispatcher remains the single tokenizer; adapters consume its argument views
+without allocating or splitting the line again.
+
+Infer parameter types and required/optional counts from member-function pointers
+using C++20 templates. Validate the complete argument list before invoking the
+handler, which returns `Status`. Reject extra arguments, missing required
+arguments, conversion failures, and values outside declared bounds. Trailing
+`std::optional<T>` parameters accept omitted arguments as `std::nullopt`; invalid
+supplied values are errors. Handlers choose defaults with `value_or()`; C++
+default parameter values are not inferred.
+
+Provide parsers for integers, floating-point values, and booleans. Numeric
+conversion consumes the entire argument and rejects overflow. Integer and float
+metadata can specify optional inclusive minimum/maximum bounds through
+`arg("name").min(value)`, `.max(value)`, or `.range(minimum, maximum)`.
+Reject NaN and infinity. Strict boolean parsing accepts `true` and `false`.
+Opt-in `.friendly()` accepts the pairs `true/false`, `1/0`, `on/off`, `yes/no`,
+`enable/disable`, `high/low`, and `set/clear`; unknown values are errors.
+
+Keep parsing and compile-time validation in a directly usable
+`command<&Board::Timer>("timer", "Start a timer", metadata...)` factory.
+Use a thin macro as the normal registration shorthand, capturing the C++ handler
+name for logging while keeping the public command name explicit:
+
+```cpp
+Status Timer(std::uint32_t microseconds);
+// Inside the module's constexpr commands() array:
+DAVEOS_COMMAND(Board, Timer, "timer", "Start a timer",
+               arg("microseconds").range(1u, 60'000'000u))
+```
+
+The macro order is module type, handler identifier, public name, help, then
+argument declarations. Do not use macros to declare handler functions or
+their parameters. Factory results share a descriptor type within each module,
+allowing different handler signatures in one array. Validate metadata count,
+type-compatible bounds/policies, and trailing optional parameters at compile
+time. Argument names support useful diagnostics and generated help showing
+`<required>` and `[optional]` parameters. Preserve actual module/C++ handler
+logging context. Direct factory calls derive the function label from GCC/Clang
+compiler signatures; the macro captures the identifier explicitly.
+
+Integer syntax is decimal, with optional `0x`/`0X` hexadecimal and `0b`/`0B`
+binary prefixes. Leading zeros remain decimal. A single leading sign is allowed;
+unsigned types reject minus signs. Floats (`float` and `double`) accept decimal
+and scientific notation, including one leading sign; reject nonfinite results,
+underflow/overflow, hexadecimal forms, whitespace, and trailing text. Conversion
+uses `std::from_chars` and is locale independent. Bounds are validated and
+converted to the parameter type at compile time; integer bounds must be integral
+and representable. Friendly boolean aliases are ASCII case-insensitive; strict
+booleans are exactly lowercase `true` and `false`. Borrowed `std::string_view`
+parameters are also supported, including optional text.
+
+Each homogeneous descriptor owns fixed metadata for up to 16 typed parameters;
+this is separate from the dispatcher's configurable token limit (16 by default,
+including module and command). Descriptors live in static constexpr storage in
+the dispatcher, not on the dispatch stack. No handler runs after an adapter
+failure. Report `invalid_argument` and log the parameter name/type or expected
+count through the ordinary optional logger. Help lists required/optional names
+and types below each command. Raw handlers retain their own validation.
+The application handlers use typed parameters: board LED takes a bounded 1–3
+index and an unconverted action string (`on`, `off`, or `toggle`), and network
+status/host exit take no arguments. Host echo deliberately remains a raw handler
+because it accepts an arbitrary number of tokens.
+
+Test the public adapters across signed/unsigned 8/16/32/64-bit integers, float,
+double, strict/friendly booleans, and unconverted string views, both required and
+optional. Cover numeric limits, all 8-bit values, malformed tokens, inclusive
+bounds and adjacent floating-point values, all boolean aliases/case variants,
+quoted/escaped/empty text, omitted versus explicitly empty strings, chains of
+optional parameters, and entirely optional handlers. Rejected input must not
+invoke the handler or retain partially parsed values. Compile checks cover
+invalid signatures, policies, bounds, ordering, and metadata capacity. Test the
+actual board commands against fake GPIO and retain host console smoke coverage.
+
+### Dispatcher
+
 Provide an allocation-free dispatcher in `daveos::core`, separate from scheduler
 internals. The application passes the same `ModuleList` used by its scheduler and
 its `SchedulerInterface<Event>&`. `dispatch(std::string_view)` returns `Status`.
@@ -689,10 +769,11 @@ the application. All input shares one command stream; all output uses logging.
 
 Modules expose constexpr command descriptor arrays containing command names,
 short help strings, member-function callbacks, and C++ handler names. The
-`DAVEOS_COMMAND(ModuleType, command, function, description)` macro captures the
-callback and C++ function name from one identifier. Handlers return `Status` and receive `std::span<const std::string_view>` containing only
-arguments after the module prefix and command. These borrowed views last until
-the handler returns. Handlers validate their own argument counts and values.
+`DAVEOS_COMMAND(ModuleType, function, command, description, ...)` macro captures
+the callback and C++ function name from one identifier. Handlers return `Status`
+and receive either validated typed parameters or `CommandArguments` containing
+only arguments after the module prefix and command. Raw argument views and typed
+string views last until the handler returns.
 Default task and command arrays are empty; command-only modules need no dummy
 task. Modules without commands do not appear in routing or help.
 

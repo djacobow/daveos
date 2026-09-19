@@ -1,4 +1,5 @@
-exe = executable('test-commands', 'commands.cpp', dependencies: test_support_dep)
+exe = executable('test-commands', ['commands.cpp', 'typed.cpp', 'argument_matrix.cpp', 'board.cpp'], dependencies: test_support_dep,
+  include_directories: include_directories('.'))
 test('commands', exe, suite: 'unit', timeout: 20)
 
 # Positive control prevents an unrelated compile failure from hiding invalid
@@ -19,13 +20,13 @@ registration_check = '''
   static_assert(sizeof(core::CommandDispatcher<Event, List>) > 0);
 '''
 foreach descriptor, expected : {
-  'DAVEOS_COMMAND(Example, "run", Run, "Run command")': true,
-  'DAVEOS_COMMAND(Example, "run", Run, "Run"), DAVEOS_COMMAND(Example, "RUN", Run, "Duplicate")': false,
-  'DAVEOS_COMMAND(Example, "HELP", Run, "Reserved")': false,
-  'DAVEOS_COMMAND(Example, "bad name", Run, "Invalid")': false,
-  'DAVEOS_COMMAND(Example, "", Run, "Empty")': false,
+  'DAVEOS_COMMAND(Example, Run, "run", "Run command")': true,
+  'DAVEOS_COMMAND(Example, Run, "run", "Run"), DAVEOS_COMMAND(Example, Run, "RUN", "Duplicate")': false,
+  'DAVEOS_COMMAND(Example, Run, "HELP", "Reserved")': false,
+  'DAVEOS_COMMAND(Example, Run, "bad name", "Invalid")': false,
+  'DAVEOS_COMMAND(Example, Run, "", "Empty")': false,
   'core::CommandDescriptor<Example>{"run", "Run", nullptr, "Run"}': false,
-  'DAVEOS_COMMAND(Example, "run", Run, "")': false,
+  'DAVEOS_COMMAND(Example, Run, "run", "")': false,
 }
   if cpp.compiles(registration_check.format(descriptor), dependencies: core_dep,
       name: 'command metadata ' + descriptor) != expected
@@ -41,7 +42,7 @@ names_check = '''
     static constexpr const char* command_prefix() { return N == 0 ? "one" : @1@; }
     core::Status Run(core::CommandArguments) { return core::Status::ok; }
     static constexpr auto commands() {
-      return std::array{DAVEOS_COMMAND(Example, "run", Run, "Run")};
+      return std::array{DAVEOS_COMMAND(Example, Run, "run", "Run")};
     }
   };
   using List = core::ModuleList<Example<0>, Example<1>>;
@@ -94,4 +95,69 @@ foreach operation : [
       error('Module event compatibility did not behave as expected')
     endif
   endforeach
+endforeach
+
+# Validate typed declarations at the public factory, with positive controls.
+typed_check = '''
+  #include "core/command/arguments.hpp"
+  namespace core = daveos::core;
+  struct Example {
+    @0@ Run(@1@) { @2@ }
+  };
+  constexpr auto descriptor = core::command<&Example::Run>("run", "Run" @3@);
+'''
+foreach variant : [
+  ['core::Status', 'std::uint32_t', 'return core::Status::ok;', ', core::arg("value").range(1u, 100u)', true],
+  ['core::Status', 'float, std::optional<bool>', 'return core::Status::ok;', ', core::arg("rate").min(0.0f), core::arg("enabled").friendly()', true],
+  ['core::Status', 'std::uint32_t', 'return core::Status::ok;', '', false],
+  ['core::Status', '', 'return core::Status::ok;', ', core::arg("extra")', false],
+  ['void', '', '', '', false],
+  ['core::Status', 'std::uint32_t', 'return core::Status::ok;', ', core::arg("value").friendly()', false],
+  ['core::Status', 'bool', 'return core::Status::ok;', ', core::arg("value").min(0)', false],
+  ['core::Status', 'std::uint32_t', 'return core::Status::ok;', ', core::arg("value").min(-1)', false],
+  ['core::Status', 'std::int8_t', 'return core::Status::ok;', ', core::arg("value").max(128)', false],
+  ['core::Status', 'std::uint32_t', 'return core::Status::ok;', ', core::arg("value").min(0.5)', false],
+  ['core::Status', 'float', 'return core::Status::ok;', ', core::arg("value").range(2.0f, 1.0f)', false],
+  ['core::Status', 'float', 'return core::Status::ok;', ', core::arg("value").max(std::numeric_limits<float>::infinity())', false],
+  ['core::Status', 'std::optional<int>, int', 'return core::Status::ok;', ', core::arg("optional"), core::arg("required")', false],
+  ['core::Status', 'int&', 'return core::Status::ok;', ', core::arg("value")', false],
+  ['core::Status', 'int', 'return core::Status::ok;', ', core::arg("")', false],
+  ['core::Status', 'std::optional<double>', 'return core::Status::ok;', ', core::arg("value").range(0.5, 2.0)', true],
+  ['core::Status', 'std::optional<std::string_view>', 'return core::Status::ok;', ', core::arg("value")', true],
+  ['core::Status', 'std::optional<std::uint8_t>', 'return core::Status::ok;', ', core::arg("value").max(256u)', false],
+  ['core::Status', 'std::optional<float>', 'return core::Status::ok;', ', core::arg("value").friendly()', false],
+  ['core::Status', 'std::optional<bool>', 'return core::Status::ok;', ', core::arg("value").max(1)', false],
+  ['core::Status', 'std::string_view', 'return core::Status::ok;', ', core::arg("value").min(1)', false],
+  ['core::Status', 'std::optional<std::string_view>', 'return core::Status::ok;', ', core::arg("value").friendly()', false],
+  ['core::Status', 'std::optional<std::optional<int>>', 'return core::Status::ok;', ', core::arg("value")', false],
+  ['core::Status', 'double', 'return core::Status::ok;', ', core::arg("value").min(std::numeric_limits<double>::quiet_NaN())', false],
+  ['core::Status', 'double', 'return core::Status::ok;', ', core::arg("value").min("bad")', false],
+  ['core::Status', 'const char*', 'return core::Status::ok;', ', core::arg("value")', false],
+  ['core::Status', 'long double', 'return core::Status::ok;', ', core::arg("value")', false],
+  ['core::Status', 'core::CommandArguments', 'return core::Status::ok;', ', core::arg("value")', false],
+]
+  if cpp.compiles(typed_check.format(variant[0], variant[1], variant[2], variant[3]),
+      dependencies: core_dep, name: 'typed command ' + variant[1] + variant[3]) != variant[4]
+    error('Typed command validation did not behave as expected')
+  endif
+endforeach
+
+capacity_check = '''
+  #include "core/command/arguments.hpp"
+  namespace core = daveos::core;
+  template <std::size_t... I>
+  struct Example {
+    core::Status Run(decltype((void)I, std::uint8_t{})...) { return core::Status::ok; }
+  };
+  template <std::size_t... I>
+  consteval auto make(std::index_sequence<I...>) {
+    return core::command<&Example<I...>::Run>("run", "Run", ((void)I, core::arg("value"))...);
+  }
+  constexpr auto descriptor = make(std::make_index_sequence<@0@>{});
+'''
+foreach count, expected : {'16': true, '17': false}
+  if cpp.compiles(capacity_check.format(count), dependencies: core_dep,
+      name: 'typed parameter capacity ' + count) != expected
+    error('Typed parameter capacity check did not behave as expected')
+  endif
 endforeach

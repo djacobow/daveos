@@ -1,5 +1,6 @@
 # Follow-up work
 
+- [x] Implement typed command adapters in PROJECT.md: signature-derived count/types, trailing optional arguments, bounded numeric parsers, strict/friendly booleans, thin DAVEOS_COMMAND registration, and argument-aware help/errors.
 - [x] Smoke-test Application composition on H563: UART/USB/TCP commands, timers, button reads, LED command acknowledgements, statistics, large ping, TCP reconnect, and software-reset recovery.
 - [x] Add passive Application composition with post-init command binding and declarative periodic tasks with compile-time intervals and explicit overrides.
 - [x] Pin both starters to the tested application/console API commit.

@@ -18,21 +18,28 @@ namespace {
     }
 
     static constexpr auto commands() {
-      return std::array{DAVEOS_COMMAND(Example, "run", Run, "Schedule tick")};
+      return std::array{DAVEOS_COMMAND(Example, Run, "run", "Schedule tick"),
+                        DAVEOS_COMMAND(Example, Sample, "sample", "Sample",
+                                       core::arg("rate").range(0.5f, 100.0f),
+                                       core::arg("enabled").friendly())};
     }
 
-    core::Status Run(core::CommandArguments args) {
-      if (!args.empty()) {
-        return core::Status::invalid_argument;
-      }
+    core::Status Run() {
       return scheduler().schedule(*this, &Example::tick, 0);
     }
+
+    core::Status Sample(float, std::optional<bool>) { return core::Status::ok; }
 
     void tick() {
       scheduler().post(Event::sample, this);
       scheduler().stop();
     }
   };
+
+  static_assert(std::string_view(core::command<&Example::Sample>(
+                                     "sample", "Sample", core::arg("rate"),
+                                     core::arg("enabled"))
+                                     .handler) == "Sample");
 }  // namespace
 
 // Declaration-only platform: exercise core templates without any host/OS

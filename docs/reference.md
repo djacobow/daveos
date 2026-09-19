@@ -431,15 +431,12 @@ class Motor : public core::Module<Motor, Event> {
 
   static constexpr auto commands() {
     return std::array{
-        DAVEOS_COMMAND(Motor, "speed", SetSpeed, "Set motor speed")};
+        DAVEOS_COMMAND(Motor, SetSpeed, "speed", "Set motor speed",
+                       core::arg("speed").range(0u, 100u))};
   }
 
-  core::Status SetSpeed(core::CommandArguments args) {
-    if (args.size() != 1) {
-      return core::Status::invalid_argument;
-    }
-    I_("requested speed: %.*s", static_cast<int>(args[0].size()),
-       args[0].data());
+  core::Status SetSpeed(std::uint32_t speed) {
+    I_("requested speed: %" PRIu32, speed);
     return core::Status::ok;
   }
 };
@@ -466,18 +463,35 @@ invalid names/callback metadata, and reserved `help` collisions fail compilation
 
 Double quotes group whole arguments, including empty arguments; mixed forms such
 as `ab"cd"` are invalid. Backslash escapes quotes and backslashes; other sequences
-remain literal. Handlers receive `CommandArguments`, a
-`std::span<const std::string_view>` valid only until they return, and validate their
-own arguments. Nested calls on the same dispatcher return `busy` and preserve
+remain literal. Typed handlers receive converted values after argument-count,
+type, and inclusive-range validation. Declare one `core::arg("name")` per
+parameter; add `.min(value)`, `.max(value)`, or `.range(low, high)` for numeric
+constraints. Trailing `std::optional<T>` arguments become `std::nullopt` when
+omitted. Metadata mismatches fail compilation. The adapter supports integral
+types, `float`, `double`, `bool`, and borrowed `std::string_view`, plus trailing
+optional forms. It consumes whole tokens and rejects numeric overflow, floating
+underflow, NaN, and infinity. Integers accept decimal and explicit `0x`/`0b`
+prefixes; leading zeros stay decimal. Floats accept decimal/scientific notation.
+
+Strict booleans accept exactly `true` and `false`. `.friendly()` accepts
+case-insensitive `true/false`, `1/0`, `on/off`, `yes/no`, `enable/disable`,
+`high/low`, and `set/clear`; unknown values are rejected.
+
+Handlers needing custom syntax can instead receive `CommandArguments`, a
+`std::span<const std::string_view>` valid only until they return, and validate
+their own arguments. Register raw handlers without argument descriptors.
+Typed text views have the same borrowed lifetime. Nested calls on the same dispatcher return `busy` and preserve
 active views. Inputs need no terminating NUL; embedded NUL bytes are rejected.
 
 Defaults are 256 input bytes and 16 arguments, counting the prefix and command.
 To customize, use `CommandDispatcher<Event, decltype(modules), 512, 24>`.
-Overflows reject the complete line without invoking a handler. Specific results
+Typed descriptors own fixed metadata for at most 16 parameters, independently
+of the dispatcher token capacity. Overflows reject the complete line without invoking a handler. Specific results
 are `parse_error`, `ambiguous_match`, `line_too_long`, and `too_many_arguments`;
 unknown names return `not_found`. Handler results propagate unchanged.
 
-`help` lists the complete tree and short descriptions. `motor` or `motor help`
+`help` lists the complete tree, short descriptions, and typed parameter
+names/types (`<required>` or `[optional]`). `motor` or `motor help`
 lists that module's commands; extra arguments to help are errors. All help and
 errors use ordinary best-effort buffered logging under `core.command`. Output
 buffer overflow and filtering apply just as for statistics tables; increase the
