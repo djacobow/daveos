@@ -38,7 +38,8 @@ ENTRY(Reset_Handler)
 MEMORY
 {
 FLASH (rx)      : ORIGIN = 0x08000000, LENGTH = 1024K
-RAM (xrw)      : ORIGIN = 0x20000000, LENGTH = 128K
+/* Preserve a fault record and emergency stack across resets. */
+RAM (xrw)      : ORIGIN = 0x20000800, LENGTH = 126K
 AXIRAM (xrw)   : ORIGIN = 0x24000000, LENGTH = 448K
 ETHRAM (xrw) : ORIGIN = 0x24070000, LENGTH = 64K
 ITCMRAM (xrw)      : ORIGIN = 0x00000000, LENGTH = 64K

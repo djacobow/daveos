@@ -11,7 +11,7 @@ def pytest_addoption(parser):
     parser.addoption('--starter-work')
     parser.addoption('--test-binary')
     parser.addoption('--test-logging', default='enabled', choices=['enabled', 'disabled'])
-    parser.addoption('--hil', action='store_true', help='Enable H563 HIL; always mass-erase and program factory firmware')
+    parser.addoption('--hil', action='store_true', help='Enable board-specific HIL; always mass-erase and program factory firmware')
     parser.addoption('--hil-config', help='Local HIL configuration TOML file')
 
 

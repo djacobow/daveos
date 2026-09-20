@@ -1,0 +1,8 @@
+board = "h755"
+build = "build/net-h755"
+probe_serial = "<H755-ST-LINK-serial>"
+uart = "/dev/serial/by-id/<H755-ST-LINK-UART>"
+usb = "/dev/serial/by-id/<DaveOS-H755-USB-CDC>"
+gdb = "arm-none-eabi-gdb"
+gdb_port = 3335
+tcl_port = 6668

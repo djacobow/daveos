@@ -48,7 +48,7 @@ namespace daveos::platform::stm32 {
 
     Driver driver_;
     console::Input<Platform, 16> input_;
-    console::BufferedOutput<Platform, Driver, 4096> output_;
+    console::BufferedOutput<Platform, Driver, board::kTxCapacity> output_;
     console::LineDisplay display_;
     std::uint8_t rx_byte_ = 0;
     bool attempted_ = false;

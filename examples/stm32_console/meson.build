@@ -14,9 +14,11 @@ component_modules = []
 component_stop = []
 component_early = []
 component_failure = []
-if board == 'h563'
+if board in ['h563', 'h755']
   component_deps += util_dep
-  component_deps += declare_dependency(sources: files('../../platform/stm32h5/iwdg_handler.S'))
+  if board == 'h563'
+    component_deps += declare_dependency(sources: files('../../platform/stm32h5/iwdg_handler.S'))
+  endif
   component_includes += '#include "health.hpp"'
   component_members += '    Health health{platform};'
   component_modules += ', health'

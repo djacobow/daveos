@@ -81,6 +81,14 @@ The configuration defaults to local GDB port 3333 and Tcl port 6666. HIL uses
 this existing server; it does not stop another debugger or start a second
 OpenOCD process. Close GDB before running the suite.
 
+Both Nucleo boards may remain attached. Select each ST-LINK explicitly: set
+`-Dprobe_serial=<ST-LINK-serial>` on its Meson build for programming targets,
+and add `-c 'adapter serial <ST-LINK-serial>'` when starting its OpenOCD server.
+Use `/dev/serial/by-id/` paths rather than numbered `ttyACM` devices. Concurrent
+OpenOCD servers need distinct GDB, Tcl, and Telnet ports; the HIL TOML must name
+the ports and UART/USB paths belonging to the H563. H563 and H755 have separate suites; the runner skips tests for the other board.
+Select `tests/hil/h563` or `tests/hil/h755` when running a single board suite.
+
 ```sh
 build/hil-venv/bin/python -B -m pytest --hil --hil-config build/hil.toml \
   tests/hil -q --junitxml=build/hil/results.xml
@@ -126,7 +134,8 @@ connected. Link-loss injection powers down the Ethernet PHY through its manageme
 register; it does not unplug the cable. Physical power interruption remains
 deferred; reset tests do not substitute for power-cut qualification. Cable-unplug
 tests, LED appearance and button presses are not automated by this suite. H755
-hardware testing remains deferred.
+uses the separate reliability suite below; its A/B bootloader/OTA integration
+is not yet implemented.
 
 ## Version identity checks
 
@@ -164,3 +173,42 @@ of virgin contents and never sends serial setters or lock requests. HIL rejects
 `otp_programming=true` for every suite. Initial physical write/lock qualification
 is separate, deliberate work; after that validation succeeds, all subsequent
 automated real-OTP checks remain read-only. Use emulators for mutation tests.
+
+### H755 reliability HIL
+
+The H755 suite covers the standalone M7 console and sleeping M4, with networking,
+UART and USB enabled. It does not run H563 bootloader, OTA, or OTP tests. Set up
+`build/net-h755` with `board=h755`, `bootloader=false`, `networking=true`,
+`uart_console=true`, `usb_console=true`, and `tcp_console=true`. Set
+`probe_serial` to the H755 ST-LINK serial, and copy
+[`h755.toml.example`](../tests/hil/h755.toml.example) to `build/hil-h755.toml`.
+Fill in that board's stable serial paths and toolchain path. The fixture verifies
+that the Meson board/options and probe selection match its configuration.
+
+Run a separate, explicitly selected OpenOCD server (replace the serial):
+
+```sh
+~/install/stmicro/openocd/bin/openocd \
+  -f interface/stlink-dap.cfg -c 'transport select dapdirect_swd' \
+  -c 'adapter serial <H755-ST-LINK-serial>' \
+  -c 'set DUAL_BANK 1; set DUAL_CORE 1' -f target/stm32h7x.cfg \
+  -c 'gdb_port 3335' -c 'tcl_port 6668' -c 'telnet_port 4446' \
+  -c 'adapter speed 1800' \
+  -c 'reset_config srst_only srst_nogate connect_assert_srst'
+
+build/hil-venv/bin/python -B -m pytest --hil \
+  --hil-config build/hil-h755.toml tests/hil/h755 -q
+```
+
+GDB ports 3335/3336 address M7/M4. The suite uses M7 port 3335 and Tcl port 6668;
+the H563 server can remain connected on its separate ports. HIL sessions remain
+serialized by the shared board lock. Every H755 test erases main flash and
+programs/verifies both core images, then clears retained fault RAM. It never
+programs OTP or changes option bytes. The artifact manifest includes both ELFs.
+
+Tests cover UART/USB/TCP commands, hardware/software/incremental CRC agreement,
+large-packet ping, reconnect/reset, UART bursts, basic and floating-point fault
+frames, configurable exceptions, retained health failures, startup failure/hang,
+and interrupt-masked watchdog reset. H755 IWDG1 has no early-warning interrupt:
+an arbitrary hang resets without a captured frame; a cooperative health failure
+can still be recorded before feeding stops.

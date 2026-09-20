@@ -3,8 +3,6 @@
 #include <cinttypes>
 
 #include "application.h"
-#include "platform/stm32h5/reliability.h"
-#include "stm32h563xx.h"
 #include "util/version_stamp.h"
 #include "watchdog/confirmation.h"
 #include "watchdog/watchdog.hpp"
@@ -20,11 +18,10 @@ namespace app {
   inline constexpr auto kHeartbeatMaxAge = 1s;
   inline constexpr auto kProgressAllowance = 100ms;
   inline constexpr auto kConfirmationDelay = 5s;
-  inline constexpr std::uint32_t kFailureUartBudget = 64000;
 
   namespace wd = daveos::watchdog;
   namespace fault = daveos::util::fault;
-  namespace h5 = daveos::platform::stm32h5;
+  namespace hardware = board::reliability;
 
   // All hardware work waits for explicit early_start()/module initialization.
   // The scheduler callback is bound after static construction has completed.
@@ -59,7 +56,10 @@ namespace app {
                         DAVEOS_COMMAND(Health, Fault, "fault",
                                        "Show retained failure diagnostics"),
                         DAVEOS_COMMAND(Health, Clear, "clear",
-                                       "Clear retained failure diagnostics")};
+                                       "Clear retained failure diagnostics"),
+                        DAVEOS_COMMAND(Health, Crc, "crc",
+                                       "Compare hardware and software CRC32",
+                                       core::arg("text"))};
     }
 
     template <typename Scheduler>
@@ -75,15 +75,13 @@ namespace app {
     }
 
     void confirmation(void* context, core::Status (*confirm)(void*)) {
+      confirms_image_ = confirm != nullptr;
       confirmation_.callback(context, confirm);
     }
 
     core::Status early_start() {
-      // Pause the health clock along with IWDG when debugging a halted CPU.
-      DBGMCU->APB1FZR1 = DBGMCU->APB1FZR1 | DBGMCU_APB1FZR1_DBG_TIM2_STOP;
-      h5::set_fault_identity(daveos::build::kApplicationVersion, 0);
-      reset_cause_ = RCC->RSR;
-      RCC->RSR = RCC->RSR | RCC_RSR_RMVF;
+      watchdog_reset_ =
+          hardware::prepare_health(daveos::build::kApplicationVersion);
       return controller_.start(kWatchdogTimeout);
     }
 
@@ -91,23 +89,7 @@ namespace app {
     [[noreturn]] void initialization_failed(core::Status status,
                                             const char* module = "core") {
       Record({status, "initialization", module}, fault::Kind::initialization);
-      if ((RCC->APB1LENR & RCC_APB1LENR_USART3EN) &&
-          (USART3->CR1 & (USART_CR1_UE | USART_CR1_TE)) ==
-              (USART_CR1_UE | USART_CR1_TE)) {
-        for (char byte :
-             std::string_view("DaveOS initialization failed; resetting\r\n")) {
-          auto budget = kFailureUartBudget;
-          while (!(USART3->ISR & USART_ISR_TXE_TXFNF) && --budget) {
-            __NOP();
-          }
-          if (!budget) {
-            break;
-          }
-          USART3->TDR = static_cast<std::uint8_t>(byte);
-        }
-      }
-      __DSB();
-      h5::reset();
+      hardware::initialization_failed();
     }
 
     core::Status init(core::InitStage stage) {
@@ -117,7 +99,7 @@ namespace app {
           return core::Status::initialization_failed;
         }
       } else {
-        if (reset_cause_ & RCC_RSR_IWDGRSTF) {
+        if (watchdog_reset_) {
           W_("Previous reset: IWDG");
         }
         Fault();
@@ -173,7 +155,11 @@ namespace app {
       }
       if (previous != wd::Confirmation::State::confirmed &&
           confirmation_.state() == wd::Confirmation::State::confirmed) {
-        I_("Healthy for five seconds; image confirmed");
+        if (confirms_image_) {
+          I_("Healthy for five seconds; image confirmed");
+        } else {
+          I_("Healthy for five seconds");
+        }
       }
     }
 
@@ -187,14 +173,15 @@ namespace app {
       fault::copy_name(data.task, failure.task);
       data.expected = failure.expected;
       data.completed = failure.completed;
-      h5::record_failure(data);
+      hardware::record_failure(data);
     }
 
     core::Status Status() {
       I_("Watchdog %s; confirmation %s",
          controller_.state() == wd::Controller::State::running ? "running"
                                                                : "latched",
-         confirmation_.state() == wd::Confirmation::State::confirmed
+         !confirms_image_ ? "not configured"
+         : confirmation_.state() == wd::Confirmation::State::confirmed
              ? "confirmed"
              : "waiting");
       return core::Status::ok;
@@ -202,7 +189,7 @@ namespace app {
 
     core::Status Fault() {
       fault::Data data;
-      if (fault::read(h5::retained_fault(), data)) {
+      if (fault::read(hardware::retained_fault(), data)) {
         W_("Retained failure: %s %s.%s status %s", data.check, data.module,
            data.task, enum_name(static_cast<core::Status>(data.status)));
         W_("CFSR=%08" PRIx32 " HFSR=%08" PRIx32 " SP=%08" PRIx32, data.cfsr,
@@ -219,22 +206,37 @@ namespace app {
       return core::Status::ok;
     }
 
+    core::Status Crc(std::string_view text) {
+      const auto bytes = std::as_bytes(std::span(text.data(), text.size()));
+      const daveos::util::crc32::Service service(hardware::crc32_backend());
+      const auto value = service.calculate(bytes);
+      const auto split = bytes.size() / 2;
+      const auto incremental = service.update(
+          service.calculate(bytes.first(split)), bytes.subspan(split));
+      if (value != daveos::util::crc32::calculate(bytes) ||
+          value != incremental) {
+        return core::Status::checksum_error;
+      }
+      I_("CRC32 %08" PRIx32 " (hardware/software/incremental agree)", value);
+      return core::Status::ok;
+    }
+
     core::Status Clear() {
-      fault::clear(h5::retained_fault());
+      fault::clear(hardware::retained_fault());
       I_("Retained failure cleared");
       return core::Status::ok;
     }
 
     Platform& platform_;
-    h5::Watchdog hardware_;
+    hardware::Watchdog hardware_;
     std::array<wd::Check, 2> checks_;
     wd::Controller controller_;
     void* scheduler_ = nullptr;
     wd::Failure (*progress_)(void*) = nullptr;
     wd::Confirmation confirmation_{kConfirmationDelay};
     core::Time last_heartbeat_ = 0;
-    std::uint32_t reset_cause_ = 0;
-    bool dispatching_ = false, reported_ = false;
+    bool watchdog_reset_ = false;
+    bool dispatching_ = false, reported_ = false, confirms_image_ = false;
   };
 
 

@@ -46,6 +46,10 @@ namespace daveos::platform::stm32h5 {
     bool started_ = false;
   };
 
+  // Prepare debug freeze/identity and consume reset flags before HAL setup.
+  bool prepare_health(const util::Version& version);
+  // Bounded emergency UART output followed by reset; no logger prerequisite.
+  [[noreturn]] void initialization_failed();
   util::fault::Record& retained_fault();
   // Explicit validation reads can recover from flash ECC NMI and return an
   // error. Other NMIs follow the fault/reset path.

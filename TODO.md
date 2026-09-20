@@ -26,6 +26,15 @@
 - [x] Integrate H563 application HardFault/BusFault/MemManage/UsageFault handlers with retained capture; trigger all four CPU faults on hardware and verify type/status bits, frame PC, CRC, reset and next-boot reporting. Add tests/hil/h563/test_faults.py for repeatable injection. ASan 24/24, format/lint, H563 boot/standalone/starter builds pass.
 - [x] IWDG validation: ASan 24/24, fake 18/18, formatting/lint, H563 boot/standalone and H755 builds; OTA with the watchdog active and automatic confirmation on H563. H755 hardware remains deferred.
 
+### H755 reliability parity
+
+- [x] Share the application health module through board-provided CRC/watchdog/fault adapters. Start M7 IWDG1 before clock/peripheral initialization; M4 continues to sleep. H755 has no IWDG early-warning IRQ, so arbitrary hangs reset without a captured frame.
+- [x] Reserve 2 KiB of DTCM for retained faults and the exception stack. Hardware testing found a byte-written record lost a magic byte across reset; publish full 32-bit words with magic last. Basic and floating-point frames now survive reset and validate their CRC.
+- [x] Exercise UART/USB/TCP commands and hardware/software/incremental CRC, DHCP/large-packet ping/TCP reconnect, software reset and USB recovery, all four CPU faults, latched task-progress failure, interrupt-masked/startup hangs, and explicit initialization failure on H755.
+- [x] H755 reliability HIL: 15 cases passed across the main run and focused reruns, including a debugger pause longer than the IWDG timeout. The first UART stress run exposed bounded TX overflow; increase H755 ping-pong buffers to 8 KiB each (H563 stays at 4 KiB). Two repeated runs then delivered all 1,160 burst replies with zero dropped frames or DMA errors. No new visual LED/button, physical cable/power-cut, or standalone-starter hardware validation.
+- [x] Parity regression: host 27/27, ASan/UBSan 27/27, fake 21/21, logging-disabled 28/28, TSan 26/26, GCC 13 28/28; portable Python 18 passed with 5 opt-in skips, H563/H755 standalone starter builds, formatting/lint, H563 OTP/boot firmware, H755 full/none/UART/USB configurations, and both programming plans passed. H563 was not reflashed; a read-only network query verified its existing OTP serial remained `dave_nucleoh563_sn001`.
+- [ ] Plan H755 A/B layout next: 128 KiB erase sectors and the sleeping M4 image at the start of bank B require a separate layout decision. H755 bootloader/OTA and OTP are not implemented.
+
 ### Remaining qualification and follow-ups
 
 - [x] Generate independent bootloader/application stamps, print boot identity and expose board version. Local CI-equivalent host/ARM builds verified build 12345 and independent boot version 7.9; GitHub workflow now checks both stamps and the OTA package.
@@ -80,7 +89,7 @@
 - [x] Add STM32 UART command input using application-owned line buffering (H755 M7).
 - [x] Add STM32H755 support with pinned CubeH7 HAL, M7 console, and sleeping M4 image.
 - [x] Confirm H755 dual-core startup, M4 sleep, M7 scheduler idle, and approximate TIM2 rate through OpenOCD/GDB.
-- [ ] Complete H755 USART3 input/error recovery, LED/button, timing-accuracy, and extended sleep/wake hardware validation.
+- [ ] Complete H755 injected USART3/DMA error recovery, physical LED/button confirmation, timing-accuracy, and extended sleep/wake hardware validation. Current command and burst checks do not cover those physical/fault-injection cases.
 - [x] Diagnose H755 newlib-nano `%llu` log-formatting HardFault; use toolchain full newlib for M7.
 - [ ] Validate embedded formatting heap use with full newlib.
 - [x] Diagnose H755 clock mismatch (25 MHz assumed, 8 MHz measured); confirm 8 MHz ST-LINK rate, then select internal HSI and correct PLL settings as requested.
@@ -104,7 +113,7 @@
 
 - [x] Fix the original H563 startup stack overflow by reserving 64 KiB; later move application objects to static storage.
 - [ ] Measure H563 whole-program stack high-water usage under console/network/interrupt load, then right-size the retained 64 KiB reservation in both linker and CubeMX settings.
-- [ ] Deferred by user: hardware-test the current H755 firmware over UART, USB, and TCP, including static storage, FIFO/16-line input, Meson board/component selection, bound timers, and reusable command binding; currently build coverage only.
+- [x] Hardware-test the current H755 firmware over UART, USB, and TCP, including static storage, FIFO/16-line input, Meson board/component selection, bound timers, and reusable command binding. Current reliability bring-up supersedes the earlier hardware deferral; standalone starter hardware testing remains outstanding.
 - [ ] Revisit H755 stack reservation after the application-owned console refactor; its Cortex-M7 has no MSPLIM guard.
 
 - [x] Fix H563 UART burst overruns with hardware FIFO reception and a 16-line queue; validated 580 unpaced commands at 1 Mb/s, including 4,112-byte bursts and overlength recovery.

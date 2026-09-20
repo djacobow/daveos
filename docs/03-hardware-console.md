@@ -125,9 +125,11 @@ only after heartbeat and repeating-task progress checks pass. `health status`,
 An early-warning interrupt saves the interrupted frame before the watchdog
 resets the CPU. With a debugger attached it breaks first; resume past the
 breakpoint to allow the reset. Masked interrupts can prevent capture, but do
-not prevent the watchdog reset. H755 watchdog integration remains deferred.
+not prevent the watchdog reset. H755 also starts IWDG before initialization
+and checks task progress, but its IWDG has no early-warning interrupt. It can
+retain a detected health failure before reset, but not a frame from an arbitrary hang.
 
-H563 board support also links assembly HardFault, MemManage, BusFault and
+Both boards link assembly HardFault, MemManage, BusFault and
 UsageFault handlers, using the same reserved stack and retained record. Startup
 enables the configurable fault exceptions. CubeMX's C fallback handlers are
 weak through its preserved USER CODE block. Capture never logs from exception
@@ -137,3 +139,8 @@ PC/LR/xPSR. Resume past the debugger breakpoint to reset.
 The HIL fault tests independently inject all four CPU faults and verify retained
 frames, status registers and recovery. They build and program matching firmware
 before using GDB; see [Testing](testing.md).
+
+Both board selections provide `health status`, `health fault`, `health clear`,
+and `health crc "123456789"` (expected CRC `cbf43926`). The standalone H755
+supports IWDG1 health monitoring and retained M7 fault reports. It does not yet
+provide the H563 A/B boot/OTA commands; its IWDG has no early-warning frame capture.

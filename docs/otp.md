@@ -4,7 +4,8 @@ Backends include a persistent host model, a bank-B flash emulator, and real
 H563 OTP. The real adapter defaults to read-only. One explicitly authorized
 serial write and permanent lock have been validated on the H563 DUT.
 The complete hardware contract and qualification sequence are in
-[PROJECT.md](../PROJECT.md#otp-storage-agreed-behavior-and-implementation-design).
+the [OTP service specification](spec/services.md#otp-storage-agreed-behavior-and-implementation-design)
+and [STM32 OTP integration](spec/stm32.md#otp-integration).
 
 `daveos::otp::Store` uses an injected synchronous `otp::Driver`. It scans 32
 64-byte records into a fixed RAM cache during `init()`. Read access never touches

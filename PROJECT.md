@@ -1,4 +1,35 @@
-# DaveOS
+# DaveOS: concept and core facilities
+
+## Specification map
+
+These four documents together define the agreed behavior. Tutorials show usage;
+these specifications own the contracts. Change the owning spec when behavior
+changes, and link to it rather than duplicating requirements.
+
+| Specification | Scope |
+| --- | --- |
+| [Concept and core](PROJECT.md) | Project principles, modules, scheduling, events, timers, queues, logging, commands, composition, and state machines. |
+| [Utilities and services](docs/spec/services.md) | Reusable networking, console plumbing, CRC/version utilities, boot/update policy, watchdog health checks, and OTP storage/modules. |
+| [Platforms](docs/spec/platforms.md) | Injected platform contract, host/fake adapters, file-backed hardware models, and build/programming conventions. |
+| [STM32 integration](docs/spec/stm32.md) | H563/H755 board support, console integration, H563 boot/OTA/OTP hardware, and qualification boundaries. |
+
+## Contents
+
+- [Purpose](#purpose)
+- [Language and Tools](#language-and-tools)
+- [Namespaces](#namespaces)
+- [Design](#design)
+- [DaveOS timers](#daveos-timers)
+- [Queues](#queues)
+- [Events](#events)
+- [Logging](#logging)
+- [Command System](#command-system)
+- [Application convenience APIs](#application-convenience-apis)
+- [Application composition and periodic tasks](#application-composition-and-periodic-tasks)
+- [State-machine structure](#state-machine-structure)
+- [Style](#style)
+- [Source organization](#source-organization)
+- [Implementation review checklist](#implementation-review-checklist)
 
 ## Purpose
 
@@ -43,7 +74,8 @@ application-owned namespaces.
 
 DaveOS has a hardware-independent core with platform support injected at
 construction. The core depends only on permitted C++ standard library facilities.
-Platform implementations may depend on an OS or other libraries.
+Platform implementations may depend on an OS or other libraries. The injected
+[platform contract](docs/spec/platforms.md#platform-interface) defines the boundary.
 
 The core provides a scheduler with one or more modules, an optional logging
 service, and an independent command dispatcher. Applications may use logging,
@@ -78,7 +110,7 @@ A module also has:
 * A reference or pointer to the module-facing scheduler interface.
 
 Each module may override `tasks()` to expose a constexpr array of task descriptors
-and `commands()` to expose command descriptors (see Command System below).
+and `commands()` to expose command descriptors (see [Command System](#command-system)).
 Each task descriptor pairs a human-readable string name with its schedulable member
 function. The array defines the task callbacks and their names; its size provides
 the task count without a separate count accessor. Statistics tables identify tasks
@@ -329,36 +361,6 @@ This applies to posts from both module callbacks and interrupt handlers. If the
 interrupt handoff design introduces a bounded scheduling-request buffer, exhaustion
 must likewise fail explicitly and be recorded.
 
-## Platform interface
-
-The injected platform supplies:
-
-* A monotonic clock returning unsigned 64-bit microseconds.
-* Exactly one asynchronous timer taking a delay and callback. Arming it returns without
-  waiting; execution may continue while the timer waits, and the callback runs
-  after the delay.
-* Optional blocking sleep taking a delay. Scheduler execution is suspended during
-  sleep and resumes at the call site when the delay expires. Sleep also supports
-  indefinite waiting and early interrupt wakeup as described in the idle rules.
-* Critical-section entry and exit primitives for shared scheduler state.
-
-On embedded targets, critical sections temporarily mask interrupts and restore
-the previous interrupt state on exit. Keep these sections short. Module callbacks
-and logging subscribers execute outside scheduler critical sections.
-
-Host critical sections are mutex-backed. Scheduler execution and simulated
-interrupt handlers use the same protection for shared state. Interrupt dispatch
-coordinates with this protection so a new handler does not start while the
-scheduler holds a critical section. Handlers already running may execute
-concurrently with module callbacks, but their protected operations remain mutually
-exclusive. Nested critical sections must preserve protection until the outermost
-section exits.
-
-The platform may also provide an optional mutex facility.
-
-Timer and sleep are distinct operations: arming a timer does not suspend execution,
-while calling sleep does.
-
 ## DaveOS timers
 
 DaveOS provides multiple simultaneous logical timers over the single platform
@@ -561,153 +563,6 @@ sleep entry. Initialization failure and shutdown flush remaining records.
 - messages exceeding the per-record storage size are truncated, preserving the
   beginning of the message, and increment a truncated-message counter
 
-## Supported platforms
-
-The implementation provides real-time host and fake-time adapters, an STM32H563
-adapter and an STM32H755 M7 adapter with one shared, board-selected console.
-UART, USB CDC, and optional TCP transports register independently.
-STM32CubeH5 and STM32CubeH7 are pinned as submodules; no board BSP is used.
-The H755 M4 completes CubeMX boot synchronization, disables SysTick, and sleeps
-in a WFI loop. It does not run DaveOS or access M7-owned peripherals.
-The core remains hardware-independent; hardware validation is tracked in TODO.md.
-
-* Host: clang++.
-* ARM: arm-none-eabi GCC and the pinned STM32H5/H7 HALs.
-  The initial MCU target is STM32H563.
-
-Host support provides both:
-
-* A fake clock and timer for fast, deterministic unit tests without real-time waits.
-  Tests can advance time manually or enable automatic advancement to the next due
-  task or timer when the scheduler would otherwise wait.
-  Advancing time delivers due timer callbacks synchronously before the advance
-  operation returns. Callbacks run in simulated interrupt context and follow the
-  same interrupt serialization and critical-section rules. Fake time requires no
-  dedicated timer thread.
-  Fake-time sleep uses the same advancement modes as awake waiting. In automatic
-  mode it advances to the next wake deadline. In manual mode it waits for the test
-  to advance time or trigger an interrupt. With no deadline, it waits for an
-  explicit simulated wakeup rather than advancing time indefinitely.
-* A real-time platform using a monotonic host clock, such as
-  `std::chrono::steady_clock`, for tests that run in real time. Integration tests
-  may interact with other processes through sockets or similar host facilities.
-
-Both use the same scheduler core through the injected platform interface.
-
-The real-time host platform implements its asynchronous timer with a dedicated
-timer thread. The thread waits for the armed expiry and invokes the timer callback
-through the serialized simulated-interrupt mechanism, respecting host critical
-sections. Rearming or shutdown wakes the thread to update or end its wait.
-
-Host threads may trigger simulated interrupts through the host platform. The
-simulated interrupt handlers may then use interrupt-supported operations, including
-scheduling tasks and posting events. Direct scheduler access from arbitrary host
-threads is not part of the supported concurrency model. Simulated interrupts must
-respect platform critical sections and be able to wake an idle scheduler.
-Simulated interrupt handlers run concurrently with module callbacks, allowing host
-tests to exercise interrupts arriving during callback execution.
-Host simulated interrupt handlers are serialized with one another: only one runs
-at a time. Nested interrupt execution and interrupt priorities are outside the
-initial host simulation scope.
-
-## Build system
-
-Use Meson. Use uv for Python test dependencies: pytest for portable checks and
-pinned Watcher/pyserial for optional HIL. Virtual environments and uv caches
-live under build/. Production packaging/programming tools remain standard-library Python.
-Build configurations live under `build/` (for example `build/host`, `build/fake`,
-`build/asan`, `build/arm`, and `build/h755`). All generated intermediates and caches belong under
-that ignored directory and can be removed and regenerated.
-Provide `format`, `format-check`, and `lint` build targets using clang-format and
-cppcheck.
-STM32 examples provide explicit `flash` (CubeProgrammer), `flash-openocd`, and
-`flash-plan` targets. Programming builds and verifies the firmware before resetting;
-H755 includes both core images. Tool paths and ST-LINK serial are configurable.
-
-## Style
-
-* Emphasize simplicity and concision in design and implementation.
-* Be DRY (Don't Repeat Yourself): keep each piece of logic or knowledge in one place.
-* Use Google C++ style with the repository's clang-format overrides: blank lines
-  between function/class definitions, braces on control-flow bodies, and indented
-  namespace contents.
-* Use short namespace aliases and qualified names instead of `using namespace`.
-* Follow the fixed-width integer and file-naming rules under Source organization.
-* Allow short variable names if their physical scope, from first to last textual
-  appearance, is less than 15 lines.
-* Do not repeat the class name in member names.
-
-## Remaining platform validation
-
-The H563 and H755 M7 examples share the board console implementation: LED
-control, button input, scheduler/DMA statistics, reset, UART echo, and formatted
-logging. USART3 runs at 1 Mb/s on PD8/PD9 with interrupt-fed input and two 4 KiB
-ping-pong TX DMA buffers. H563 uses GPDMA1 Channel 0 and normal SRAM; H755 uses
-DMA1 Stream 0 and AXI SRAM. Full buffers drop whole output frames and expose
-counters. Both use internal HSI, TIM2 at 1 MHz, and shallow WFI sleep.
-The shared STM32 board console includes `board timer <microseconds>`: a positive
-unsigned decimal delay starts a one-shot DaveOS timer; its interrupt-time callback
-logs `Timer fired` for deferred delivery. Reissuing replaces the pending timer.
-
-H563 LEDs are PB0/PF4/PG4; H755 LEDs are PB0/PE1/PB14. Both read PC13.
-H563's CPU runs at nominal 250 MHz, H755 M7 at 400 MHz. H563 hardware checks
-passed for boot, UART bursts and TX DMA, USB/TCP commands, timer completion,
-Ethernet, and software-reset recovery. Earlier physical checks also confirmed
-all LEDs, button press/release, USB-C orientations, and cable reconnection.
-Injected UART/DMA errors, precision timing, and prolonged sleep/backpressure
-stress remain outstanding. H755 additionally boots M4 into sleep; its earlier
-hardware results predate the static-storage, FIFO, board/composition, and
-convenience-API changes. Current H755 coverage is build-only, including Application composition. H563
-smoke tests also passed after the Application migration: UART/USB/TCP commands,
-timers, statistics, button reads, LED acknowledgements, large-packet ping, TCP
-reconnect, and software-reset recovery; no new physical LED/button confirmation. See TODO.md for
-remaining work. Shared code changes require both board selections to build.
-
-The application may call `platform.reset()` directly, independently of the
-scheduler. STM32 H5/H7 request an immediate system reset without returning
-(both cores on H755); no initialization, shutdown, or log drain is required.
-Host/fake return `Status::unsupported` without changing state. Each STM32 board
-module exposes this as `board reset` with no arguments.
-
-## Implementation review checklist
-
-These checks follow from the agreed behavior; they do not introduce additional APIs.
-
-* Verify stage ordering, automatic initialization, terminal failure, repeated-init
-  errors, and failure-path log delivery.
-* Verify earliest-first dispatch, retained overdue iterations, replacement,
-  cancellation, self-rescheduling, zero-delay validation, and per-task statistics.
-* Verify copied variant payloads, typed handler registration and rejection of
-  invalid declarations, ignored alternatives, visitor fallback, handler log context,
-  and allocation-free delivery, including concurrent interrupt posting. Verify
-  sender exclusion, complete broadcasts, fixed capacity, and overflow reporting
-  without depending on unspecified equal-time or recipient ordering.
-* Verify timestamped logs, severity filtering, truncation, overflow, and dispatch
-  behind due tasks/events.
-* Verify queue failures preserve contents and all callers use consistent protection.
-* Exercise concurrent host interrupts, restored critical-section state, and wakeup
-  arriving between the idle check and sleep entry so work cannot be stranded.
-* Verify fake-time tests and real-time host tests through the same core interface.
-* Verify timer replacement, cancellation, self-rearming, positive-delay validation,
-  pre-run errors, capacity limits, and the reserved scheduler slot.
-* Verify sleep is bounded by pending task and timer due times, and shutdown ends
-  timer activity and flushes logs before returning.
-* Verify compile-time module/command metadata validation, case-insensitive exact
-  and unique-prefix matching, quoting, input limits, help, and handler statuses.
-* Verify handler logging context and argument views survive nested-dispatch
-  rejection, and that command-only modules require no task slots.
-* Exercise all four combinations of commands and logging. Disabled macros must
-  skip argument evaluation; disabled logger instances must have no buffer storage.
-* Verify logger counters reset independently of scheduler statistics, interrupt
-  enqueue notifies idle dispatch, and pending records prevent sleep.
-* Verify console EOF does not stop the scheduler; `console exit` does.
-* Verify exact chrono conversion, invalid-delay preservation, compile-time task
-  selection, bound-timer identity/cancellation, and retained initialization errors.
-* Verify the optional command-binding module and separate consumer starter build.
-
-Public headers define concrete C++ signatures and status values. Changes to those
-interfaces must keep this specification and the application examples consistent.
-
 ## Command System
 
 ### Typed argument adapters
@@ -842,7 +697,8 @@ argument counts, numeric bounds/overflow, and decimal/hex/binary timer delays.
 Rejected LED commands produced no LED-handler log; fake-board tests separately
 verify no GPIO writes. Large-packet Ethernet ping, TCP reconnect, and software
 reset recovery also passed. LED acknowledgements were checked without visual
-confirmation. H755 retains build-only coverage for these changes.
+confirmation. H755 now has current UART/USB/TCP command smoke coverage; the
+full 114-case parser hardware campaign above remains H563-specific.
 
 ### Dispatcher
 
@@ -953,112 +809,6 @@ typed line on Return, and logs the submitted command before dispatch. UART inter
 transmit or log synchronously. Backspace/Delete support basic line editing, and
 log output preserves unfinished input by erasing and redrawing it. Terminal-local
 echo should be disabled; wrapped-line editing is outside the initial scope.
-
-## Source organization
-
-Colocate headers and implementations by component: shared console helpers live
-under `console/`, core facilities live under
-`core/{schedule,command,event,logging,queue,platform,enum}/`, and adapters under
-`platform/{host,fake,stm32h5,stm32h7}/`, with shared adapter details in
-`platform/detail/`. Optional networking lives in `net/` (`daveos::net`), with
-shared STM32 Ethernet support in `platform/stm32/ethernet/`
-(`daveos::net::stm32`). Include paths are relative to the repository root.
-Core/platform namespaces remain `daveos::core` and `daveos::platform::*`. No separate include
-and source trees are needed. Headers defining templates use `.hpp`, other
-headers use `.h`, and C++ translation units use `.cpp`. Vendor and generated
-file naming is retained. Meson definitions live with their components/targets.
-
-Use fixed-width integers from `<cstdint>` for stored numeric values and explicit
-enum underlying types. Use `PRI*` macros from `<inttypes.h>` for printf-style formatting of those values, rather than
-casting to `long` or `long long`. Retain API-required types such as `int` for
-`main`, printf width/precision, and C/POSIX return values, and `std::size_t` for
-sizes and indices.
-
-Do not rely on embedded libc to format 64-bit integers. Statistics retain their
-full-width stored values but use a bounded 32-bit decimal display, appending
-`+` above UINT32_MAX. Format any future 64-bit hexadecimal output as separate
-32-bit upper and lower halves, with the lower half padded to eight digits.
-
-Use small named concepts for repeated type contracts. `ModuleFor<M, Event>`
-checks event-type compatibility at scheduling, cancellation, registration, and
-command-dispatch boundaries after the concrete module is complete. Keep
-value/metadata validation in constexpr checks. Prefer concrete parameter types
-when no template deduction is needed, and name repeated policy predicates.
-
-## Optional networking
-
-Networking lives outside core in `daveos::net`, with pinned lwIP 2.2.1 in
-NO_SYS mode. An application-owned service takes a driver and monotonic clock;
-a thin CRTP module polls every 1 ms, processing at most four received frames
-and servicing stack timeouts. PHY link polling occurs every 250 ms. Interrupts
-never call lwIP. All packet and stack allocation uses fixed preallocated pools.
-The first milestone supports Ethernet/ARP, IPv4, ICMP ping, UDP for DHCP, and
-DHCP or application-configured static addressing. TCP provides a single-client
-nonblocking byte-stream server for the console. IPv6, DNS, fragmentation, TLS,
-and a general multi-listener/connection API are deferred. Future application
-networking uses this separate library rather than extending SchedulerInterface.
-Hardware-init failure leaves the remaining application operational and requires
-reset to retry. Cable and DHCP recovery are automatic. `net status` reports link,
-addressing, and counters. Meson `networking` defaults to false and disabled builds
-need no networking submodules. Both STM32 board selections use ST HAL and LAN8742, with
-fixed DMA buffers and board-specific RMII wiring. H755 hardware validation
-passed for DHCP/static IPv4, ping, cable reconnection, and USB console
-responsiveness. H563 initial hardware validation passed for UART/USB commands,
-TX DMA, LEDs/button, timer completion, reset, DHCP, ping, and TCP commands.
-USB works in both USB-C orientations; USB/Ethernet recover after physical
-reconnection. Its
-Cortex-M33 stack reservation is 64 KiB, enforced by MSPLIM. Long-lived STM32
-application objects (modules, logger, scheduler, dispatcher, and transport
-buffers) have file-scope storage rooted in `examples/stm32_console/appmain.cpp`.
-Optional UART, USB, networking, and TCP components live in separate files selected
-by Meson, with no application feature-selection preprocessor branches. A generated
-`composition.hpp` assembles only selected members and their registration lists,
-statistics routing, and shutdown calls; disabled components have no instances.
-Component constructors are passive; hardware setup remains in module init.
-Both boards build one `stm32-console` application target. `platform=stm32` and
-`board=h563` (default) or `board=h755` select board files under
-`platform/stm32/nucleo/`, the platform adapter, HAL, CPU/ABI flags, startup,
-and linker script. Both use `meson/stm32.ini`; H755 additionally builds its
-sleeping M4 image with separate CPU flags. Both
-generated `Core/Src/main.c` entry points include `appmain.h` and call `appmain()`
-after CubeMX peripheral setup; `appmain()` initializes the platform and calls
-`application.run()`. Hardware setup waits for initialization;
-Application binds command sources after both initialization stages succeed. The
-64 KiB reservation addressed the old 34,216-byte application stack frame; the
-current debug `appmain()` frame is 32 bytes. Total stack high-water usage has
-not been measured, so the reservation is retained pending that measurement.
-Keep linker and CubeMX settings consistent when resizing it. H755 has build
-coverage only for the later static-storage, UART FIFO/16-line queue,
-board/component-selection, and convenience-API changes; the current H755 firmware
-still needs hardware testing.
-
-
-The optional TCP console is an independent log subscriber and command source,
-like UART and USB, and listens on port 1000 by default. A second connection is
-reset while the first remains active. All commands use the existing dispatcher;
-TCP callbacks only buffer bytes. Disconnect, peer FIN, or link loss discards
-partial input and queued output; half-close is not supported. The next client
-starts a fresh session. Fixed 4 KiB RX and 8 KiB TX buffers bound storage. RX uses
-TCP flow control; output overflow drops a complete record without blocking.
-Disconnected output is not retained. The protocol is plain TCP, without Telnet
-negotiation, authentication, or encryption, and relies on local terminal echo.
-`tcp_console=false` omits the console without disabling networking, UART, or USB.
-
-
-Shared transport-agnostic console helpers belong in `console/`, namespace
-`daveos::console`, with an explicit Meson dependency. `BufferedOutput` serves
-asynchronous UART/USB transmission. A common CRTP console module handles task
-scheduling, dropped-line reporting, command logging/dispatch, and independent
-source/subscriber registration; transports retain session, echo, and I/O rules.
-Prefer application ownership and borrowed callback contexts over singleton
-objects. HAL/middleware APIs without user context may use a minimal callback
-routing pointer, with teardown quiescing hardware before detaching it. lwIP's
-global stack constraint does not justify a generic singleton guard.
-TCP processes at most one completed line and 256 input bytes per invocation.
-It consumes spans from a ring buffer without shifting remaining bytes. Bytes
-after a newline remain for subsequent commands, partial lines persist between
-invocations, and CRLF may cross chunk boundaries. No additional TCP command
-queue is required.
 
 ## Application convenience APIs
 
@@ -1183,69 +933,7 @@ construction, two-stage ordering, failure/repeated lifecycle calls, source
 binding, file-scope use, and allocation-free operation. Periodic tests cover cadence/start epoch, explicit overrides/cancellation, init failure,
 compile-time invalid durations, and unchanged explicit task descriptors.
 
-
-## Ready-made I/O, console library, and device starter
-
-`platform/host/io.hpp` provides `host::stdout_subscriber()` with the standard
-prefix, implicit newline, and per-record flush. `host::run(runnable)` accepts a
-Scheduler or Application, returns 0 for Status::ok and 1 otherwise, and reports
-failure status to stderr independently of DaveOS logging. Both helpers can be
-used with a fake platform and introduce no timer thread themselves.
-
-Reusable USART3/USB transports, Board commands, Nucleo network wiring, and the
-Console group live in `platform/stm32/console`, namespace
-`daveos::platform::stm32`. The transport-agnostic serial module wrapper and TCP
-console live in `console/`, namespace `daveos::console`. Library code depends on
-core/console/net and a consumer-supplied board contract, never on example headers.
-`TransportModule<Event, Transport>` owns a passive transport, initializes it in
-stage1, and supplies the common command/log/statistics interface. UART and USB
-expose the same shape; UART retains its FIFO and 16-line queue. A second active
-USART3/USB instance is rejected; C callback routing pointers own no state.
-
-`stm32::Console{uart, usb, tcp}` borrows any number of transports. It provides
-modules(other_modules...), subscribers(), sources(), log_statistics(), and
-reverse-order stop(). It creates no scheduler/module of its own and reserves no
-names. Network services remain separately owned and outlive their TCP consoles.
-The STM32 example's generated header selects objects; registration and console
-shutdown use this library group.
-
-Configured Nucleo startup, linker scripts, and peripheral glue live in
-`platform/stm32/nucleo/{h563,h755}`. `stm32_support=true` enables their dependencies
-without building the example. Export `daveos-nucleo`, `daveos-stm32-console`,
-`daveos-stm32-uart`, and conditional `daveos-stm32-usb` Meson dependencies.
-The board dependency propagates CPU/ABI and linker settings and compiles sources
-in the consuming application. The consumer provides appmain.h/appmain(). H755
-also provides a sleeping M4 image; programming must include both images.
-
-`starters/stm32` is a separate Meson consumer with its own appmain(), periodic
-Worker, and UART board console. Board selection defaults to H563. A mismatch
-between the starter's board and the subproject's board is an error. Startup uses
-our CubeMX configuration, not a board BSP. The host/fake and device starter wrap
-pins must advance when new public APIs they consume are committed.
-
-The documentation learning path has four levels: a small hello, logging and
-commands, hardware console, and custom components. README links to these levels;
-docs/reference.md retains detailed build, programming, and API information.
-Validate actual host stdout/stderr/exit codes, common console registration and
-reverse shutdown, existing USB/TCP behavior, and separate H563/H755 starter builds
-and programming plans. Hardware claims remain distinct from build coverage.
-
-The reusable full console has passed H563 UART/USB/TCP, Ethernet ping, timer,
-and software-reset recovery checks. The standalone H563 starter has passed
-periodic-worker, UART help/timer/statistics, and reset-recovery checks. H755
-starter and console validation for this extraction is build/programming-plan
-coverage only; its current firmware still needs hardware validation.
-
-## Bootloader, OTA, and reliability services
-
-The initial implementation targets H563 and host/fake tests. H755 bootloader
-integration and hardware validation are deferred. Components are optional,
-allocation-free, and use injected platform services. Standalone applications
-remain supported; boot control reports `not_supported` without a bootloader,
-and OTA is unavailable. All STM32 builds, including dependencies, M4, and
-starters, use `-Os` with debug information retained.
-
-### State-machine structure
+## State-machine structure
 
 All new state machines follow AGENTS.md: enum-class state, `ns = cs` at the
 start of each tick, next-state changes only inside `switch (cs)`, and one
@@ -1282,745 +970,85 @@ with no transition). There is no synchronization: owners serialize access and
 synchronize externally submitted flags. See the custom-components guide for an
 example.
 
-### Flash layout and executable images
-
-Boot policy and the OTA engine receive an injected `boot::Flash` interface.
-Host/fake simulations can use `platform::host::FileFlash`, a raw persistent file
-with caller-supplied geometry and an optional injected clock. It models bounds,
-sector erase, aligned 16-byte programming, and one-to-zero NOR bits, with fsync
-before successful completion. Reopening preserves images and metadata across
-simulated boots. It does not model STM32 ECC or torn in-flight mutations; the
-memory-backed fault-injection tests cover those failure boundaries separately.
-
-Reserve 32 KiB (four 8 KiB sectors) for the bootloader, including room to grow.
-Measure the feature-complete bootloader at `-Os` and fail the build if it exceeds
-that fixed reservation; never silently move the application slots. H563 main
-flash uses this arrangement:
-
-| Bank | Layout |
-| --- | --- |
-| 1, 0x08000000 | bootloader, metadata A (8 KiB), application A |
-| 2, 0x08100000 | placeholder equal to bootloader reservation, metadata B (8 KiB), application B |
-
-Metadata starts at 0x08008000 and 0x08108000; applications start at 0x0800A000
-and 0x0810A000, each with 984 KiB capacity.
-
-The H563 example's `bootloader=true` Meson option selects the slot-A linker
-script and builds `factory.hex` with the bootloader, confirmed A (installation
-counter 1), and identical initial journal records in both metadata sectors.
-Its programming targets mass-erase main flash before writing and verifying;
-the default standalone example remains available with `bootloader=false`.
-The example also links B from the same compiled objects and validates the paired
-relocation package during every bootloader-enabled build. Bring-up commands
-`boot status` and `boot confirm` expose the executing slot and explicit durable
-confirmation; they are omitted from standalone builds.
-On H563, flash completion includes ICACHE invalidation before readback: the
-application can otherwise read cached erased metadata despite a successful
-physical write. Boot-time reads alone do not cover this condition because the
-minimal bootloader leaves ICACHE disabled.
-
-Application capacities and within-bank offsets are equal. No bank swapping is
-used. Generate linker bounds, flash geometry and package metadata from one
-layout definition. Enforce bounds before any erase/program operation. Metadata
-A/B are a redundant journal of shared boot state, not exclusively per-slot
-descriptors. Brief metadata-operation stalls are acceptable; bulk OTA must
-yield to normal application work.
-
-Prefer one package containing a base image, block-local relocation records,
-and the expected installed CRC for each slot. Link the same objects at both
-addresses and verify reconstructed outputs byte-for-byte against independent
-links during packaging. Apply relocations on-device in the transport-independent
-updater. Reject unsupported transforms. Correct startup/vector-table handling
-and prove execution from both slots on H563. If this is too complex or fails
-validation, use separate slot-specific images with explicit destination and
-load-address metadata. The initial `-Os` full-console study is build evidence
-only: 202,088 bytes and 1,545 word patches reconstructed the second link exactly.
-
-### Versions, compatibility and persistent boot state
-
-Application and bootloader have independent version stamps containing uint32_t
-major/minor/build, Git commit ID, and dirty-tree flag. Major/minor are defined in
-the application's top-level meson.build. CI supplies build through a Meson
-option; local builds use reserved UINT32_MAX and display `local`. Omit timestamps
-by default for reproducibility. Bootloader major/minor use the boot_version_major
-and boot_version_minor options; version_build applies to both components. The
-board version command prints application identity; the bootloader prints its own
-identity on UART. CI checks generated stamps and the packaged OTA identity against
-its build number. Images carry an application-defined product ID
-and flash-layout revision; updater and bootloader reject mismatches. Use a
-versioned image format with space for future signing; v1 integrity uses CRC only.
-
-The journal stores complete boot-state snapshots in append-only CRC-protected
-records. Program the commit marker last in its own flash programming unit.
-Preserve a valid committed snapshot while reclaiming either region. A separate
-record sequence orders journal snapshots. A device-local uint64_t installation
-counter advances only when a fully verified installation commits; aborted
-uploads do not consume a number. Preserve it when replacing pending images or
-erasing the inactive slot. Reject counter exhaustion rather than wrapping.
-
-Boot preference follows installation order, not firmware version. Reinstalling
-identical or older firmware is a new installation. New OTA installations get
-one trial. Durably mark the trial started before jumping; any reset before
-confirmation, including power loss before the jump, rejects that installation.
-Do not automatically retry it. The application explicitly applies its health
-policy and calls confirm_image(). Confirmation is bounded and synchronous:
-success means durable confirmation has been verified. It is idempotent without
-another write when already confirmed. Errors are returned for application retry.
-
-Read and CRC-verify the full selected image from flash on every boot, including
-confirmed images. A failed CRC prohibits booting it. Try another eligible image
-only after validating it; rejected trials remain ineligible. If neither image
-is eligible/valid, or no committed metadata state is recoverable, record the
-failure, attempt bounded UART diagnostics, wait one second, and reset.
-
-ST-LINK installation erases all main flash and installs bootloader, a confirmed
-application, and fresh metadata/history. OTP is untouched. Ordinary OTA never
-rewrites the bootloader. Emergency application-driven bootloader rewriting is a
-future possibility, not a safe or implemented v1 update path.
-
-The bootloader stays small. Reuse DaveOS services where helpful, including the
-logger with explicit draining. UART only, matching application UART/baud, with
-bounded best-effort output; UART failure never blocks a valid boot. No USB,
-networking or command dispatcher is required in the bootloader.
-
-### CRC service
-
-Use CRC-32/ISO-HDLC matching Python binascii.crc32() for chunks, images, and
-metadata. Polynomial 0x04C11DB7 (reflected 0xEDB88320), initial internal register
-0xFFFFFFFF, reflected input/output, final XOR 0xFFFFFFFF; `123456789` checks to
-0xCBF43926 and empty input checks to zero. External incremental state follows
-binascii's initial-zero convention. Each caller owns its state. Foreground
-updates may use injected hardware; interrupt callers use software without
-waiting for the peripheral. Updates synchronously process caller-bounded byte
-spans, accepting arbitrary lengths/alignment. Test incremental partitions,
-interleaved callers, and exact hardware/software agreement.
-
-### Watchdog and application health
-
-Provide an optional generic watchdog module with injected hardware support
-(STM32 IWDG). Start explicitly. Named application-provided checks run before
-hardware enable and before every task-driven feed. First check/feed failure
-latches its identity/status and prevents further feeds until reset, even if the
-condition recovers. Failed pre-start checks also latch without enabling hardware.
-Timeout and check/feed period are explicit chrono durations. Configure IWDG to
-freeze while a debugger halts the CPU.
-
-The demo starts the watchdog early enough to cover clock/peripheral setup and
-module initialization, without depending on scheduler dispatch. Do not repeatedly
-feed during initialization. Explicit init failure records diagnostics, attempts
-bounded UART output, and resets; a hang expires the watchdog. One timeout covers
-startup and normal execution; pre-start checks must be safe before module init.
-
-Keep these named constexpr durations near the top of the application file:
-watchdog timeout 5 s; health-check/feed period 100 ms; heartbeat period 100 ms;
-heartbeat maximum age 1 s; repeating-task completion allowance 100 ms; trial
-confirmation delay 5 s. Confirm after five seconds of healthy scheduler operation;
-USB attachment, Ethernet link and DHCP are not confirmation requirements.
-
-In addition to the independent heartbeat, check every active repeating task's
-completed count against its actual cadence: every iteration due more than the
-completion allowance ago must have completed. Expose scheduler progress data to
-an optional health helper, handling initial delays, cancellation, period changes,
-rescheduling, statistics resets, and the checking task's unfinished invocation.
-Resetting diagnostic statistics must not hide progress deficits. Latch failures
-with task/module identity and expected/actual counts. This policy is optional
-application health checking, not an unconditional core scheduler overload policy.
-
-On H563, enable the IWDG early-warning interrupt with a nominal 128 ms
-remaining at the demo timeout. Capture the interrupted basic register frame
-using the reserved fault stack and retained CRC-protected record. Preserve an
-already-latched health failure while adding its frame. Do not feed or return;
-let IWDG reset. If a debugger is attached, break before waiting for reset.
-Interrupt masking or an unpreemptible handler may prevent capture; watchdog
-reset must remain independent. Freeze the scheduler clock with IWDG during
-debugger halts to avoid false task-progress failures after resuming.
-
-### Retained fault diagnostics
-
-Reserve one fixed RAM record shared by bootloader/application, excluded from
-startup clearing. Begin with magic, then format version, size, data, and CRC.
-Store image identity and copied names/data, not pointers into an old image.
-Latest failure wins. The application reads and explicitly acknowledges/clears
-the record; the bootloader preserves it. Reset retention is supported; power-loss
-retention is not promised.
-
-Capture HardFault, MemManage, BusFault, and UsageFault frames/status registers.
-Validate frame accessibility and avoid logging from fault context. Reject frames
-when exception stacking or a hardware stack-limit check failed, even when the
-reported stack pointer is inside RAM. Preserve fault status without copying an
-invalid frame. Record first,
-then break if debugger control is enabled; otherwise reset. Resuming that
-breakpoint proceeds to reset. Watchdog failures use the same retained record.
-H563 Nucleo board support supplies the assembly handlers and enables configurable
-fault exceptions before application initialization. CubeMX USER CODE weak
-pragmas keep generated fallback handlers from replacing the assembly entry points.
-The console reports fault identity, CFSR/HFSR, stack pointer and available frame
-registers at the next boot; health clear explicitly removes the record.
-
-### OTA engine and streaming
-
-Keep three distinct state-machine levels: transport chunks (initial maximum
-1 KiB, one outstanding, CRC checked before use), package blocks with local
-relocation records, and platform flash operations. Arbitrary transport boundaries
-may split package records or contain multiple pieces; retain unconsumed bytes.
-Do not buffer the whole image or relocation table.
-
-Durably invalidate the destination before its first erase. Erase only sectors
-needed by the incoming image, one at a time as required; wait for completion
-before programming that sector. Program in hardware write units and yield
-between bounded steps. Pad a final partial write unit with 0xFF, excluding that
-padding from the declared image CRC. Finally read flash incrementally to verify
-the expected installed CRC before committing eligibility/installation counter.
-
-OTA is disabled initially and application-controlled. The demo exposes
-`ota enable`, `ota disable`, and `ota status`; enablement is not retained across
-reset. Require a confirmed running image before accepting uploads, preserving
-its fallback while a trial runs. Accept unlimited replacement uploads before
-reboot; replace only the inactive slot. Disabling an idle updater does not
-invalidate an already completed installation.
-
-The host polls readiness, sends an offset/chunk/CRC, and waits while the target
-processes it. Advertise limits and expected offset; no blocking flash work in
-status handling. Reject a bad chunk CRC before programming and allow resending
-that chunk. Flash erase/program errors or final readback CRC mismatch abort the
-installation. Disconnect, explicit abort, disable during upload, or inactivity
-timeout aborts without resume. New attempts restart from the beginning. An
-in-flight hardware operation may finish before storage is reused. Host inactivity
-timeout defaults to configurable 30 s, including partial chunks; device-side
-erase/program/verification time does not count against it.
-
-Use versioned binary framing with explicit bounded lengths, fixed byte order,
-and sequential offsets on a dedicated configurable TCP port (default 1001).
-Allow one client/session and provision lwIP for OTA plus the existing port-1000
-console. Binary OTA never travels over the console UART. Future console base64
-or SD-card adapters feed the same transport-independent engine.
-
-A Python uploader takes target address and image path and reports progress and
-errors. Optional --reboot sends a protocol request only after successful install
-commit. An application-provided callback accepts/declines it; decline leaves the
-image installed/pending and is reported distinctly. Reboot does not confirm it.
-
-### Implementation and validation gates
-
-Implement CRC/version/flash/fault/watchdog foundations first, then the small
-bootloader and measured layout, prove both slot executions, and add journal/OTA
-integration. Power-loss tests interrupt every flash erase/program/commit boundary,
-including journal rollover. Exercise corrupt images/metadata, trial rejection,
-idempotent confirmation, older-version installs, replacement uploads and recovery.
-Test malformed packages, relocation bounds, exact reconstruction, arbitrary TCP
-fragmentation/coalescing, retries, abort/disable/disconnect/timeout, and reboot
-refusal. Verify watchdog startup, latching, task rates, schedule changes, counter
-resets, and retained diagnostics on host/fake.
-
-On H563 repeatedly test A/B updates, rollback, faults, early init hangs/errors,
-debugger/watchdog behavior, and UART/USB/TCP responsiveness during OTA. Measure
-bootloader size and metadata stalls against the 100 ms progress allowance. Run
-all repository tests, formatting, lint and existing H563/H755 builds; identify
-hardware-tested results separately. H755 hardware testing remains deferred.
-
-
-### Test organization and H563 HIL
-
-Keep Catch2 for C++ tests. Run Python tests through pytest, including Meson-driven
-host process and consumer checks. Hardware tests live in tests/hil/h563 and are
-excluded from ordinary pytest collection and normal CI. Explicit --hil selection
-requires a local configuration, matching H563 bootloader/network/USB/TCP build,
-ST-LINK UART/SWD, USB CDC and reachable DHCP Ethernet.
-
-Every selected HIL test starts with a main-flash mass erase, factory programming
-and verification, clearing the retained RAM fault record as well. There is no
-reuse-installed-image option. A shared fixture
-owns the board, serializes access, builds matching artifacts, captures transcripts
-and controls OpenOCD/GDB. Missing prerequisites and provisioning failures fail
-setup. Tests must be independent of execution order; cleanup closes transports
-and resets the board even on failure. Store all generated artifacts under
-build/. Watcher is a pinned test-only dependency for asynchronous text streams;
-OTA binary protocol and byte-level UART stress retain appropriate direct I/O.
-
-Cover all three console transports, reset/reconnect, Ethernet ping, UART bursts,
-CPU fault frames, watchdog failures, startup trial rollback, and bidirectional
-OTA with concurrent command traffic. Also cover PSP and invalid-stack capture,
-interrupt-masked watchdog reset, faults with core debugging disabled, journal
-rollover, both-images-invalid recovery, and OTA timeout/disable/reset/link-loss
-interruption and replacement. PHY power-down and CPU reset tests do not replace
-physical cable-unplug or power-interruption qualification. Watcher fixes belong upstream with tests;
-update the pinned published commit after validation.
-
-
-## OTP storage (agreed behavior and implementation design)
-
-Implementation status: the record codec, Store, optional module/commands and
-persistent host FileOtp and injected bank-B FlashOtp emulator are implemented.
-See [docs/otp.md](docs/otp.md) for composition and test usage. H563 emulator HIL
-covers factory/reset retention and bidirectional OTA. The real H563 OTP backend
-is implemented with provisioning disabled by default. Guarded read/NMI behavior
-has been tested on a previously provisioned H563. One explicitly authorized
-write stored `dave_nucleoh563_sn001` in block 1 and verified its permanent lock;
-all other blocks retained their fingerprints and locks. Read-only firmware was
-restored and HIL verified retention through factory programming and reset.
-Further automated real
-OTP tests are read-only. Physical power-cut qualification remains deferred.
-
-Provide an optional OTP service outside the scheduler core, with injected
-platform storage and CRC support. Constructors remain passive. During stage1,
-the module initializes its injected backend, scans storage and populates
-fixed-size RAM storage. It has no initialization dependency on other modules;
-its backend and CRC support must be usable within its own stage1. Its stage2 is
-a no-op. After successful stage1, the cache is available to every module during
-stage2 without depending on module registration order.
-
-Begin with a persistent host file backend, following the FileFlash approach, so
-development and repeatable tests consume no real OTP capacity.
-
-Read and write APIs are restricted to the scheduler thread, including module
-initialization callbacks. No interrupt-context or concurrent host-thread access
-is supported. Writes synchronously program and read back one block, verify the
-record, and return the result; no background task or asynchronous completion API
-is required for these infrequent provisioning operations.
-
-### Records and cached access
-
-Treat the available OTP storage as ordered, fixed-size slots, with exactly one
-record per hardware block. On H563 this gives 32 slots of 64 bytes each. Each
-record structure occupies the entire block; do not pack multiple records into
-one block or span a record across blocks. Each record has a type identifier,
-size, and CRC32 header followed by its payload. The H563 record layout is:
-
-| Offset | Field | Size |
-| --- | --- | --- |
-| 0 | Type identifier: enum class with std::uint16_t underlying type | 2 bytes |
-| 2 | Payload length: std::uint16_t, counting payload bytes only | 2 bytes |
-| 4 | CRC32: std::uint32_t | 4 bytes |
-| 8 | Payload | 56 bytes |
-
-The record totals 64 bytes. CRC32 uses the existing DaveOS CRC32 convention
-and covers the type, payload length, and all 56 payload bytes, in stored order,
-excluding the CRC field itself. Fill unused payload bytes with 0xFF before
-calculating the CRC using the intended final type identifier.
-
-Reserve type 0xFFFF as invalid/unwritten. Program the length, payload, and CRC
-before programming the type field last as the completion marker. A record is
-accepted only when its completion marker, length, CRC, and supported payload
-validation pass. A type field still at 0xFFFF does not prove the block is unused:
-partially programmed contents elsewhere in the block consume it. Unknown types
-other than 0xFFFF remain subject to the skip-and-consume policy below. Readback
-verification after the final type write is required before reporting success or
-updating the RAM cache.
-
-Permanently lock each successfully programmed and verified block as part of the
-write operation; locking is not deferred to a separate provisioning API. Verify
-the lock before returning success for a newly written record. Each record uses
-an entire block, so there is no remaining space in that block to preserve for
-future writes. If record verification succeeds but permanent locking fails,
-return an error and expose the verified new value in the RAM cache. The block
-remains consumed. This keeps runtime reads consistent with the valid record
-that initialization would find after reboot; do not fall back to the previous
-value solely because locking failed.
-
-Initialization scans every potential slot, validates records, and loads valid
-supported data into RAM. For a repeated type, the valid record later in physical
-slot order replaces the earlier cached value. An invalid later record must not
-replace a valid earlier value. Unknown record types do not fail initialization:
-skip their contents and treat their blocks as consumed, preserving compatibility
-with data written by newer firmware. Initialization also accepts a valid but
-unlocked record, for example after a reset between programming and locking.
-Cache its value, block identity and lock state, but do not program or lock OTP
-during initialization. A later identical write retries only that block's lock.
-Startup scanning is read-only with respect to OTP contents and permanent locks.
-Record validity and precedence depend on contents, CRC and physical slot order,
-not the lock bit. A valid unlocked record is usable; a locked corrupt record is
-not. Consult lock state for locking/verification and to exclude locked blocks
-from write candidates; being unlocked does not establish that a block is unused.
-Public read accessors use the RAM cache rather than rereading OTP.
-
-If a block has a genuine recoverable ECC read error, record the problem, treat
-the block as consumed, and continue scanning. It must not replace an earlier
-valid cached record or become a write candidate. Failure to initialize or access
-the backend as a whole fails module initialization. Expected ECC indications
-from never-written OTP are distinct from genuine per-block read errors.
-
-For every supported record type, compare a requested write with the current
-valid cached record of that type. If the type, payload length, and payload bytes
-are identical and its block is locked, return success without programming or
-consuming a block. If the valid cached record is unlocked, whether from a failed
-lock operation or the initialization scan, an identical write retries only the
-permanent lock on that existing block and verifies it. Do not rewrite data or consume another slot; return
-success once locking is verified, otherwise return the lock error and retain
-the verified cached value. These rules apply to all types, not only serial
-numbers, and require no free slots. Compare contents rather than relying on
-CRC equality. Deterministic padding and CRC make identical content an identical
-stored row.
-
-Changed records append immediately after the highest consumed block, starting
-at block zero when none have been consumed. Normal operation must use consecutive
-blocks and create no gaps. A partial or failed write consumes its block rather
-than creating a reusable gap. If externally produced contents contain an earlier
-unused gap, do not backfill it: physical slot order must continue to represent
-write order. Records never update a previously written record in place.
-Distinguish never-used storage from a used slot containing invalid or partially
-written data. A partially written or corrupt
-block is consumed permanently and must never be reused. Initialization skips
-such records and retains the latest earlier valid value for each type.
-
-After programming a record, read it back and verify it before updating the RAM
-cache. If verification fails, return an error, preserve the previous cached
-value, and leave the affected block consumed. A subsequent write uses a fresh
-block. If a changed value needs a new record and no never-used block remains,
-return core::Status::full without changing the RAM cache. Identical writes
-consume no storage when all blocks are used, and succeed if the existing block
-is already locked or the lock-only retry succeeds.
-
-The first and only implemented payload type is a serial number: ASCII text up
-to the maximum payload capacity. Device keys and additional types remain future
-work. On H563 the serial number may occupy all 56 payload bytes. The payload
-length field gives its character count; no NUL terminator is stored. The RAM
-accessor returns std::optional<std::string_view>, referring to the RAM cache.
-If no valid serial-number record exists, initialization still succeeds and the
-accessor returns std::nullopt. The application decides whether provisioning is
-required. Accept 1 through 56 printable ASCII characters
-(bytes 0x20 through 0x7E inclusive), including spaces. Preserve characters exactly;
-do not trim whitespace. Reject empty strings, overlength values, control
-characters (including NUL and DEL), and non-ASCII bytes before programming or
-consuming a slot. Apply the same serial-number validation during initialization
-before accepting a stored record into the RAM cache.
-
-### Demo commands
-
-Provide commands to show the cached serial number and report the backend,
-consumed/remaining slots and error counts. Setting the serial number uses an
-explicit serial set subcommand with two required string arguments: the proposed
-serial number and its confirmation. Compare the parsed strings exactly,
-including whitespace and case. If they differ, return core::Status::invalid_argument
-without programming data, retrying a lock, consuming a slot or changing the RAM
-cache. Matching values must still pass the normal serial-number validation.
-There is no single-argument setter shortcut.
-
-The setter is otp serial set "ABC 123" "ABC 123". The command namespace is
-otp, separate from ota firmware updates. The read/status commands are otp serial
-and otp status. The serial command adapter handles the explicit set form as
-described below, using the existing dispatcher tokens.
-
-### Backends and STM32 integration
-
-The host file backend must preserve contents across close/reopen and support
-tests of slot consumption, repeated types, invalid records, partial writes and
-exhaustion. Persist permanent block locks as well as contents across reopen.
-It should model the selected OTP programming restrictions; ordinary
-flash erase/rewrite semantics are not sufficient.
-
-After the host-file tests pass, implement a second test backend using flash in
-the reserved bank-B placeholder. Use it to exercise the OTP module on H563 before
-programming real OTP. This backend is part of the initial implementation plan.
-Reserve one 8 KiB erase sector from the bank-B placeholder. Expose the same
-32 logical 64-byte records as real H563 OTP; additional physical space within
-that sector stores simulated permanent locks and interrupted-write tracking.
-This allocation must not overlap boot metadata or either application slot and
-must not change their sizes or addresses. The emulator's physical layout must
-respect the underlying flash programming unit without reprogramming a unit to
-simulate OTP's smaller writes. Records and simulated permanent locks survive
-resets and OTA updates. Do not automatically erase the emulator during
-initialization or when it becomes full. Existing factory programming clears it
-as part of its main-flash mass erase; actual hardware OTP remains untouched by
-factory programming. Keep emulated OTP programming and permanent-lock semantics
-consistent with the host backend despite the underlying flash being erasable.
-
-Real H563 OTP support requires coordinated MPU/cache configuration and NMI
-handling. Use the reference OTP driver and interrupt handler below to guide the
-hardware adapter. The reference distinguishes 16-bit programming units from
-64-byte lockable blocks; do not equate these sizes or silently assume the same
-geometry on H755. Keep device geometry in the platform adapter.
-
-The NMI path must inspect FLASH ECC status and ECCDR, acknowledge ECCDETR as
-required for reads of unwritten OTP, and preserve handling of genuine ECC errors
-and unrelated NMIs. Integrate with the existing main-flash ECC handler rather
-than installing competing NMI handlers. MPU configuration must coexist with
-existing board memory attributes. Exact ECC classification and the hardware
-sequence for applying and verifying permanent block locks require reference
-verification; do not simply treat any ECC error as a free slot.
-
-References reviewed:
-
-- /home/david/form/g2/fw/src/common/form/hal/otp/
-- /home/david/form/g2/fw/src/middleware/cube/Src/stm32h5xx_it_user.c
-- ST guidance: https://community.st.com/stm32-mcus-60/handling-ecc-errors-in-stm32h5-series-reading-unwritten-otp-and-flash-data-area-143933
-- Pinned STM32CubeH5 HAL: stm32h5xx_hal_flash.c (HAL_FLASH_OB_Launch),
-  stm32h5xx_hal_flash_ex.c (OTP lock programming/current-state readback), and
-  stm32h563xx.h (OTP geometry and ECC register fields).
-- RM0481, FLASH OTP access/read operations and OTPBLR/ECC register descriptions,
-  for the real-adapter qualification checklist; emulator success is not a
-  substitute for verifying those hardware semantics.
-
-### Implementation design
-
-Keep the storage service in daveos::otp (otp/), independent of the scheduler,
-logger, commands and STM32 HAL. Provide otp::Module<Event = core::NoEvent> as a
-thin optional DaveOS adapter. It owns no peripheral or global singleton: the
-application constructs a backend, a Store with a borrowed driver and optional
-CRC service, and then the module referring to that Store. Constructors only
-store configuration/references. Module stage1 calls Store::init(); stage2 does
-nothing. No periodic task is needed.
-
-Use the existing borrowed context/function-pointer DI idiom, without virtual
-methods or heap allocation. The initial supported geometry is 32 blocks of
-64 bytes; an incompatible backend fails initialization before any mutation.
-Keep the geometry reported by the backend so another target's adapter cannot
-silently inherit H563 assumptions. Do not implement H755 OTP by assuming it is
-identical to H563.
-
-The driver provides these synchronous operations:
-
-- init(): prepare/open the backend and validate its geometry.
-- inspect(block, result): return the 64 logical bytes, lock state and an enum
-  describing unused, consumed/readable, or consumed/unreadable storage. A
-  recoverable block error is represented in that result; a non-ok operation
-  status means the backend could not reliably inspect storage.
-- program(block, record): program one fresh logical record, with the type field
-  committed last. Return status and an attempted flag. Busy/rejected operations
-  that never touch storage do not consume the next block. Once programming may
-  have started, a failed attempt consumes it. No automatic data-write retries.
-- lock(block): idempotently apply the permanent lock. Store then inspects the
-  block to verify the actual lock state; issuing a lock request is not proof.
-
-The backend owns physical programming order and the distinction between virgin,
-programmed and unreadable storage. The Store owns record validation, CRC, append
-position, equality checks and the RAM cache. There is no erase or arbitrary
-reprogram operation in the public OTP driver. It does not expose raw mapped OTP
-pointers to callers.
-
-Use explicit little-endian encoding rather than writing a compiler-dependent
-struct representation. Define serial_number = 1 in the record type enum and
-reserve 0xFFFF as the uncommitted value. Other identifiers are unknown types.
-Verify the header offsets and 64-byte total at compile time. Check payload
-length before using it; validate CRC over bytes 0..3 and 8..63, then validate
-the supported payload. Require canonical 0xFF padding. All-zero, malformed,
-uncommitted and checksum-invalid records are consumed but not cached.
-
-Store exposes init(), ready(), serial(), set_serial(string_view), and snapshot().
-Before successful initialization, serial() returns nullopt and set_serial()
-returns not_running; ready() distinguishes this from an initialized device with
-no serial number. Repeated successful init returns already_initialized; an init
-failure leaves the service unavailable. Returned serial views borrow fixed RAM
-storage and are valid until the next verified value change or Store destruction.
-Lock-only retries and identical no-op writes do not invalidate a view. Never
-return a view into driver staging storage or mapped OTP.
-
-Stage a proposed value before mutation, including when it aliases the current
-cached string. Invalid input and full/busy rejections leave cache and append
-position unchanged. A failed programming/readback attempt leaves the previous
-cache intact and consumes its target when the backend reports an attempt. A
-verified new value replaces the cache before lock completion; lock failure is
-reported separately without hiding that value. A reset during an operation may
-leave a valid unlocked record; the next scan is authoritative.
-
-Use existing core::Status values: invalid_argument for bad values/confirmation,
-full for exhausted append space, busy for unavailable shared hardware, io_error
-for read/program/lock failures, timeout for bounded operation timeouts, and
-checksum_error for mismatching record verification. Invalid backend geometry or
-host-file format is incompatible. Status snapshots identify the failing phase
-(scan, program, verify, lock), block and status so an io_error is diagnosable.
-Error returns after mutation are explicitly not rollback guarantees.
-
-Snapshots use fixed-size value types, including backend identity, readiness,
-consumed blocks, remaining appendable slots, invalid/unknown/unreadable block
-counts, latest record's block/lock state, and saturating operation-error counters.
-Report an anomalous earlier gap as unavailable for append, not free capacity.
-An expected unwritten-OTP ECC indication is not counted as a genuine read error.
-Counters are diagnostic data, not a tick-driven state machine.
-
-### Host file backend
-
-Provide platform::host::FileOtp with a passive constructor taking a borrowed
-path and explicit existing/create mode. Open during init, matching the stage1
-contract. Create is exclusive and never truncates an existing file; existing
-mode rejects missing, malformed, wrong-version or wrong-size files. No automatic
-reset or repair of a damaged backing file. Use bounded buffers and positional
-file I/O; successful mutations include persistence synchronization.
-
-Define a versioned file format: a 64-byte header describing the magic, format,
-geometry and header CRC, followed by 32 fixed 128-byte block images. Each image
-contains the 64 logical bytes, one state byte for each of its 32 halfwords,
-a persistent lock byte and reserved padding. Per-halfword states distinguish
-virgin, programming attempted/incomplete, programmed, and injected read failure.
-A programmed 0xFFFF halfword is not virgin. Lock state is sticky across reopen.
-Reject malformed simulator bookkeeping instead of treating it as erased.
-
-Before each simulated halfword write, persist its attempted state, then its data,
-then its completed state. Program length first, then the remaining non-type
-halfwords, and the type halfword last. Program each halfword at most once,
-including 0xFFFF padding. Data and lock faults are independently injectable at
-operation boundaries. Model failure before any mutation, partial programming,
-readback mismatch/ECC, and lock failure before/after persistence. Close/reopen
-must retain evidence of interrupted writes and lock state. Reset fixtures by
-creating a new test file, not by exposing erase through the service.
-
-This is a deterministic OTP model, not a claim about transistor-level failure
-behavior or storage guarantees after loss of power to the host itself.
-
-### Bank-B flash emulator
-
-Reserve 0x08100000..0x08101FFF, the first 8 KiB of the existing 32 KiB bank-B
-placeholder. Generate/export the reservation from the same layout tooling as
-boot metadata, with overlap/alignment assertions and programming-plan coverage.
-The rest of the placeholder, metadata B at 0x08108000 and application B at
-0x0810A000 remain unchanged. Require a compatible boot-layout build when this
-backend is selected; do not assume a standalone firmware image reserves it.
-
-Use 32 physical slots of 256 bytes each. A slot contains:
-
-| Relative offset | Physical contents |
-| --- | --- |
-| 0..15 | Claim marker identifying format and logical block, with integrity check |
-| 16..79 | 64-byte record body, with the type field left at 0xFFFF |
-| 80..95 | Commit marker containing final type and record identity/integrity check |
-| 96..255 | Ten independent 16-byte lock-attempt cells |
-
-Write the claim first, then the body, then the commit marker. All-0xFF body
-flash words carry no data and remain virgin; never program them merely as padding. Only a complete
-valid commit marker supplies the type when reconstructing the logical record.
-The service still sees the same 64-byte format and CRC convention; physical
-markers are backend bookkeeping. A nonvirgin or ECC-damaged claim/body/commit
-consumes the slot even when no valid record can be reconstructed. Unexpected
-contents must never cause the emulator to erase itself.
-
-Successful locking appends one valid lock marker tied to that block. Torn lock
-cells are consumed and a retry uses the next virgin lock cell, without changing
-the logical record or consuming another logical block. Any valid lock marker
-makes the block permanently locked. Exhausting the ten lock-attempt cells returns
-io_error with lock-phase diagnostics; do not rewrite a physical flash word or
-erase the sector to recover. This bound is an emulator implementation limit,
-not a limit imposed on the Store API or a hardware OTP lock operation.
-
-Wrap the injected flash driver and poll only operations the emulator itself
-started. Reject busy hardware before claiming a slot; never poll or clear another
-owner's completion. Keep all waits bounded and leave interrupts enabled. The
-emulator must coordinate with OTA/boot flash operations and use the existing
-ICACHE invalidation/readback discipline. Do not feed the watchdog directly from
-OTP code. The implementation bounds each flash-word wait to 100 ms and also
-has a finite polling budget for a stalled clock. A timeout retains the write
-buffer and makes that emulator instance unavailable until reset. Factory
-main-flash mass erase is the only normal reset of this backend.
-
-### H563 hardware adapter and ECC integration
-
-Real-DUT policy: this board may already be provisioned. Scan read-only and report
-existing blocks and locks before proposing any new record. Preserve unfamiliar
-records. After the initial explicitly approved write/lock validation, all
-automated real-OTP tests are read-only. Further real writes require explicit user
-instruction. Repeated writes/failure injection remain on FileOtp/FlashOtp. The
-HIL runner rejects builds with `otp_programming=true`.
-
-On the qualified H563, ADDR_ECC identifies OTP 32-bit address groups as
-`0x600 + (address - 0x08FFF000) / 4`; actual loads remain 16-bit. NMI delivery can
-lag the load by several cycles. Keep the borrowed read context through ECC
-status synchronization and acknowledgement, then remove it before returning.
-Tests pin the region/bank/address matching and check both halfwords of every
-OTP address group without broadening recovery to unrelated NMI sources.
-
-
-Use the existing Nucleo MPU mapping (region 0, 0x08FFF000..0x08FFFFFF,
-non-cacheable, execute-never) as the starting point. It is currently read-only.
-The board owns the mapping: the driver must request a scoped programming access
-change and restore permissions on every exit rather than resetting unrelated MPU
-regions or globally disabling the MPU for a whole scan/write. Preserve access
-to engineering/calibration bytes. Barriers accompany permission changes.
-
-Read OTP through volatile 16-bit accesses only. Program length first, then every
-remaining halfword other than type, and type last. Never program an OTP halfword
-twice; 0xFFFF data still has programmed ECC state and must not be mistaken for
-virgin storage. A locked blank block is consumed. A block with any programmed or
-uncertain halfword is consumed. In the running process, retain consumption after
-an attempted write even if subsequent readback fails.
-
-Centralize recovery of flash ECC NMIs. During an explicit read, publish a narrow
-borrowed read context identifying main flash versus OTP and the address/unit
-being read; remove it before returning. Inspect ECCDETR's ECCD, OTP/region and
-address information and capture ECCDR before acknowledging the event. The OTP
-path uses the documented unwritten-halfword indication to classify virgin reads;
-other recoverable errors become block read failures. The proposed virgin test
-requires a matching OTP read, ECCD and the full 16-bit all-ones failing datum;
-all halfwords in an unlocked block must qualify as virgin. A halfword read
-successfully without that indication is programmed even when its value is
-0xFFFF. Confirm this classification against the target before enabling real OTP
-writes; the public service consumes ambiguous blocks. Do not copy the reference's
-broad ECCDR low-byte truth test as a blanket exception suppressor. An NMI outside
-the matching guarded read retains the existing fault capture/reset behavior.
-Clear relevant stale ECC flags before the next read, preserve diagnostics, and
-avoid logging or dereferencing the failing location from NMI context.
-
-Peripherals cannot supply a historical record of a write attempt that leaves no
-observable change. Do not claim that an all-ones data read alone proves a block
-was never touched: classification must include ECC and lock evidence. Real-hardware
-qualification must establish the supported interrupted-programming behavior;
-ambiguous/damaged cells are never reused. Host failure injection does not replace
-this qualification, and physical power-interruption testing remains deferred.
-
-For locks, first finish and verify data programming, then update only the selected
-OTP lock bit while preserving existing locks and unrelated option bytes. The
-pinned HAL programs OTPBLR_PRG and applies options using OPTSTART; it reads locks
-from OTPBLR_CUR. Verify the effective lock there before reporting success, and
-restore flash/option-register locking on every exit. A PRG-register write alone
-is insufficient. Do not add an implicit MCU reset to the setter. If hardware
-requires a reset to make the lock effective, bring that constraint back for a
-behavior decision instead of silently changing the synchronous contract.
-
-The existing flash adapters and the new OTP adapter need shared controller
-ownership for program/erase/option updates, including pending asynchronous OTA
-operations. A separate driver object is not proof that the peripheral is free.
-Busy rejection must not alter another owner's flags, permissions or lock state.
-Test contention both while OTA writes B from A and writes A from B.
-
-### Command adaptation and composition
-
-Keep the command dispatcher unchanged. Register otp serial as a raw-arguments
-command adapter, with a normal typed no-argument otp status command. Serial
-accepts exactly zero arguments (read) or three arguments (literal set, value,
-confirmation). Validate this grammar and exact string equality before calling
-Store::set_serial. All strings come from the existing dispatcher tokenizer;
-there is no second splitting/quoting implementation. Do not accept a single-value
-shortcut. Help explicitly prints both forms and the confirmation requirement.
-
-The adapter is the only raw command boundary; service accessors/setters remain
-typed. Include quoted spaces, escaped quotes, and maximum-length serial numbers
-in command tests. Two maximally escaped 56-byte serials fit in the default
-256-byte line buffer and the command uses five tokens, within the default eight.
-Keep logging/command availability orthogonal to the Store and backend.
-
-Use Meson composition files to select none, host file, H563 flash emulator or
-H563 hardware backend; never silently fall back between them. Demo H563 testing
-selects the emulator explicitly. Real OTP programming is a separate deliberate
-qualification step, after host and emulator coverage. H755 OTP is outside this
-initial adapter implementation. File paths and injected objects outlive their
-borrowers and remain valid for file-scope construction.
-
-### Implementation and validation sequence
-
-1. Add record encoding, Store, injected driver, diagnostics and unit tests.
-   Cover empty storage, all slot boundaries, unknown/invalid/repeated records,
-   read-only scans, unlocked valid records, full storage, exact deduplication,
-   string validation, cache/view behavior, and all error paths.
-2. Add FileOtp and reopen-based fault tests. Interrupt each halfword/commit/lock
-   boundary; verify previous-value recovery or a valid unlocked new value,
-   consumed slots, no data reprogramming, and lock-only retry. Test genuine ECC
-   failure separately from expected virgin reads and fatal backend failures.
-3. Add the module/commands and Meson composition. Test stage1 independence,
-   stage2 consumers, count/confirmation errors, exact whitespace/case behavior,
-   serial/status output, and logging-disabled operation.
-4. Add the flash emulator and exercise it against FileFlash first. Test every
-   claim/body/commit/lock boundary, physical write-once rules, retry exhaustion,
-   layout overlap checks, resets/reopens, no erase-on-full and controller busy.
-5. Add H563 HIL cases starting from the factory image: serial read/set/duplicate/
-   mismatch, reset retention, A/B OTA retention, exhaustion, lock retries via
-   test injection, and factory clearing. Verify adjacent placeholder bytes,
-   metadata and both application slots are untouched by OTP operations. Preserve
-   existing console, boot, OTA and watchdog coverage.
-6. Integrate the real H563 backend with guarded ECC/MPU/controller handling.
-   Exercise classification and register-operation seams in host tests, then
-   validate non-programming hardware access before any deliberate OTP write.
-   Real fuse/lock qualification and physical power-cut evidence remain distinct
-   from emulator success; do not claim them from a passing file/flash suite.
-
-No new tick-driven state machine is needed for these synchronous operations.
-If implementation introduces one, use core::StateMachine and the AGENTS.md
-single-transition structure. Keep named constants for geometry, formats and
-operation timeouts at the top of their relevant files. Run the full supported
-host/fake/sanitizer, ARM, formatting/lint and selected HIL checks before pushing.
+## Style
+
+* Emphasize simplicity and concision in design and implementation.
+* Be DRY (Don't Repeat Yourself): keep each piece of logic or knowledge in one place.
+* Use Google C++ style with the repository's clang-format overrides: blank lines
+  between function/class definitions, braces on control-flow bodies, and indented
+  namespace contents.
+* Use short namespace aliases and qualified names instead of `using namespace`.
+* Follow the fixed-width integer and file-naming rules under Source organization.
+* Allow short variable names if their physical scope, from first to last textual
+  appearance, is less than 15 lines.
+* Do not repeat the class name in member names.
+
+## Source organization
+
+Colocate headers and implementations by component: shared console helpers live
+under `console/`, core facilities live under
+`core/{schedule,command,event,logging,queue,platform,enum}/`, and adapters under
+`platform/{host,fake,stm32h5,stm32h7}/`, with shared adapter details in
+`platform/detail/`. Optional networking lives in `net/` (`daveos::net`), with
+shared STM32 Ethernet support in `platform/stm32/ethernet/`
+(`daveos::net::stm32`). Include paths are relative to the repository root.
+Core/platform namespaces remain `daveos::core` and `daveos::platform::*`. No separate include
+and source trees are needed. Headers defining templates use `.hpp`, other
+headers use `.h`, and C++ translation units use `.cpp`. Vendor and generated
+file naming is retained. Meson definitions live with their components/targets.
+
+Use fixed-width integers from `<cstdint>` for stored numeric values and explicit
+enum underlying types. Use `PRI*` macros from `<inttypes.h>` for printf-style formatting of those values, rather than
+casting to `long` or `long long`. Retain API-required types such as `int` for
+`main`, printf width/precision, and C/POSIX return values, and `std::size_t` for
+sizes and indices.
+
+Do not rely on embedded libc to format 64-bit integers. Statistics retain their
+full-width stored values but use a bounded 32-bit decimal display, appending
+`+` above UINT32_MAX. Format any future 64-bit hexadecimal output as separate
+32-bit upper and lower halves, with the lower half padded to eight digits.
+
+Use small named concepts for repeated type contracts. `ModuleFor<M, Event>`
+checks event-type compatibility at scheduling, cancellation, registration, and
+command-dispatch boundaries after the concrete module is complete. Keep
+value/metadata validation in constexpr checks. Prefer concrete parameter types
+when no template deduction is needed, and name repeated policy predicates.
+
+## Implementation review checklist
+
+These checks follow from the agreed behavior; they do not introduce additional APIs.
+
+* Verify stage ordering, automatic initialization, terminal failure, repeated-init
+  errors, and failure-path log delivery.
+* Verify earliest-first dispatch, retained overdue iterations, replacement,
+  cancellation, self-rescheduling, zero-delay validation, and per-task statistics.
+* Verify copied variant payloads, typed handler registration and rejection of
+  invalid declarations, ignored alternatives, visitor fallback, handler log context,
+  and allocation-free delivery, including concurrent interrupt posting. Verify
+  sender exclusion, complete broadcasts, fixed capacity, and overflow reporting
+  without depending on unspecified equal-time or recipient ordering.
+* Verify timestamped logs, severity filtering, truncation, overflow, and dispatch
+  behind due tasks/events.
+* Verify queue failures preserve contents and all callers use consistent protection.
+* Exercise concurrent host interrupts, restored critical-section state, and wakeup
+  arriving between the idle check and sleep entry so work cannot be stranded.
+* Verify fake-time tests and real-time host tests through the same core interface.
+* Verify timer replacement, cancellation, self-rearming, positive-delay validation,
+  pre-run errors, capacity limits, and the reserved scheduler slot.
+* Verify sleep is bounded by pending task and timer due times, and shutdown ends
+  timer activity and flushes logs before returning.
+* Verify compile-time module/command metadata validation, case-insensitive exact
+  and unique-prefix matching, quoting, input limits, help, and handler statuses.
+* Verify handler logging context and argument views survive nested-dispatch
+  rejection, and that command-only modules require no task slots.
+* Exercise all four combinations of commands and logging. Disabled macros must
+  skip argument evaluation; disabled logger instances must have no buffer storage.
+* Verify logger counters reset independently of scheduler statistics, interrupt
+  enqueue notifies idle dispatch, and pending records prevent sleep.
+* Verify console EOF does not stop the scheduler; `console exit` does.
+* Verify exact chrono conversion, invalid-delay preservation, compile-time task
+  selection, bound-timer identity/cancellation, and retained initialization errors.
+* Verify the optional command-binding module and separate consumer starter build.
+
+Public headers define concrete C++ signatures and status values. Changes to those
+interfaces must keep this specification and the application examples consistent.

@@ -72,6 +72,8 @@ static void MX_USART3_UART_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+__attribute__((weak)) void app_early_init(void) {}
+__attribute__((weak)) void app_init_failed(void) {}
 
 /* USER CODE END 0 */
 
@@ -83,6 +85,11 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
+  SCB->SHCSR |= SCB_SHCSR_MEMFAULTENA_Msk | SCB_SHCSR_BUSFAULTENA_Msk |
+                SCB_SHCSR_USGFAULTENA_Msk;
+  __DSB();
+  __ISB();
+  app_early_init();
 
   /* USER CODE END 1 */
 /* USER CODE BEGIN Boot_Mode_Sequence_0 */
@@ -368,6 +375,8 @@ void MPU_Config(void)
 void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
+  app_init_failed();
+  NVIC_SystemReset();
   /* User can add his own implementation to report the HAL error return state */
   __disable_irq();
   while (1)

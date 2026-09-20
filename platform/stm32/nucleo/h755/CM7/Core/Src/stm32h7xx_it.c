@@ -51,6 +51,11 @@
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+/* Strong assembly entry points retain the original exception frame. */
+#pragma weak HardFault_Handler
+#pragma weak MemManage_Handler
+#pragma weak BusFault_Handler
+#pragma weak UsageFault_Handler
 
 /* USER CODE END 0 */
 

@@ -1,7 +1,8 @@
 # Build and API reference
 
 A C++20 cooperative scheduler for embedded applications. [PROJECT.md](../PROJECT.md)
-is the behavioral specification. The implementation provides real-time Linux
+is the concept/core specification and index to the services, platforms, and
+STM32 integration specifications. The implementation provides real-time Linux
 host and deterministic fake-time platforms, STM32H563/H755 adapters, optional logging and command dispatch, and
 standalone application starter files. One shared STM32 console supports both
 Nucleo boards, with independently selectable UART, USB CDC, and TCP transports
@@ -613,10 +614,10 @@ overflow drops whole new lines and records a warning; sustained input still
 needs sender pacing. FIFO setup runs during module stage1, after CubeMX setup,
 so regeneration cannot silently disable it. H563 hardware validation passed
 580 unpaced commands, including repeated 16-line, 4,112-byte bursts and
-overlength rejection followed by a valid command. H755 has build coverage only
-for the later static-storage, UART FIFO/queue, Meson board/component selection,
-convenience-API, and Application-composition changes; its earlier hardware results do not validate the
-current firmware. H563 hardware smoke tests also passed after the Application-composition
+overlength rejection followed by a valid command. H755 now has current
+UART burst and UART/USB/TCP hardware coverage after the static-storage,
+FIFO/queue, Meson board/component selection, convenience-API, and
+Application-composition changes. H563 hardware smoke tests also passed after the Application-composition
 migration: UART/USB/TCP commands, timers, statistics, LED command acknowledgements,
 button reads, large-packet ping, TCP reconnect, and software-reset recovery.
 Overlength lines are rejected, full queues drop entire lines, and UART errors
@@ -628,7 +629,7 @@ CRLF. With `-Dlogging=false`, commands still execute but help and log output are
 USART3 output (logs and echo) uses DMA1 Stream 0, memory-to-peripheral, with
 normal byte transfers and the USART3 TX request. DMA completion enables the
 USART3 transmission-complete interrupt, which releases the transmitted buffer
-and starts pending output. Two 4 KiB ping-pong buffers live in DMA-accessible
+and starts pending output. Two 8 KiB ping-pong buffers live in DMA-accessible
 AXI SRAM (`.dma_tx`); the linker section must be retained after CubeMX regeneration.
 The driver cleans transmitted cache lines if D-cache is enabled. DMA and AXI SRAM
 clocks remain enabled during shallow sleep. RX still uses one-byte interrupts.

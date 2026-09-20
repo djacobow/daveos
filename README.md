@@ -36,12 +36,15 @@ Build outputs stay under the ignored `build/` directory.
 
 ## References and starters
 
-- [Testing: portable checks and H563 HIL](docs/testing.md)
+- [Testing: portable checks and H563/H755 HIL](docs/testing.md)
 - [Application API guide](docs/application-guide.md)
 - [Build, board setup, programming, and API reference](docs/reference.md)
 - [Host/fake application starter](starters/application/README.md)
 - [STM32 device starter](starters/stm32/README.md)
-- [Behavioral specification](PROJECT.md)
+- [Concept and core specification](PROJECT.md)
+- [Utilities and portable services specification](docs/spec/services.md)
+- [Platform specification](docs/spec/platforms.md)
+- [STM32 integration and support matrix](docs/spec/stm32.md)
 - [Outstanding work and hardware validation](TODO.md)
 
 The STM32 starter reuses our CubeMX-generated startup and peripheral support,

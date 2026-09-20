@@ -10,6 +10,7 @@ namespace daveos::platform::stm32h5 {
 
 
   namespace {
+    constexpr std::uint32_t kFailureUartBudget = 64000;
     constexpr std::uint32_t kFlashBase = 0x08000000;
     constexpr std::uint32_t kFlashEnd = 0x08200000;
     constexpr std::uint32_t kCacheWaitBudget = 64000;
@@ -264,6 +265,34 @@ namespace daveos::platform::stm32h5 {
               return static_cast<Watchdog*>(p)->Start(timeout);
             },
             [](void* p) { return static_cast<Watchdog*>(p)->Feed(); }};
+  }
+
+  bool prepare_health(const util::Version& version) {
+    DBGMCU->APB1FZR1 = DBGMCU->APB1FZR1 | DBGMCU_APB1FZR1_DBG_TIM2_STOP;
+    set_fault_identity(version, 0);
+    const bool watchdog_reset = RCC->RSR & RCC_RSR_IWDGRSTF;
+    RCC->RSR = RCC->RSR | RCC_RSR_RMVF;
+    return watchdog_reset;
+  }
+
+  [[noreturn]] void initialization_failed() {
+    if ((RCC->APB1LENR & RCC_APB1LENR_USART3EN) &&
+        (USART3->CR1 & (USART_CR1_UE | USART_CR1_TE)) ==
+            (USART_CR1_UE | USART_CR1_TE)) {
+      for (char byte :
+           std::string_view("DaveOS initialization failed; resetting\r\n")) {
+        auto budget = kFailureUartBudget;
+        while (!(USART3->ISR & USART_ISR_TXE_TXFNF) && --budget) {
+          __NOP();
+        }
+        if (!budget) {
+          break;
+        }
+        USART3->TDR = static_cast<std::uint8_t>(byte);
+      }
+    }
+    __DSB();
+    reset();
   }
 
   util::fault::Record& retained_fault() {

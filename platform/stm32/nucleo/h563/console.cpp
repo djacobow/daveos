@@ -22,7 +22,7 @@ namespace board {
   }
 
   // H7 requires AXI SRAM; H5's normal SRAM is GPDMA-accessible (no D-cache).
-  alignas(32) std::array<std::uint8_t, 8192> tx_storage{};
+  alignas(32) std::array<std::uint8_t, 2 * kTxCapacity> tx_storage{};
 
   bool StartTransmit(const std::uint8_t* bytes, std::size_t size) {
     __DSB();

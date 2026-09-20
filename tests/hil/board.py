@@ -1,4 +1,4 @@
-"""One H563 fixture owns programming, consoles and debugger access."""
+"""One board fixture owns programming, consoles and debugger access."""
 from contextlib import contextmanager
 from pathlib import Path
 import socket
@@ -68,6 +68,13 @@ class Board:
         return stream.watch_for(pattern, timeout=timeout)
 
     def ready(self, slot='A', trial=False):
+        if self.config.get('board', 'h563') == 'h755':
+            self.uart.watch_for('DaveOS STM32H755 M7; type help', timeout=35)
+            self.ip = self.uart.watch_for(r'ready, link .*IP ((?!0\.0\.0\.0)\d+\.\d+\.\d+\.\d+)', timeout=15)[1]
+            # Survive a complete watchdog interval before declaring ready.
+            time.sleep(5)
+            self.query(self.uart, 'health status', 'Watchdog running')
+            return
         pattern = (rf'(?P<boot>Boot slot {slot} \({"trial" if trial else "confirmed"}\), CRC verified)'
                    r'|ready, link .*IP (?P<ip>(?!0\.0\.0\.0)\d+\.\d+\.\d+\.\d+)'
                    r'|(?P<healthy>Healthy for five seconds; image confirmed)')
@@ -83,11 +90,19 @@ class Board:
     def factory(self):
         # No reuse option: even a single selected test starts from factory state.
         target = self.control('capture {targets}')
-        if 'stm32h5x' not in target:
-            raise RuntimeError('OpenOCD must target the configured H563')
+        family = self.config.get('board', 'h563')
+        expected = 'stm32h5x' if family == 'h563' else 'stm32h7x'
+        if expected not in target:
+            raise RuntimeError(f'OpenOCD must target the configured {family}')
         self.uart = self.connect('uart')
-        image = tcl_word(str(self.firmware / 'factory.hex'))
-        self.control(f'reset halt; stm32h5x mass_erase 0; flash write_image {image}; verify_image {image}')
+        if family == 'h563':
+            image = tcl_word(str(self.firmware / 'factory.hex'))
+            self.control(f'reset halt; stm32h5x mass_erase 0; flash write_image {image}; verify_image {image}')
+        else:
+            # H755 standalone factory state includes both the sleeping M4 and M7.
+            m4 = tcl_word(str(Path(self.config['build']).resolve() / 'platform/stm32/nucleo/h755/CM4/stm32h755-sleep-m4.elf'))
+            m7 = tcl_word(str(self.firmware / 'stm32-console.elf'))
+            self.control(f'targets stm32h7x.cpu0; reset halt; flash erase_address 0x08000000 0x200000; flash write_image {m4}; verify_image {m4}; flash write_image {m7}; verify_image {m7}')
         # Flash erase does not clear retained RAM; start with no old fault record.
         self.control('mww 0x20000000 0')
         self.uart.drain()
