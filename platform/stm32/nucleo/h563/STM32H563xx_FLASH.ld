@@ -39,7 +39,8 @@ ENTRY(Reset_Handler)
 /* Memories definition */
 MEMORY
 {
-  RAM    (xrw)    : ORIGIN = 0x20000000,   LENGTH = 640K
+  /* First 2 KiB: shared retained fault record and emergency exception stack. */
+  RAM    (xrw)    : ORIGIN = 0x20000800,   LENGTH = 638K
   FLASH    (rx)    : ORIGIN = 0x8000000,   LENGTH = 2048K
 }
 /* Highest address of the user mode stack */

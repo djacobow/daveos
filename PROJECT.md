@@ -1234,3 +1234,227 @@ and software-reset recovery checks. The standalone H563 starter has passed
 periodic-worker, UART help/timer/statistics, and reset-recovery checks. H755
 starter and console validation for this extraction is build/programming-plan
 coverage only; its current firmware still needs hardware validation.
+
+## Bootloader, OTA, and reliability services
+
+The initial implementation targets H563 and host/fake tests. H755 bootloader
+integration and hardware validation are deferred. Components are optional,
+allocation-free, and use injected platform services. Standalone applications
+remain supported; boot control reports `not_supported` without a bootloader,
+and OTA is unavailable. All STM32 builds, including dependencies, M4, and
+starters, use `-Os` with debug information retained.
+
+### State-machine structure
+
+All new state machines follow AGENTS.md: enum-class state, `ns = cs` at the
+start of each tick, next-state changes only inside `switch (cs)`, and one
+conditional current-state assignment after the switch. Other methods and
+interrupt handlers submit requests/results, never directly change state.
+Conversion of existing state machines is a separate TODO.
+
+### Flash layout and executable images
+
+Reserve 32 KiB (four 8 KiB sectors) for the bootloader, including room to grow.
+Measure the feature-complete bootloader at `-Os` and fail the build if it exceeds
+that fixed reservation; never silently move the application slots. H563 main
+flash uses this arrangement:
+
+| Bank | Layout |
+| --- | --- |
+| 1, 0x08000000 | bootloader, metadata A (8 KiB), application A |
+| 2, 0x08100000 | placeholder equal to bootloader reservation, metadata B (8 KiB), application B |
+
+Metadata starts at 0x08008000 and 0x08108000; applications start at 0x0800A000
+and 0x0810A000, each with 984 KiB capacity.
+
+The H563 example's `bootloader=true` Meson option selects the slot-A linker
+script and builds `factory.hex` with the bootloader, confirmed A (installation
+counter 1), and identical initial journal records in both metadata sectors.
+Its programming targets mass-erase main flash before writing and verifying;
+the default standalone example remains available with `bootloader=false`.
+The example also links B from the same compiled objects and validates the paired
+relocation package during every bootloader-enabled build. Bring-up commands
+`boot status` and `boot confirm` expose the executing slot and explicit durable
+confirmation; they are omitted from standalone builds.
+On H563, flash completion includes ICACHE invalidation before readback: the
+application can otherwise read cached erased metadata despite a successful
+physical write. Boot-time reads alone do not cover this condition because the
+minimal bootloader leaves ICACHE disabled.
+
+Application capacities and within-bank offsets are equal. No bank swapping is
+used. Generate linker bounds, flash geometry and package metadata from one
+layout definition. Enforce bounds before any erase/program operation. Metadata
+A/B are a redundant journal of shared boot state, not exclusively per-slot
+descriptors. Brief metadata-operation stalls are acceptable; bulk OTA must
+yield to normal application work.
+
+Prefer one package containing a base image, block-local relocation records,
+and the expected installed CRC for each slot. Link the same objects at both
+addresses and verify reconstructed outputs byte-for-byte against independent
+links during packaging. Apply relocations on-device in the transport-independent
+updater. Reject unsupported transforms. Correct startup/vector-table handling
+and prove execution from both slots on H563. If this is too complex or fails
+validation, use separate slot-specific images with explicit destination and
+load-address metadata. The initial `-Os` full-console study is build evidence
+only: 202,088 bytes and 1,545 word patches reconstructed the second link exactly.
+
+### Versions, compatibility and persistent boot state
+
+Application and bootloader have independent version stamps containing uint32_t
+major/minor/build, Git commit ID, and dirty-tree flag. Major/minor are defined in
+the application's top-level meson.build. CI supplies build through a Meson
+option; local builds use reserved UINT32_MAX and display `local`. Omit timestamps
+by default for reproducibility. Images carry an application-defined product ID
+and flash-layout revision; updater and bootloader reject mismatches. Use a
+versioned image format with space for future signing; v1 integrity uses CRC only.
+
+The journal stores complete boot-state snapshots in append-only CRC-protected
+records. Program the commit marker last in its own flash programming unit.
+Preserve a valid committed snapshot while reclaiming either region. A separate
+record sequence orders journal snapshots. A device-local uint64_t installation
+counter advances only when a fully verified installation commits; aborted
+uploads do not consume a number. Preserve it when replacing pending images or
+erasing the inactive slot. Reject counter exhaustion rather than wrapping.
+
+Boot preference follows installation order, not firmware version. Reinstalling
+identical or older firmware is a new installation. New OTA installations get
+one trial. Durably mark the trial started before jumping; any reset before
+confirmation, including power loss before the jump, rejects that installation.
+Do not automatically retry it. The application explicitly applies its health
+policy and calls confirm_image(). Confirmation is bounded and synchronous:
+success means durable confirmation has been verified. It is idempotent without
+another write when already confirmed. Errors are returned for application retry.
+
+Read and CRC-verify the full selected image from flash on every boot, including
+confirmed images. A failed CRC prohibits booting it. Try another eligible image
+only after validating it; rejected trials remain ineligible. If neither image
+is eligible/valid, or no committed metadata state is recoverable, record the
+failure, attempt bounded UART diagnostics, wait one second, and reset.
+
+ST-LINK installation erases all main flash and installs bootloader, a confirmed
+application, and fresh metadata/history. OTP is untouched. Ordinary OTA never
+rewrites the bootloader. Emergency application-driven bootloader rewriting is a
+future possibility, not a safe or implemented v1 update path.
+
+The bootloader stays small. Reuse DaveOS services where helpful, including the
+logger with explicit draining. UART only, matching application UART/baud, with
+bounded best-effort output; UART failure never blocks a valid boot. No USB,
+networking or command dispatcher is required in the bootloader.
+
+### CRC service
+
+Use CRC-32/ISO-HDLC matching Python binascii.crc32() for chunks, images, and
+metadata. Polynomial 0x04C11DB7 (reflected 0xEDB88320), initial internal register
+0xFFFFFFFF, reflected input/output, final XOR 0xFFFFFFFF; `123456789` checks to
+0xCBF43926 and empty input checks to zero. External incremental state follows
+binascii's initial-zero convention. Each caller owns its state. Foreground
+updates may use injected hardware; interrupt callers use software without
+waiting for the peripheral. Updates synchronously process caller-bounded byte
+spans, accepting arbitrary lengths/alignment. Test incremental partitions,
+interleaved callers, and exact hardware/software agreement.
+
+### Watchdog and application health
+
+Provide an optional generic watchdog module with injected hardware support
+(STM32 IWDG). Start explicitly. Named application-provided checks run before
+hardware enable and before every task-driven feed. First check/feed failure
+latches its identity/status and prevents further feeds until reset, even if the
+condition recovers. Failed pre-start checks also latch without enabling hardware.
+Timeout and check/feed period are explicit chrono durations. Configure IWDG to
+freeze while a debugger halts the CPU.
+
+The demo starts the watchdog early enough to cover clock/peripheral setup and
+module initialization, without depending on scheduler dispatch. Do not repeatedly
+feed during initialization. Explicit init failure records diagnostics, attempts
+bounded UART output, and resets; a hang expires the watchdog. One timeout covers
+startup and normal execution; pre-start checks must be safe before module init.
+
+Keep these named constexpr durations near the top of the application file:
+watchdog timeout 5 s; health-check/feed period 100 ms; heartbeat period 100 ms;
+heartbeat maximum age 1 s; repeating-task completion allowance 100 ms; trial
+confirmation delay 5 s. Confirm after five seconds of healthy scheduler operation;
+USB attachment, Ethernet link and DHCP are not confirmation requirements.
+
+In addition to the independent heartbeat, check every active repeating task's
+completed count against its actual cadence: every iteration due more than the
+completion allowance ago must have completed. Expose scheduler progress data to
+an optional health helper, handling initial delays, cancellation, period changes,
+rescheduling, statistics resets, and the checking task's unfinished invocation.
+Resetting diagnostic statistics must not hide progress deficits. Latch failures
+with task/module identity and expected/actual counts. This policy is optional
+application health checking, not an unconditional core scheduler overload policy.
+
+### Retained fault diagnostics
+
+Reserve one fixed RAM record shared by bootloader/application, excluded from
+startup clearing. Begin with magic, then format version, size, data, and CRC.
+Store image identity and copied names/data, not pointers into an old image.
+Latest failure wins. The application reads and explicitly acknowledges/clears
+the record; the bootloader preserves it. Reset retention is supported; power-loss
+retention is not promised.
+
+Capture HardFault, MemManage, BusFault, and UsageFault frames/status registers.
+Validate frame accessibility and avoid logging from fault context. Record first,
+then break if debugger control is enabled; otherwise reset. Resuming that
+breakpoint proceeds to reset. Watchdog failures use the same retained record.
+
+### OTA engine and streaming
+
+Keep three distinct state-machine levels: transport chunks (initial maximum
+1 KiB, one outstanding, CRC checked before use), package blocks with local
+relocation records, and platform flash operations. Arbitrary transport boundaries
+may split package records or contain multiple pieces; retain unconsumed bytes.
+Do not buffer the whole image or relocation table.
+
+Durably invalidate the destination before its first erase. Erase only sectors
+needed by the incoming image, one at a time as required; wait for completion
+before programming that sector. Program in hardware write units and yield
+between bounded steps. Pad a final partial write unit with 0xFF, excluding that
+padding from the declared image CRC. Finally read flash incrementally to verify
+the expected installed CRC before committing eligibility/installation counter.
+
+OTA is disabled initially and application-controlled. The demo exposes
+`ota enable`, `ota disable`, and `ota status`; enablement is not retained across
+reset. Require a confirmed running image before accepting uploads, preserving
+its fallback while a trial runs. Accept unlimited replacement uploads before
+reboot; replace only the inactive slot. Disabling an idle updater does not
+invalidate an already completed installation.
+
+The host polls readiness, sends an offset/chunk/CRC, and waits while the target
+processes it. Advertise limits and expected offset; no blocking flash work in
+status handling. Reject a bad chunk CRC before programming and allow resending
+that chunk. Flash erase/program errors or final readback CRC mismatch abort the
+installation. Disconnect, explicit abort, disable during upload, or inactivity
+timeout aborts without resume. New attempts restart from the beginning. An
+in-flight hardware operation may finish before storage is reused. Host inactivity
+timeout defaults to configurable 30 s, including partial chunks; device-side
+erase/program/verification time does not count against it.
+
+Use versioned binary framing with explicit bounded lengths, fixed byte order,
+and sequential offsets on a dedicated configurable TCP port (default 1001).
+Allow one client/session and provision lwIP for OTA plus the existing port-1000
+console. Binary OTA never travels over the console UART. Future console base64
+or SD-card adapters feed the same transport-independent engine.
+
+A Python uploader takes target address and image path and reports progress and
+errors. Optional --reboot sends a protocol request only after successful install
+commit. An application-provided callback accepts/declines it; decline leaves the
+image installed/pending and is reported distinctly. Reboot does not confirm it.
+
+### Implementation and validation gates
+
+Implement CRC/version/flash/fault/watchdog foundations first, then the small
+bootloader and measured layout, prove both slot executions, and add journal/OTA
+integration. Power-loss tests interrupt every flash erase/program/commit boundary,
+including journal rollover. Exercise corrupt images/metadata, trial rejection,
+idempotent confirmation, older-version installs, replacement uploads and recovery.
+Test malformed packages, relocation bounds, exact reconstruction, arbitrary TCP
+fragmentation/coalescing, retries, abort/disable/disconnect/timeout, and reboot
+refusal. Verify watchdog startup, latching, task rates, schedule changes, counter
+resets, and retained diagnostics on host/fake.
+
+On H563 repeatedly test A/B updates, rollback, faults, early init hangs/errors,
+debugger/watchdog behavior, and UART/USB/TCP responsiveness during OTA. Measure
+bootloader size and metadata stalls against the 100 ms progress allowance. Run
+all repository tests, formatting, lint and existing H563/H755 builds; identify
+hardware-tested results separately. H755 hardware testing remains deferred.

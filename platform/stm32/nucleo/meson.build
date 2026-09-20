@@ -2,11 +2,13 @@
 # consumer, whose appmain.h/appmain() supply the application entry point.
 objcopy = find_program('objcopy')
 subdir(board)
-stm32_nucleo_dep = declare_dependency(sources: board_sources,
+stm32_nucleo_sources_dep = declare_dependency(sources: board_sources,
   include_directories: board_includes, dependencies: firmware_deps,
   compile_args: board_args + cpu_flags,
-  link_args: cpu_flags + ['--specs=nosys.specs', '-T' + board_linker_path,
+  link_args: cpu_flags + ['--specs=nosys.specs',
                          '-Wl,--gc-sections'])
+stm32_nucleo_dep = declare_dependency(dependencies: stm32_nucleo_sources_dep,
+  link_args: ['-T' + board_linker_path])
 stm32_nucleo_linker_script = board_linker_script
 stm32_nucleo_aux_images = firmware_images
 meson.override_dependency('daveos-nucleo', stm32_nucleo_dep)

@@ -13,3 +13,8 @@ network_lib = static_library('daveos-net', lwip_sources, 'service.cpp', 'tcp_ser
   include_directories: network_includes)
 network_dep = declare_dependency(link_with: network_lib,
   include_directories: include_directories('..'))
+# OTA is an optional adapter; the base network library remains independent.
+network_update_lib = static_library('daveos-net-update', 'update.cpp',
+  dependencies: [network_dep, update_dep])
+network_update_dep = declare_dependency(link_with: network_update_lib,
+  dependencies: [network_dep, update_dep])

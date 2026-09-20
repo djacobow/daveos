@@ -8,6 +8,7 @@
 #include "core/logging/log_format.hpp"
 #include "core/queue/queue.hpp"
 #include "core/schedule/module.hpp"
+#include "progress.h"
 
 namespace daveos::core {
 
@@ -102,6 +103,9 @@ namespace daveos::core {
       Time due = 0;
       Time default_period = 0;
       bool explicitly_scheduled = false;
+      Time first_due = 0;
+      std::uint64_t completed = 0;
+      std::uint64_t generation = 0;
     };
 
     struct EventRecord {
@@ -253,6 +257,7 @@ namespace daveos::core {
         for (auto& task : tasks_) {
           if (task.active) {
             task.due = After(start, task.interval);
+            task.first_due = task.due;
           }
         }
       }
@@ -262,6 +267,7 @@ namespace daveos::core {
         EventRecord event;
         bool has_event = false;
         Time scheduled = 0;
+        std::uint64_t generation = 0;
         {
           Guard guard(platform_);
           if (stop_requested_) {
@@ -291,6 +297,7 @@ namespace daveos::core {
           } else if (task_index < kTasks) {
             auto& task = tasks_[task_index];
             scheduled = task.due;
+            generation = task.generation;
             // Advance before invocation: explicit callback/ISR changes always
             // win.
             if (task.mode == Mode::repeat) {
@@ -320,6 +327,9 @@ namespace daveos::core {
           Time duration = platform_.now() - start;
           Guard guard(platform_);
           auto& stats = statistics_.tasks[task_index];
+          if (task.generation == generation) {
+            ++task.completed;
+          }
           if (!stats.executions || duration < stats.min_duration) {
             stats.min_duration = duration;
           }
@@ -493,6 +503,27 @@ namespace daveos::core {
       return statistics_;
     }
 
+    // Health snapshots do not share counters with reset_statistics(). The
+    // currently executing callback is not complete yet; callers allow an
+    // explicit completion grace instead of counting it early.
+    Progress<kTasks> progress() {
+      Guard guard(platform_);
+      Progress<kTasks> result;
+      result.running = state_ == State::running;
+      result.now = platform_.now();
+      for (std::size_t i = 0; i < kTasks; ++i) {
+        const auto& task = tasks_[i];
+        result.tasks[i] = {task.module_name,
+                           task.name,
+                           task.active && task.mode == Mode::repeat,
+                           task.first_due,
+                           task.interval,
+                           task.completed,
+                           task.generation};
+      }
+      return result;
+    }
+
     // Reset timing/counters while retaining names, pending work and buffered
     // logs. An in-progress task records its whole iteration when it
     // subsequently finishes.
@@ -629,6 +660,9 @@ namespace daveos::core {
           task.mode = mode;
           task.due =
               state_ == State::running ? After(platform_.now(), delay) : delay;
+          task.first_due = task.due;
+          task.completed = 0;
+          ++task.generation;
           platform_.notify();
           return Status::ok;
         }
@@ -651,6 +685,7 @@ namespace daveos::core {
           }
           task.active = false;
           task.explicitly_scheduled = true;
+          ++task.generation;
           platform_.notify();
           return Status::ok;
         }

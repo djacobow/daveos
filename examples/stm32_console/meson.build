@@ -1,16 +1,35 @@
 # Meson selects optional members; Console supplies registration and shutdown.
 component_deps = [stm32_console_dep, stm32_nucleo_dep]
+application_linker = board_linker_script
+application_link_args = []
+if get_option('bootloader')
+  component_deps = [stm32_console_dep, stm32_nucleo_sources_dep, boot_layout_dep]
+  application_linker = boot_layout[2]
+  application_link_args = ['-T' + boot_layout_directory / 'slot_a.ld']
+endif
 component_includes = []
 component_members = []
 component_consoles = []
 component_modules = []
 component_stop = []
+if get_option('bootloader')
+  component_includes += '#include "boot.hpp"'
+  component_members += '    Boot boot{platform};'
+  component_modules += ', boot'
+endif
 
 if get_option('networking')
   component_includes += '#include "platform/stm32/console/network.hpp"'
   component_members += '    stm32::Network<Event> network{platform};'
   component_modules += ', network.module'
   component_stop += '      network.stop();'
+  if get_option('bootloader')
+    component_deps += network_update_dep
+    component_includes += '#include "ota.hpp"'
+    component_members += '    Ota ota{platform, network.service};'
+    component_modules += ', ota.module'
+    component_stop = ['      ota.stop();'] + component_stop
+  endif
   if get_option('tcp_console')
     component_includes += '#include "console/tcp.hpp"'
     component_members += '    daveos::console::TcpConsole<Event, Platform> tcp{platform, network.service};'
@@ -46,14 +65,48 @@ firmware = executable('stm32-console', 'appmain.cpp',
   # the core compile check uses the same header mode for C++20 <chrono>.
   cpp_args: board_args + ['-D_GLIBCXX_NO_ASSERTIONS', '-fno-freestanding',
                          '-fno-rtti', '-fstack-usage'],
-  link_args: [
+  link_args: application_link_args + [
              '-Wl,--print-memory-usage',
              '-Wl,-Map=' + meson.current_build_dir() / 'stm32-console.map'],
-  link_depends: board_linker_script)
+  link_depends: application_linker)
 foreach output_format : [['hex', 'ihex'], ['bin', 'binary']]
-  custom_target('stm32-console-' + output_format[0],
+  converted = custom_target('stm32-console-' + output_format[0],
     input: firmware, output: 'stm32-console.' + output_format[0],
     command: [objcopy, '-O', output_format[1], '@INPUT@', '@OUTPUT@'],
     build_by_default: true)
+  if output_format[0] == 'bin'
+    application_binary = converted
+  endif
 endforeach
-firmware_images += [firmware]
+if get_option('bootloader')
+  slot_b_dependencies = []
+  foreach dep : component_deps
+    slot_b_dependencies += dep.partial_dependency(links: true, link_args: true)
+  endforeach
+  slot_b = executable('stm32-console-b',
+    objects: firmware.extract_all_objects(recursive: false),
+    dependencies: slot_b_dependencies, name_suffix: 'elf',
+    link_args: ['-T' + boot_layout_directory / 'slot_b.ld',
+      '-Wl,--print-memory-usage',
+      '-Wl,-Map=' + meson.current_build_dir() / 'stm32-console-b.map'],
+    link_depends: boot_layout[3])
+  slot_b_binary = custom_target('stm32-console-b-bin', input: slot_b,
+    output: 'stm32-console-b.bin', command: [objcopy, '-O', 'binary', '@INPUT@', '@OUTPUT@'],
+    build_by_default: true)
+  custom_target('application-package',
+    input: [application_binary, slot_b_binary, boot_layout[4], version_header[1]],
+    output: 'application.ota',
+    command: [python, files('../../tools/package.py'), '--a', '@INPUT0@', '--b', '@INPUT1@',
+      '--layout', '@INPUT2@', '--version', '@INPUT3@', '--output', '@OUTPUT@'],
+    build_by_default: true)
+  factory_image = custom_target('factory-image',
+    input: [boot_binary, application_binary, boot_layout[4], version_header[1]],
+    output: 'factory.hex',
+    command: [python, files('../../tools/factory.py'), '--bootloader', '@INPUT0@',
+      '--application', '@INPUT1@', '--layout', '@INPUT2@', '--version', '@INPUT3@',
+      '--output', '@OUTPUT@'], build_by_default: true,
+    depends: boot_size_check)
+  firmware_images += [factory_image]
+else
+  firmware_images += [firmware]
+endif

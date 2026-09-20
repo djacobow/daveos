@@ -33,7 +33,15 @@ namespace daveos::core {
   X(ambiguous_match)            \
   X(line_too_long)              \
   X(too_many_arguments)         \
-  X(unsupported)
+  X(unsupported)                \
+  X(health_failed)              \
+  X(io_error)                   \
+  X(timeout)                    \
+  X(checksum_error)             \
+  X(incompatible)               \
+  X(not_confirmed)              \
+  X(rejected)                   \
+  X(counter_exhausted)
   DAVEOS_ENUM(Status, std::int32_t, DAVEOS_STATUS_VALUES)
 #undef DAVEOS_STATUS_VALUES
   // All modules finish stage1 before any module begins stage2.

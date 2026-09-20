@@ -1,5 +1,29 @@
 # Follow-up work
 
+## Bootloader and reliability implementation
+
+- [x] Wire the optional H563 TCP OTA listener (1001), enable/disable/status commands, and delayed reboot callback. On hardware, reject a bad chunk, abort on disconnect, then install A→B and B→A over TCP; each transfer took about 35.45 s including flash CRC and metadata commit. Concurrent console timer requests passed (167/172 checks, maximum 13 ms response); both reboot requests, trial boots, and manual confirmations passed. Add fragmented-protocol and failed-final-commit regression tests. Automatic health-based confirmation remains outstanding.
+- [x] Repeat the TCP round trip with the final build: two more installations/reboots/confirmations passed (35.46 s each), with 331 concurrent console timer checks and maximum 13 ms response. Leave A confirmed and OTA disabled. ASan passed 24/24, format/lint passed, and the standalone H755 firmware still builds. H755 hardware remains deferred.
+- [x] Link H563 slot B from the same application objects as A; build a paired relocation package that reconstructs B exactly. On hardware, verify B trial boot, unconfirmed-reset rejection and fallback to A, durable/idempotent `boot confirm`, three confirmed-B reset cycles, and CRC rejection/fallback after erasing B's first sector. Restore and leave B confirmed; preserve A. Fix ICACHE-stale metadata readback after flash programming. These installations used ST-LINK; TCP OTA and automatic health-based confirmation remain outstanding.
+- [x] Repeat five software resets of the restored confirmed B: UART/USB/TCP timers, DHCP, and 1,400-byte ping passed after every boot. ASan passed 24/24, including paired-package layout/version checks. Current linked applications are 217,796 bytes each; the paired package is 223,714 bytes.
+- [x] Build an ST-LINK-programmable H563 factory HEX with the fixed 32 KiB bootloader, confirmed slot A, and redundant initial metadata; mass-erase main flash before programming, preserving OTP. First hardware boot verified the CRC and started the relocated application successfully.
+- [x] Validate the H563 factory boot through five software-reset cycles: CRC verification, UART/USB/TCP commands and timers, DHCP, and 1,400-byte ping passed in every cycle. Fix a false UART start bit by enabling the transmitter before selecting the TX pin alternate function. Bootloader uses 17,404 bytes; slot A uses 202,368 bytes. ASan passed 24/24; formatting/lint and standalone H755 build passed. H755 hardware remains deferred; OTA and slot-B hardware validation are still outstanding.
+- [ ] Implement the bootloader/OTA specification in PROJECT.md; validate H563 and host/fake first. H755 bootloader integration and hardware validation remain deferred.
+- [ ] Use `-Os` for every STM32 compilation, including dependencies, M4, and device starters; retain debug information.
+- [ ] Add independent application/bootloader version stamps from Meson: u32 major/minor/CI build, local UINT32_MAX sentinel, Git commit and dirty flag.
+- [ ] Implement software and injected STM32 CRC-32 matching Python binascii.crc32, including caller-owned incremental state and software fallback from interrupts.
+- [ ] Add injected flash operations, redundant metadata journal, one-trial boot selection, explicit durable confirmation, and corruption/power-loss tests.
+- [ ] Measure the complete bootloader at `-Os` and enforce its fixed 32 KiB reservation. Layout: bank 1 [BL][metaA][A], bank 2 [32 KiB placeholder][metaB][B]; metadata sectors are 8 KiB each, A/B capacities are 984 KiB each.
+- [ ] Prove block-local device-side relocation against both independently linked images and on H563; use separate slot-specific images if feasibility fails.
+- [ ] Add transport-independent incremental OTA, a dedicated TCP listener on port 1001, Python uploader with optional --reboot, and application-controlled enable/disable/status.
+- [ ] Add an injected, explicitly started watchdog with latched health/feed failures, early startup coverage, scheduler progress checking, and debugger freeze.
+- [ ] Add one magic/version/size/CRC-protected retained fault record, shared by bootloader and application; capture faults before debugger break or reset.
+- [ ] Repeatedly validate A/B updates, confirmation, rejection/rollback, flash corruption, initialization failures, watchdogs, and console responsiveness on H563.
+- [ ] Add an OTP driver for serial numbers and optional device keys/other provisioning data; design provisioning and locking separately.
+- [ ] Audit and convert existing state machines to the AGENTS.md enum/cs/ns/switch/single-commit structure in separate work.
+
+## Existing work
+
 - [x] Add capacity-first application factories and document the raw-handler token-limit migration; keep explicit handler-name extraction tests.
 - [x] Reflash and verify the final H563 image; pass another 120 command checks across UART/USB/TCP, two runs of the checked-in UART stress tool (1,160 burst commands), 1,400-byte ping, TCP reconnect, and software-reset recovery. All transmit counters remained clean; no visual LED/button confirmation in this run.
 - [x] Fix the UART DMA completion race: a post-start control-register read/modify/write could re-enable an exhausted H563 GPDMA transfer (captured HAL_DMA_ERROR_USE). Leave HAL half-transfer handling enabled on both boards; reduce echo pressure by appending only new input bytes.
@@ -66,3 +90,14 @@
 - [x] Add a standalone H563/H755 device starter and CI consumer-build/programming-plan checks.
 - [x] Organize the documentation into hello, logging/commands, hardware console, and custom-component levels.
 - [x] Validate the reusable console on H563 over UART/USB/TCP, including Ethernet ping and reset recovery; validate the standalone device starter's periodic worker, commands, and reset over UART. H755 has build/programming-plan coverage only for these changes.
+- [ ] create DaveOS::Util space
+- [ ] add crc32 driver to DaveOS::Util, perhaps allow for DI allow a hardware implementation if one is available as in most stm32 chips
+- [ ] create a hal layer that allows us to abstract away SPI and I2C devices independent of vendor HAL, using DI to be part of "platform". hal layer should support interrupt based api and a polling based api, but not a blocking api
+
+## For STM32
+
+- [ ] Implement flash layout that support an A/B bootloader
+- [ ] Implement simple bootloader that chooses latest valid image and starts it
+- [ ] Implement a module that can perform an OTA to the opposite flash A/B bank. We'll want a protocol that crc's chunks as they come, as well as finally checking the whole image. The actual writing to flash should be via routines that come from the platform. Details about an image size, flash boundaries etc, should come from knowledge TBD
+- [ ] Implement a FAT filesystem reader/writer module using FATFS (as a git submodule), again with DI of the SPI bus via the hal layer mentioned above
+- [ ] Implememnt a display driver module for ssd1306 devices using DI of the I2C via the layer above

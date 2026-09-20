@@ -18,7 +18,7 @@ if platform == 'stm32'
     platform = 'stm32h7'
     cpu_flags = ['-mcpu=cortex-m7', '-mfpu=fpv5-d16']
   endif
-  cpu_flags += ['-mthumb', '-mfloat-abi=hard']
+  cpu_flags += ['-mthumb', '-mfloat-abi=hard', '-Os', '-g3']
   add_project_arguments(cpu_flags + ['-ffreestanding', '-ffunction-sections',
     '-fdata-sections'], language: ['c', 'cpp'])
   add_project_link_arguments(cpu_flags, language: ['c', 'cpp'])
@@ -26,12 +26,21 @@ endif
 
 subdir('tools')
 subdir('core')
+subdir('util')
+subdir('boot')
+subdir('update')
 subdir('console')
 if get_option('networking')
   subdir('net')
 endif
 firmware_images = []
 subdir('platform')
+if get_option('bootloader')
+  if platform != 'stm32h5' or not get_option('examples')
+    error('The initial bootloader target requires H563 and examples=true')
+  endif
+  subdir('boot/h563')
+endif
 # Stable dependency names for applications using DaveOS as a Meson subproject.
 meson.override_dependency('daveos-core', core_dep)
 meson.override_dependency('daveos-console', console_dep)

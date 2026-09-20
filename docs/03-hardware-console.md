@@ -44,4 +44,84 @@ See the [board/programming reference](reference.md) for cable connections,
 submodule setup, build options, and flashing. See [TODO.md](../TODO.md) for the
 precise hardware validation coverage; a successful cross-build is not a hardware test.
 
+## H563 factory boot image
+
+The H563 example can boot through the small CRC-verifying bootloader. With the
+ARM toolchain on `PATH`, build a factory image with:
+
+```sh
+meson setup build/boot-h563 --cross-file meson/stm32.ini -Dboard=h563 -Dexamples=true -Dnetworking=true -Dbootloader=true
+meson compile -C build/boot-h563
+meson compile -C build/boot-h563 flash-plan
+meson compile -C build/boot-h563 flash
+```
+
+`examples/stm32_console/factory.hex` under that build directory contains the
+bootloader, two copies of initial metadata, and confirmed application A linked
+at `0x0800A000`. The bootloader reservation is fixed at 32 KiB; each application
+slot has 984 KiB. The factory programming targets erase **all main flash** before
+programming and verification, clearing any previous images and installation
+history while preserving OTP. `flash-openocd` selects OpenOCD instead of
+STM32CubeProgrammer; release any existing debug session before using either.
+
+At 1 Mb/s on the ST-LINK UART, expect `Boot slot A (confirmed), CRC verified`
+followed by the normal application messages. `board reset` returns through the
+bootloader and repeats CRC verification. Bootloader-enabled builds also provide
+`boot status` (executing slot and eligibility) and `boot confirm` (explicit,
+durable, idempotent confirmation by the running application). During bring-up,
+confirmation is manual. OTA must be explicitly enabled as described below;
+automatic health-based confirmation remains future work.
+
+The same build links `stm32-console-b.elf` at `0x0810A000`, reusing the exact
+objects compiled for A. It also builds `application.ota`: packaging must reproduce
+the independent B binary byte-for-byte using block-local relocation records, or
+the build fails. The B binary alone does not make the slot bootable: installation
+must verify flash and commit pending metadata. Factory programming still clears
+both slots and installs confirmed A; it is not a slot-B update command.
+
+With UART, USB CDC and DHCP Ethernet connected, repeat the reset/console checks
+against an already-programmed board using:
+
+```sh
+python3 tools/hardware/boot_smoke.py --uart /dev/serial/by-id/<ST-LINK-port> --usb /dev/serial/by-id/<DaveOS-port> --repeat 5
+```
+
+The script requires pyserial and checks boot messages, timer callbacks on all
+three transports, and 1,400-byte ping after each software reset. It does not flash.
+Pass `--slot B` when validating an installed, confirmed B image.
+
+## TCP firmware updates
+
+With `-Dbootloader=true -Dnetworking=true`, the example includes an independent
+binary OTA listener on **TCP port 1001**. The text console remains on port 1000.
+On any console, run `ota enable`, then upload from the host:
+
+```sh
+python3 tools/ota.py 192.168.1.207 build/boot-h563/examples/stm32_console/application.ota --reboot
+```
+
+Use the board's current DHCP address from `net status`. The running image must
+be confirmed. The package works in either direction: the updater erases and
+programs the inactive slot while normal application tasks continue, verifies
+its CRC by reading flash, then commits it as a pending installation. The script
+polls readiness and sends one checked chunk at a time. `--reboot` requests a
+delayed application reset only after successful installation; omit it to keep
+the current application running. This does not confirm the new image.
+
+After the trial boots, inspect `boot status` and use `boot confirm` when satisfied.
+A reset before confirmation rejects that trial and returns to the other valid,
+confirmed image. `ota status` reports progress; `ota disable` closes the listener
+and aborts unfinished work. Updates start disabled after every reset. Disconnecting
+mid-upload discards progress: a new connection restarts from the beginning.
+UART and USB remain text-only console transports.
+
+`tools/hardware/ota_smoke.py --host ADDRESS --image PACKAGE --uart UART_PATH`
+repeats the hardware regression: bad CRC, disconnect, two full updates with
+concurrent TCP console timers, reboot and confirmation. It replaces **both**
+application slots and leaves the original slot confirmed. Use `--slot B` if
+starting from confirmed B. Close other TCP console clients before running it.
+
+Without `-Dbootloader=true`, the example retains its standalone linker layout
+and normal programming behavior. H755 bootloader integration remains deferred.
+
 Next: [custom components](04-custom-components.md).

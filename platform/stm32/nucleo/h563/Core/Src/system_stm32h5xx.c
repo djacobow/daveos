@@ -256,7 +256,9 @@ void SystemInit(void)
   #ifdef VECT_TAB_SRAM
     SCB->VTOR = SRAM1_BASE | VECT_TAB_OFFSET; /* Vector Table Relocation in Internal SRAM */
   #else
-    SCB->VTOR = FLASH_BASE | VECT_TAB_OFFSET; /* Vector Table Relocation in Internal FLASH */
+    /* The linked symbol follows standalone, slot A, and slot B images. */
+    extern const uint32_t g_pfnVectors[];
+    SCB->VTOR = (uint32_t)g_pfnVectors;
   #endif /* VECT_TAB_SRAM */
 
   /* Check OPSR register to verify if there is an ongoing swap or option bytes update interrupted by a reset */
@@ -400,4 +402,3 @@ void SystemCoreClockUpdate(void)
 /**
   * @}
   */
-

@@ -34,11 +34,13 @@ def tcl_word(value):
     return '"' + ''.join('\\' + c if c in '\\"$[]' else c for c in value) + '"'
 
 
-def command(backend, executable, family, images, serial):
+def command(backend, executable, family, images, serial, erase_all=False):
     if backend == "cubeprogrammer":
         args = [executable, "-c", "port=SWD", "mode=UR", "reset=HWrst", "ap=0"]
         if serial:
             args.append(f"sn={serial}")
+        if erase_all:
+            args += ["-e", "all"]
         for image in images:
             args += ["-d", str(image), "-v"]
         return args + ["-rst"]
@@ -51,6 +53,10 @@ def command(backend, executable, family, images, serial):
     args += ["-f", f"target/{family}x.cfg", "-c", "adapter speed 1800",
              "-c", "reset_config srst_only srst_nogate connect_assert_srst",
              "-c", "init; reset halt"]
+    if erase_all:
+        if family != "stm32h5":
+            raise ValueError("Factory mass erase is currently supported only for H563")
+        args += ["-c", "stm32h5x mass_erase 0"]
     for image in images:
         args += ["-c", "flash write_image erase " + tcl_word(str(image)),
                  "-c", "verify_image " + tcl_word(str(image))]
@@ -64,6 +70,8 @@ def main():
     parser.add_argument("--openocd", default="")
     parser.add_argument("--cubeprogrammer", default="")
     parser.add_argument("--serial", default="")
+    parser.add_argument("--erase-all", action="store_true",
+                        help="Erase all main flash before factory programming (preserves OTP)")
     parser.add_argument("images", nargs="+", type=Path)
     args = parser.parse_args()
     images = [image.resolve() for image in args.images]
@@ -81,7 +89,7 @@ def main():
             print(str(error), file=sys.stderr)
             # Preview is useful on CI and hosts without programming tools too.
             executable = str(Path(getattr(args, backend)).expanduser()) if getattr(args, backend) else name
-        invocation = command(backend, executable, args.family, images, args.serial)
+        invocation = command(backend, executable, args.family, images, args.serial, args.erase_all)
         print(shlex.join(invocation), flush=True)
         if args.backend != "plan":
             subprocess.run(invocation, check=True)
