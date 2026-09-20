@@ -1,6 +1,7 @@
 #pragma once
 
 #include "boot/flash.h"
+#include "core/state_machine/state_machine.hpp"
 
 namespace daveos::update {
 
@@ -25,9 +26,22 @@ namespace daveos::update {
 
    private:
     enum class State { idle, prepare, erase_wait, program_wait, done, failed };
+
+    class Machine
+        : public core::StateMachine<Machine, State, State::idle,
+                                    static_cast<std::size_t>(State::failed) +
+                                        1> {
+      friend class core::StateMachine<Machine, State, State::idle,
+                                      static_cast<std::size_t>(State::failed) +
+                                          1>;
+
+      void Step(State cs, State& ns, Writer& owner) { owner.Step(cs, ns); }
+    };
+
+    void Step(State cs, State& ns);
     boot::Flash flash_;
     boot::Layout layout_;
-    State cs = State::idle;
+    Machine machine_;
     Status status_ = Status::ok;
     std::span<const std::byte> data_{};
     alignas(16) std::array<std::byte, 16> word_{};

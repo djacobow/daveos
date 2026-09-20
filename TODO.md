@@ -32,7 +32,8 @@
 - [ ] Exercise hardware journal rollover, both-images-invalid recovery, physical power interruption, and comprehensive OTA timeout/link-loss/disable/replacement cases.
 - [ ] Run the full host/fake/sanitizer matrix, format/lint, and H563/H755/starter builds before pushing. H755 bootloader integration and hardware testing remain deferred.
 - [ ] Add an OTP driver for serial numbers and optional device keys; design provisioning/locking separately.
-- [ ] Convert existing state machines to the AGENTS.md enum/cs/ns/switch/single-commit convention as separate work.
+- [x] Add the CRTP state-machine helper with deferred hooks, dwell/per-state statistics, read-only snapshots, and unit tests; convert the OTA Engine using a private nested machine.
+- [x] Convert the journal, OTA writer/package reader/protocol, watchdog controller/confirmation, host FileFlash, and scheduler lifecycle to the shared state-machine helper. Keep state enums and implementation classes nested; derived status snapshots and persistent image metadata remain data. Validation: host 25/25, ASan/UBSan 25/25, fake 19/19, logging-disabled 26/26, TSan 24/24; H563/H755 ARM builds, format/lint, and H563 HIL 13/13 passed. Bootloader is 18,224 bytes of its 32 KiB reservation. H755 hardware remains deferred.
 
 ## Test organization
 

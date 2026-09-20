@@ -213,8 +213,9 @@ namespace daveos::boot {
     return Status::ok;
   }
 
-  void Journal::tick() {
-    State ns = cs;
+  void Journal::tick() { (void)machine_.tick(*this); }
+
+  void Journal::Step(State cs, State& ns) {
     switch (cs) {
       case State::idle:
       case State::done:
@@ -283,9 +284,6 @@ namespace daveos::boot {
         ns = status_ == Status::ok ? State::done : State::failed;
         break;
       }
-    }
-    if (ns != cs) {
-      cs = ns;
     }
   }
 

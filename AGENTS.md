@@ -26,7 +26,14 @@ with a build system in meson and tools written in Python
 * After the switch, commit `cs = ns` only if the two differ. This must be the
   single runtime assignment to current state; declaration-time initialization
   is allowed.
+* With the CRTP `core::StateMachine` helper, the base begins the tick with
+  `ns = cs` and performs the single commit after the derived `Step(cs, ns, ...)`
+  returns. The derived switch remains the only place that changes `ns`;
+  entry/exit/tick hooks perform actions, not transitions.
+* Declare state enums and machine classes at the narrowest practical scope.
 * Other methods and interrupt callbacks submit requests or completion flags;
   they must not change current state directly.
-* Apply this structure to all new state machines. Existing conversions are
-  tracked separately in TODO.md rather than bundled into unrelated work.
+* Use the shared helper for new state machines. Per-tick context and input may
+  be passed as borrowed arguments; do not retain them beyond the tick.
+* Status snapshots (such as link state) and persistent image eligibility are
+  data, not tick-driven machines; do not add artificial transitions to them.

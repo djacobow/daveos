@@ -4,6 +4,7 @@
 
 #include "core/schedule/module.hpp"
 #include "core/schedule/progress.h"
+#include "core/state_machine/state_machine.hpp"
 #include "driver.h"
 
 namespace daveos::watchdog {
@@ -71,9 +72,9 @@ namespace daveos::watchdog {
         : driver_(driver), checks_(checks), observer_(observer) {}
 
     core::Status start(core::Time timeout) {
-      if (cs != State::stopped) {
-        return cs == State::failed ? failure_.status
-                                   : core::Status::already_initialized;
+      if (state() != State::stopped) {
+        return state() == State::failed ? failure_.status
+                                        : core::Status::already_initialized;
       }
       if (!timeout || timeout == core::kForever || !driver_.start ||
           !driver_.feed) {
@@ -92,8 +93,39 @@ namespace daveos::watchdog {
       return status == core::Status::ok ? start(micros) : status;
     }
 
-    void tick() {
-      State ns = cs;
+    void tick() { (void)machine_.tick(*this); }
+
+    State state() const { return machine_.state(); }
+
+    std::uint64_t dwell_count() const { return machine_.dwell_count(); }
+
+    core::StateStatistics statistics(State state) const {
+      return machine_.statistics(state);
+    }
+
+    auto statistics() const { return machine_.statistics(); }
+
+    const Failure& failure() const { return failure_; }
+
+   private:
+    class Machine
+        : public core::StateMachine<Machine, State, State::stopped,
+                                    static_cast<std::size_t>(State::failed) +
+                                        1> {
+      friend class core::StateMachine<Machine, State, State::stopped,
+                                      static_cast<std::size_t>(State::failed) +
+                                          1>;
+
+      void Step(State cs, State& ns, Controller& owner) { owner.Step(cs, ns); }
+
+      void OnEnter(State state, Controller& owner) {
+        if (state == State::failed && owner.observer_.failed) {
+          owner.observer_.failed(owner.observer_.context, owner.failure_);
+        }
+      }
+    };
+
+    void Step(State cs, State& ns) {
       switch (cs) {
         case State::stopped: {
           if (start_requested_) {
@@ -121,19 +153,8 @@ namespace daveos::watchdog {
           break;
         }
       }
-      if (ns != cs) {
-        cs = ns;
-        if (cs == State::failed && observer_.failed) {
-          observer_.failed(observer_.context, failure_);
-        }
-      }
     }
 
-    State state() const { return cs; }
-
-    const Failure& failure() const { return failure_; }
-
-   private:
     Failure CheckHealth() const {
       for (const auto& check : checks_) {
         auto result = check.test ? check.test(check.context)
@@ -150,7 +171,7 @@ namespace daveos::watchdog {
     std::span<const Check> checks_;
     Observer observer_;
     Failure failure_{};
-    State cs = State::stopped;
+    Machine machine_;
     core::Time timeout_ = 0;
     bool start_requested_ = false;
   };

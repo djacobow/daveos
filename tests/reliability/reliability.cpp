@@ -161,6 +161,9 @@ TEST_CASE(
   REQUIRE(controller.state() == wd::Controller::State::failed);
   REQUIRE(fixture.feeds == feeds);
   REQUIRE(fixture.failures == 1);
+  REQUIRE(controller.statistics(wd::Controller::State::failed).entries == 1);
+  REQUIRE(controller.statistics(wd::Controller::State::failed).ticks == 1);
+  REQUIRE(controller.dwell_count() == 1);
   REQUIRE(controller.start(5000000) != core::Status::ok);
 }
 
@@ -386,6 +389,12 @@ TEST_CASE(
     }
   }
   REQUIRE(engine.state() == update::Engine::State::done);
+  REQUIRE(engine.dwell_count() == 0);
+  REQUIRE(engine.statistics(update::Engine::State::disabled).entries == 1);
+  REQUIRE(engine.statistics(update::Engine::State::done).entries == 1);
+  REQUIRE(engine.statistics(update::Engine::State::done).ticks == 0);
+  REQUIRE(engine.statistics(update::Engine::State::writing).ticks > 0);
+  REQUIRE(engine.statistics(update::Engine::State::verifying).ticks > 0);
   REQUIRE(engine.status() == core::Status::ok);
   REQUIRE(std::equal(expected.begin(), expected.end(),
                      memory.bytes.begin() + layout.slots[1]));
@@ -410,6 +419,8 @@ TEST_CASE(
   REQUIRE(engine.status() == core::Status::ok);
   REQUIRE(journal.load(factory) == core::Status::ok);
   REQUIRE(factory.counter == 3);
+  REQUIRE(engine.statistics(update::Engine::State::done).entries == 2);
+  REQUIRE(engine.statistics(update::Engine::State::done).ticks == 1);
 }
 
 namespace {
@@ -571,6 +582,10 @@ TEST_CASE(
     return value.status;
   });
   REQUIRE(confirmation.tick(100000, true) == core::Status::ok);
+  REQUIRE(confirmation.statistics(wd::Confirmation::State::waiting).ticks == 1);
+  REQUIRE(confirmation.statistics(wd::Confirmation::State::observing).entries ==
+          1);
+  REQUIRE(confirmation.dwell_count() == 0);
   REQUIRE(confirmation.tick(5099999, true) == core::Status::ok);
   REQUIRE(result.calls == 0);
   SECTION("confirms at boundary exactly once") {

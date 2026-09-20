@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/state_machine/state_machine.hpp"
 #include "flash.h"
 #include "util/version.h"
 
@@ -68,10 +69,23 @@ namespace daveos::boot {
       done,
       failed
     };
+
+    class Machine
+        : public core::StateMachine<Machine, State, State::idle,
+                                    static_cast<std::size_t>(State::failed) +
+                                        1> {
+      friend class core::StateMachine<Machine, State, State::idle,
+                                      static_cast<std::size_t>(State::failed) +
+                                          1>;
+
+      void Step(State cs, State& ns, Journal& owner) { owner.Step(cs, ns); }
+    };
+
+    void Step(State cs, State& ns);
     Flash flash_;
     Layout layout_;
     Record record_{};
-    State cs = State::idle;
+    Machine machine_;
     Status status_ = Status::ok;
     std::uint32_t target_ = 0;
     std::uint32_t latest_ = 0;

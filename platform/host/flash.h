@@ -1,6 +1,7 @@
 #pragma once
 
 #include "boot/flash.h"
+#include "core/state_machine/state_machine.hpp"
 
 namespace daveos::platform::host {
 
@@ -40,6 +41,21 @@ namespace daveos::platform::host {
    private:
     enum class State { idle, execute };
     enum class Operation { erase, program };
+
+    class Machine
+        : public core::StateMachine<Machine, State, State::idle,
+                                    static_cast<std::size_t>(State::execute) +
+                                        1> {
+      friend class core::StateMachine<Machine, State, State::idle,
+                                      static_cast<std::size_t>(State::execute) +
+                                          1>;
+
+      void Step(State cs, State& ns, FileFlash& owner, core::Status& status) {
+        owner.Step(cs, ns, status);
+      }
+    };
+
+    void Step(State cs, State& ns, core::Status& status);
     bool Range(std::uint32_t address, std::size_t size) const;
     core::Status Read(std::uint32_t address, std::span<std::byte> bytes);
     core::Status Erase(std::uint32_t address);
@@ -53,7 +69,7 @@ namespace daveos::platform::host {
     Geometry geometry_{};
     void* clock_context_;
     core::Time (*clock_)(void*);
-    State cs = State::idle;
+    Machine machine_;
     Operation operation_ = Operation::erase;
     bool requested_ = false, closed_ = false;
     std::uint32_t address_ = 0;

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/state_machine/state_machine.hpp"
 #include "package.h"
 #include "util/crc32.h"
 #include "writer.h"
@@ -35,12 +36,17 @@ namespace daveos::update {
           crc_(crc),
           inactivity_(inactivity) {}
 
+    Engine(const Engine&) = delete;
+    Engine& operator=(const Engine&) = delete;
+    Engine(Engine&&) = delete;
+    Engine& operator=(Engine&&) = delete;
+
     void enable(bool value) { enabled_ = value; }
 
     // Platform identity is bound during initialization, never during
     // construction.
     Status running_slot(std::uint32_t slot) {
-      if (enabled_ || cs != State::disabled) {
+      if (enabled_ || state() != State::disabled) {
         return Status::busy;
       }
       if (slot >= 2) {
@@ -58,7 +64,15 @@ namespace daveos::update {
     void abort(Status reason = Status::rejected);
     void tick();
 
-    State state() const { return cs; }
+    State state() const { return machine_.state(); }
+
+    std::uint64_t dwell_count() const { return machine_.dwell_count(); }
+
+    core::StateStatistics statistics(State state) const {
+      return machine_.statistics(state);
+    }
+
+    auto statistics() const { return machine_.statistics(); }
 
     Status status() const { return status_; }
 
@@ -74,6 +88,18 @@ namespace daveos::update {
     bool active() const;
 
    private:
+    class Machine
+        : public core::StateMachine<Machine, State, State::disabled,
+                                    static_cast<std::size_t>(State::failed) +
+                                        1> {
+      friend class core::StateMachine<Machine, State, State::disabled,
+                                      static_cast<std::size_t>(State::failed) +
+                                          1>;
+
+      void Step(State cs, State& ns, Engine& owner) { owner.Step(cs, ns); }
+    };
+
+    void Step(State cs, State& ns);
     void Fail(Status status);
     boot::Flash flash_;
     boot::Layout layout_;
@@ -86,7 +112,7 @@ namespace daveos::update {
     boot::Snapshot snapshot_{};
     std::array<std::byte, kBlockSize> rx_{};
     std::array<std::byte, 256> verification_{};
-    State cs = State::disabled;
+    Machine machine_;
     Status status_ = Status::not_running, abort_reason_ = Status::rejected;
     std::uint32_t received_ = 0, verify_offset_ = 0, verify_crc_ = 0;
     std::size_t rx_size_ = 0, rx_at_ = 0;

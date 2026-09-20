@@ -94,8 +94,14 @@ namespace daveos::update {
   }
 
   std::size_t PackageReader::tick(std::span<const std::byte> input) {
-    State ns = cs;
     std::size_t consumed = 0;
+    (void)machine_.tick(*this, input, consumed);
+    return consumed;
+  }
+
+  void PackageReader::Step(State cs, State& ns,
+                           std::span<const std::byte> input,
+                           std::size_t& consumed) {
     // Restart is an input accepted in every state (after the owner has stopped
     // using the previous block). All state assignments remain in this switch.
     switch (cs) {
@@ -173,10 +179,6 @@ namespace daveos::update {
         break;
       }
     }
-    if (ns != cs) {
-      cs = ns;
-    }
-    return consumed;
   }
 
 

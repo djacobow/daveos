@@ -7,12 +7,13 @@ namespace daveos::update {
 
 
   bool Engine::active() const {
-    return requested_ || (cs != State::disabled && cs != State::idle &&
-                          cs != State::done && cs != State::failed);
+    return requested_ ||
+           (state() != State::disabled && state() != State::idle &&
+            state() != State::done && state() != State::failed);
   }
 
   bool Engine::ready() const {
-    return enabled_ && !abort_requested_ && cs == State::receiving &&
+    return enabled_ && !abort_requested_ && state() == State::receiving &&
            !rx_size_ && received_ < total() &&
            reader_.state() != PackageReader::State::ready;
   }
@@ -83,8 +84,9 @@ namespace daveos::update {
     abort_requested_ = true;
   }
 
-  void Engine::tick() {
-    State ns = cs;
+  void Engine::tick() { (void)machine_.tick(*this); }
+
+  void Engine::Step(State cs, State& ns) {
     switch (cs) {
       case State::disabled:
       case State::idle:
@@ -280,9 +282,6 @@ namespace daveos::update {
         ns = State::failed;
         break;
       }
-    }
-    if (ns != cs) {
-      cs = ns;
     }
   }
 

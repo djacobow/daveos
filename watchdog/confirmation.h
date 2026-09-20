@@ -3,6 +3,7 @@
 #include <chrono>
 
 #include "core/platform/platform.hpp"
+#include "core/state_machine/state_machine.hpp"
 
 namespace daveos::watchdog {
 
@@ -23,7 +24,36 @@ namespace daveos::watchdog {
     }
 
     core::Status tick(core::Time now, bool healthy) {
-      State ns = cs;
+      (void)machine_.tick(*this, now, healthy);
+      return status_;
+    }
+
+    State state() const { return machine_.state(); }
+
+    std::uint64_t dwell_count() const { return machine_.dwell_count(); }
+
+    core::StateStatistics statistics(State state) const {
+      return machine_.statistics(state);
+    }
+
+    auto statistics() const { return machine_.statistics(); }
+
+   private:
+    class Machine
+        : public core::StateMachine<Machine, State, State::waiting,
+                                    static_cast<std::size_t>(State::failed) +
+                                        1> {
+      friend class core::StateMachine<Machine, State, State::waiting,
+                                      static_cast<std::size_t>(State::failed) +
+                                          1>;
+
+      void Step(State cs, State& ns, Confirmation& owner, core::Time now,
+                bool healthy) {
+        owner.Step(cs, ns, now, healthy);
+      }
+    };
+
+    void Step(State cs, State& ns, core::Time now, bool healthy) {
       switch (cs) {
         case State::waiting:
           if (!healthy || delay_.count() <= 0) {
@@ -47,17 +77,10 @@ namespace daveos::watchdog {
         case State::failed:
           break;
       }
-      if (ns != cs) {
-        cs = ns;
-      }
-      return status_;
     }
 
-    State state() const { return cs; }
-
-   private:
     std::chrono::microseconds delay_;
-    State cs = State::waiting;
+    Machine machine_;
     core::Time since_ = 0;
     core::Status status_ = core::Status::ok;
     void* context_ = nullptr;

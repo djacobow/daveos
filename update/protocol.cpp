@@ -93,13 +93,18 @@ namespace daveos::update {
   }
 
   std::span<const std::byte> Protocol::reply() const {
-    return cs == State::reply ? std::span<const std::byte>(reply_)
-                              : std::span<const std::byte>{};
+    return machine_.state() == State::reply ? std::span<const std::byte>(reply_)
+                                            : std::span<const std::byte>{};
   }
 
   std::size_t Protocol::tick(std::span<const std::byte> input) {
-    State ns = cs;
     std::size_t count = 0;
+    (void)machine_.tick(*this, input, count);
+    return count;
+  }
+
+  void Protocol::Step(State cs, State& ns, std::span<const std::byte> input,
+                      std::size_t& count) {
     switch (cs) {
       case State::header:
       case State::payload:
@@ -154,10 +159,6 @@ namespace daveos::update {
         break;
       }
     }
-    if (ns != cs) {
-      cs = ns;
-    }
-    return count;
   }
 
 

@@ -1251,7 +1251,36 @@ All new state machines follow AGENTS.md: enum-class state, `ns = cs` at the
 start of each tick, next-state changes only inside `switch (cs)`, and one
 conditional current-state assignment after the switch. Other methods and
 interrupt handlers submit requests/results, never directly change state.
-Conversion of existing state machines is a separate TODO.
+The allocation-free `core::StateMachine<Derived, State, Initial, Count>` helper
+owns this tick lifecycle and the single current-state assignment; the derived
+`Step(State cs, State& ns, ...)` owns the transition switch. States are contiguous
+enum-class values starting at zero. Declare enums and machine classes at the
+narrowest practical scope. The OTA engine keeps `Engine::State` public for
+observers and its machine class private. The journal, OTA writer/package
+reader/protocol, watchdog controller/confirmation gate, host FileFlash, and
+scheduler lifecycle use the same helper. Scheduler lifecycle ticks represent
+requests at lifecycle boundaries and retain the existing platform locking;
+they are not dispatch-loop iterations. Network status snapshots and persistent
+image eligibility are data rather than tick-driven machines.
+
+Optional `OnEnter(State, ...)`, `OnExit(State, ...)`, and `OnTick(State, ...)`
+hooks receive the same per-tick arguments as `Step`. `tick(args...)` borrows these
+arguments as lvalues for the duration of the call without storing or moving them;
+callbacks must not retain references to temporary arguments. Hooks return void
+and must not throw, as must `Step`. Initial entry is deferred until the first
+tick. Each tick increments the current state's dwell and cumulative ticks before
+`OnTick` and `Step`. A transition calls exit, commits the new state, resets dwell
+to zero, and calls entry. The new state's first tick is the next invocation;
+staying in the same state does not trigger exit/entry.
+
+Read-only value getters expose `state()`, `dwell_count()`, `statistics(state)`
+(ticks and entries), and `statistics()` (an array indexed by enum value).
+Counters saturate at UINT64_MAX and are never implicitly reset. Unknown state
+queries return zero statistics. `tick()` returns `ok`, `busy` on recursive entry,
+or `invalid_argument` for an out-of-range next state (that tick remains counted,
+with no transition). There is no synchronization: owners serialize access and
+synchronize externally submitted flags. See the custom-components guide for an
+example.
 
 ### Flash layout and executable images
 

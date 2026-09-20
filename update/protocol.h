@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/state_machine/state_machine.hpp"
 #include "engine.h"
 
 namespace daveos::update {
@@ -38,10 +39,27 @@ namespace daveos::update {
 
     void reset() { reset_ = true; }
 
-    bool failed() const { return cs == State::failed; }
+    bool failed() const { return machine_.state() == State::failed; }
 
    private:
     enum class State { header, payload, reply, failed };
+
+    class Machine
+        : public core::StateMachine<Machine, State, State::header,
+                                    static_cast<std::size_t>(State::failed) +
+                                        1> {
+      friend class core::StateMachine<Machine, State, State::header,
+                                      static_cast<std::size_t>(State::failed) +
+                                          1>;
+
+      void Step(State cs, State& ns, Protocol& owner,
+                std::span<const std::byte> input, std::size_t& count) {
+        owner.Step(cs, ns, input, count);
+      }
+    };
+
+    void Step(State cs, State& ns, std::span<const std::byte> input,
+              std::size_t& count);
     Status Dispatch();
     void Reply(Status status);
     Engine& engine_;
@@ -49,7 +67,7 @@ namespace daveos::update {
     std::array<std::byte, 16> header_{};
     std::array<std::byte, kBlockSize + 8> payload_{};
     std::array<std::byte, 88> reply_{};
-    State cs = State::header;
+    Machine machine_;
     std::uint32_t opcode_ = 0, length_ = 0;
     std::size_t filled_ = 0;
     bool sent_ = false, reset_ = false;

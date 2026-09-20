@@ -8,6 +8,7 @@
 #include "core/logging/log_format.hpp"
 #include "core/queue/queue.hpp"
 #include "core/schedule/module.hpp"
+#include "core/state_machine/state_machine.hpp"
 #include "progress.h"
 
 namespace daveos::core {
@@ -81,6 +82,54 @@ namespace daveos::core {
       failed
     };
 
+    // Lifecycle transitions run under the existing platform guard. Each tick
+    // is a lifecycle request, not a task-dispatch iteration.
+    class Lifecycle
+        : public StateMachine<Lifecycle, State, State::fresh,
+                              static_cast<std::size_t>(State::failed) + 1> {
+      friend class StateMachine<Lifecycle, State, State::fresh,
+                                static_cast<std::size_t>(State::failed) + 1>;
+
+     public:
+      enum class Request { initialize, ready, fail, run, stop, stopped };
+
+     private:
+      void Step(State cs, State& ns, Request request) {
+        switch (cs) {
+          case State::fresh:
+            if (request == Request::initialize) {
+              ns = State::initializing;
+            }
+            break;
+          case State::initializing:
+            if (request == Request::ready) {
+              ns = State::ready;
+            } else if (request == Request::fail) {
+              ns = State::failed;
+            }
+            break;
+          case State::ready:
+            if (request == Request::run) {
+              ns = State::running;
+            }
+            break;
+          case State::running:
+            if (request == Request::stop) {
+              ns = State::stopping;
+            }
+            break;
+          case State::stopping:
+            if (request == Request::stopped) {
+              ns = State::stopped;
+            }
+            break;
+          case State::stopped:
+          case State::failed:
+            break;
+        }
+      }
+    };
+
     struct Registration {
       void* object = nullptr;
       const char* name = "";
@@ -147,13 +196,13 @@ namespace daveos::core {
     [[nodiscard]] Status init() {
       {
         Guard guard(platform_);
-        if (state_ == State::failed) {
+        if (lifecycle_.state() == State::failed) {
           return failure_;
         }
-        if (state_ != State::fresh) {
+        if (lifecycle_.state() != State::fresh) {
           return Status::already_initialized;
         }
-        state_ = State::initializing;
+        (void)lifecycle_.tick(Lifecycle::Request::initialize);
       }
       Status status = Validate();
       if (status == Status::ok) {
@@ -188,9 +237,9 @@ namespace daveos::core {
       {
         Guard guard(platform_);
         if (status == Status::ok) {
-          state_ = State::ready;
+          (void)lifecycle_.tick(Lifecycle::Request::ready);
         } else {
-          state_ = State::failed;
+          (void)lifecycle_.tick(Lifecycle::Request::fail);
           failure_ = status;
           initialization_failure_.status = status;
           for (auto& task : tasks_) {
@@ -236,13 +285,14 @@ namespace daveos::core {
           return Status::already_run;
         }
         used_ = true;
-        if (state_ == State::failed) {
+        if (lifecycle_.state() == State::failed) {
           return failure_;
         }
-        if (state_ != State::fresh && state_ != State::ready) {
+        if (lifecycle_.state() != State::fresh &&
+            lifecycle_.state() != State::ready) {
           return Status::busy;
         }
-        initialize = state_ == State::fresh;
+        initialize = lifecycle_.state() == State::fresh;
       }
       if (initialize) {
         Status status = init();
@@ -252,7 +302,7 @@ namespace daveos::core {
       }
       {
         Guard guard(platform_);
-        state_ = State::running;
+        (void)lifecycle_.tick(Lifecycle::Request::run);
         Time start = platform_.now();
         for (auto& task : tasks_) {
           if (task.active) {
@@ -386,7 +436,7 @@ namespace daveos::core {
       }
       {
         Guard guard(platform_);
-        state_ = State::stopping;
+        (void)lifecycle_.tick(Lifecycle::Request::stop);
         for (auto& timer : timers_) {
           timer.active = false;
         }
@@ -402,7 +452,7 @@ namespace daveos::core {
       }
       {
         Guard guard(platform_);
-        state_ = State::stopped;
+        (void)lifecycle_.tick(Lifecycle::Request::stopped);
       }
       return Status::ok;
     }
@@ -412,7 +462,7 @@ namespace daveos::core {
     // no-op.
     Status stop() {
       Guard guard(platform_);
-      if (state_ != State::running) {
+      if (lifecycle_.state() != State::running) {
         return Status::not_running;
       }
       if (platform_.can_stop()) {
@@ -451,7 +501,7 @@ namespace daveos::core {
     // timer_overflows.
     Status timer(Time delay, const TimerCallback& callback) {
       Guard guard(platform_);
-      if (state_ != State::running) {
+      if (lifecycle_.state() != State::running) {
         return Status::not_running;
       }
       if (!delay || !callback) {
@@ -481,7 +531,7 @@ namespace daveos::core {
     // pointer.
     Status cancel_timer(const TimerCallback& callback) {
       Guard guard(platform_);
-      if (state_ != State::running) {
+      if (lifecycle_.state() != State::running) {
         return Status::not_running;
       }
       for (std::size_t index = 0; index < TimerCapacity; ++index) {
@@ -509,7 +559,7 @@ namespace daveos::core {
     Progress<kTasks> progress() {
       Guard guard(platform_);
       Progress<kTasks> result;
-      result.running = state_ == State::running;
+      result.running = lifecycle_.state() == State::running;
       result.now = platform_.now();
       for (std::size_t i = 0; i < kTasks; ++i) {
         const auto& task = tasks_[i];
@@ -561,8 +611,10 @@ namespace daveos::core {
     friend class SchedulerInterface<Event>;
 
     bool AcceptsWork() const {
-      return state_ == State::fresh || state_ == State::initializing ||
-             state_ == State::ready || state_ == State::running;
+      return lifecycle_.state() == State::fresh ||
+             lifecycle_.state() == State::initializing ||
+             lifecycle_.state() == State::ready ||
+             lifecycle_.state() == State::running;
     }
 
     bool Contains(void* module) const {
@@ -658,8 +710,9 @@ namespace daveos::core {
           task.explicitly_scheduled = true;
           task.interval = delay;
           task.mode = mode;
-          task.due =
-              state_ == State::running ? After(platform_.now(), delay) : delay;
+          task.due = lifecycle_.state() == State::running
+                         ? After(platform_.now(), delay)
+                         : delay;
           task.first_due = task.due;
           task.completed = 0;
           ++task.generation;
@@ -699,7 +752,7 @@ namespace daveos::core {
       }
       {
         Guard guard(platform_);
-        if (state_ != State::running) {
+        if (lifecycle_.state() != State::running) {
           return Status::not_running;
         }
       }
@@ -738,7 +791,7 @@ namespace daveos::core {
         TimerCallback callback = nullptr;
         {
           Guard guard(platform_);
-          if (state_ != State::running) {
+          if (lifecycle_.state() != State::running) {
             return;
           }
           std::size_t slot = timers_.size();
@@ -774,7 +827,7 @@ namespace daveos::core {
     Statistics<kTasks> statistics_{};
     std::size_t module_count_ = 0, task_count_ = 0, event_count_ = 0;
     bool registration_error_ = false, used_ = false, stop_requested_ = false;
-    State state_ = State::fresh;
+    Lifecycle lifecycle_;
     Status failure_ = Status::initialization_failed;
     InitializationFailure initialization_failure_;
   };

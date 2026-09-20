@@ -97,7 +97,7 @@ namespace daveos::platform::host {
     if (!Range(address, bytes.size())) {
       return Status::invalid_argument;
     }
-    if (requested_ || cs != State::idle) {
+    if (requested_ || machine_.state() != State::idle) {
       return Status::busy;
     }
     std::size_t at = 0;
@@ -136,7 +136,7 @@ namespace daveos::platform::host {
     if (fd_ < 0) {
       return Status::not_running;
     }
-    if (requested_ || cs != State::idle) {
+    if (requested_ || machine_.state() != State::idle) {
       return Status::busy;
     }
     if (!Range(address, geometry_.sector_size) ||
@@ -154,7 +154,7 @@ namespace daveos::platform::host {
     if (fd_ < 0) {
       return Status::not_running;
     }
-    if (requested_ || cs != State::idle) {
+    if (requested_ || machine_.state() != State::idle) {
       return Status::busy;
     }
     if (bytes.size() != 16 || address % 16 || !Range(address, bytes.size())) {
@@ -178,8 +178,12 @@ namespace daveos::platform::host {
   }
 
   core::Status FileFlash::Poll() {
-    State ns = cs;
     auto status = fd_ < 0 ? Status::not_running : Status::ok;
+    (void)machine_.tick(*this, status);
+    return status;
+  }
+
+  void FileFlash::Step(State cs, State& ns, core::Status& status) {
     switch (cs) {
       case State::idle:
         if (closed_) {
@@ -214,10 +218,6 @@ namespace daveos::platform::host {
         ns = State::idle;
         break;
     }
-    if (ns != cs) {
-      cs = ns;
-    }
-    return status;
   }
 
   core::Time FileFlash::Now() const {

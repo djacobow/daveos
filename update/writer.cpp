@@ -31,8 +31,9 @@ namespace daveos::update {
     return Status::ok;
   }
 
-  void Writer::tick() {
-    State ns = cs;
+  void Writer::tick() { (void)machine_.tick(*this); }
+
+  void Writer::Step(State cs, State& ns) {
     switch (cs) {
       case State::idle:
       case State::done:
@@ -96,9 +97,6 @@ namespace daveos::update {
         }
         break;
       }
-    }
-    if (ns != cs) {
-      cs = ns;
     }
   }
 

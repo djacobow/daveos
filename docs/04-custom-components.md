@@ -105,3 +105,86 @@ Use the [API guide](application-guide.md) for precise callback, time, and failur
 contracts, and [PROJECT.md](../PROJECT.md) for scheduler semantics. Keep drivers
 and services separate from DaveOS where possible; the independent lwIP service
 and its small scheduling module are examples of that separation.
+
+### Structured state machines
+
+[`core/state_machine/state_machine.hpp`](../core/state_machine/state_machine.hpp)
+provides an allocation-free CRTP helper, independent of the scheduler. Use a
+contiguous `enum class` starting at zero; supply its state count as the final
+argument. Declare the enum and machine in the narrowest scope that their users
+need (for example, nested in the owning service).
+
+```cpp
+namespace core = daveos::core;
+
+enum class State { idle, running };
+
+class Machine : public core::StateMachine<Machine, State, State::idle, 2> {
+  friend class core::StateMachine<Machine, State, State::idle, 2>;
+
+ public:
+  void request_start() { start_ = true; }
+
+ private:
+  void Step(State cs, State& ns) {
+    switch (cs) {
+      case State::idle:
+        if (start_) {
+          ns = State::running;
+        }
+        break;
+      case State::running:
+        break;
+    }
+  }
+
+  bool start_ = false;
+};
+```
+
+Call `tick()` from a task or another serialized owner. It returns `Status::ok`
+on a normal tick. The derived `Step` owns the transition switch, and the base
+alone commits the selected next state. Optional `void OnEnter(State)`,
+`void OnExit(State)`, and `void OnTick(State)` hooks perform state-specific actions;
+use the state argument to select those actions. Neither hooks nor request methods
+may change the current state. Hooks and `Step` must not throw.
+
+Construction calls no hooks. On the first tick the initial state's entry hook
+runs, then its dwell and cumulative tick counts increment, then `OnTick` and
+`Step` run. On a transition, exit runs with the old state and its final dwell,
+then the base changes state, resets dwell to zero, and calls entry. The new
+state's tick happens on the next invocation. Staying in the same state does not
+run exit/entry hooks.
+
+- `state()` returns the current enum value.
+- `dwell_count()` returns ticks spent in the current visit.
+- `statistics(state)` returns cumulative `ticks` and `entries` for that state.
+- `statistics()` returns a copy of the whole statistics array, indexed by enum
+  value. Snapshots cannot mutate the machine. Unknown enum queries return zeros.
+
+Counters are `std::uint64_t` and saturate at their maximum. They measure calls,
+not elapsed time, and there is no implicit statistics reset. Recursive `tick()`
+calls return `busy`. An out-of-range next state returns `invalid_argument` with
+no transition hooks or state change; the attempted tick remains counted.
+The helper is not thread-safe: serialize calls and snapshots, and synchronize
+flags written by interrupts separately.
+
+The [OTA engine](../update/engine.h) uses a private nested machine and exposes
+these getters through its existing public interface. The journal, OTA writer,
+package reader, protocol, watchdog controller, confirmation gate, host FileFlash,
+and scheduler lifecycle also use the helper. Implementation-only enums stay
+private; enums used by public observers remain nested and public. Network status
+snapshots and persisted image eligibility remain data, not transition machines.
+
+A machine can borrow context and inputs for a tick rather than store an owner
+pointer: `machine.tick(owner, input, consumed)` calls
+`Step(State cs, State& ns, Owner& owner, Input input, std::size_t& consumed)`.
+Any optional hooks accept the same trailing arguments. Arguments are passed as
+lvalues and never stored or moved from by the helper; callbacks must not retain
+references to temporaries. The parsers use this to return consumed byte counts
+without adding temporary fields. Constructors remain passive.
+
+Scheduler lifecycle ticks occur at initialization, run, and shutdown boundaries
+under the existing platform guard. Their counts measure lifecycle requests,
+not scheduler loop iterations. Watchdog failure notification is an entry action,
+so a latched failure notifies exactly once.

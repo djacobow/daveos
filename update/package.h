@@ -1,6 +1,7 @@
 #pragma once
 
 #include "boot/journal.h"
+#include "core/state_machine/state_machine.hpp"
 
 namespace daveos::update {
 
@@ -34,7 +35,15 @@ namespace daveos::update {
 
     void release() { release_requested_ = true; }
 
-    State state() const { return cs; }
+    State state() const { return machine_.state(); }
+
+    std::uint64_t dwell_count() const { return machine_.dwell_count(); }
+
+    core::StateStatistics statistics(State state) const {
+      return machine_.statistics(state);
+    }
+
+    auto statistics() const { return machine_.statistics(); }
 
     Status status() const { return status_; }
 
@@ -45,6 +54,22 @@ namespace daveos::update {
     }
 
    private:
+    class Machine
+        : public core::StateMachine<Machine, State, State::idle,
+                                    static_cast<std::size_t>(State::failed) +
+                                        1> {
+      friend class core::StateMachine<Machine, State, State::idle,
+                                      static_cast<std::size_t>(State::failed) +
+                                          1>;
+
+      void Step(State cs, State& ns, PackageReader& owner,
+                std::span<const std::byte> input, std::size_t& consumed) {
+        owner.Step(cs, ns, input, consumed);
+      }
+    };
+
+    void Step(State cs, State& ns, std::span<const std::byte> input,
+              std::size_t& consumed);
     std::size_t Copy(std::span<const std::byte> input,
                      std::span<std::byte> output);
     bool Apply();
@@ -52,7 +77,7 @@ namespace daveos::update {
     std::array<std::byte, 12> block_header_{};
     std::array<std::byte, kMaxPatches * 2> patches_{};
     alignas(16) std::array<std::byte, kBlockSize> data_{};
-    State cs = State::idle;
+    Machine machine_;
     Status status_ = Status::ok;
     std::uint32_t destination_ = 0, offset_ = 0, length_ = 0, patch_count_ = 0;
     std::size_t filled_ = 0;
