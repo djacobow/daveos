@@ -621,13 +621,15 @@ namespace daveos::core {
   }
 
 // Capture the C++ identifier without declaring the handler or its parameters.
-#define DAVEOS_COMMAND(ModuleType, function, name, description, ...)  \
-  []() consteval {                                                    \
-    auto descriptor = ::daveos::core::command<&ModuleType::function>( \
-        name, description __VA_OPT__(, ) __VA_ARGS__);                \
-    descriptor.handler = #function;                                   \
-    return descriptor;                                                \
-  }                                                                   \
+// The explicit constant intermediate also supports GCC 13 in templated modules.
+#define DAVEOS_COMMAND(ModuleType, function, name, description, ...)           \
+  []() consteval {                                                             \
+    constexpr auto prototype = ::daveos::core::command<&ModuleType::function>( \
+        name, description __VA_OPT__(, ) __VA_ARGS__);                         \
+    auto descriptor = prototype;                                               \
+    descriptor.handler = #function;                                            \
+    return descriptor;                                                         \
+  }                                                                            \
   ()
 
 

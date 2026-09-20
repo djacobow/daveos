@@ -29,7 +29,8 @@
 ### Remaining qualification and follow-ups
 
 - [x] Generate independent bootloader/application stamps, print boot identity and expose board version. Local CI-equivalent host/ARM builds verified build 12345 and independent boot version 7.9; GitHub workflow now checks both stamps and the OTA package.
-- [ ] Verify the new version-propagation job on GitHub after the next push.
+- [ ] Verify the new version-propagation job on GitHub after the next push; the first run stopped at ARM compilation before reaching it.
+- [x] Fix CI blockers: use an explicit constexpr intermediate for GCC 13 command macros in templated modules, and declare the host I/O helper as a Meson test dependency so test-only builds produce it.
 - [x] H563 journal rollover/reclamation, both-images-invalid reset loop/factory recovery, and OTA timeout/disable/reset/PHY-link-loss/replacement tests. All 26 HIL cases passed across the main run and focused completion runs after fixing a GDB file-local-symbol lookup in the PHY test helper. Includes 1,160 UART burst replies without drops/errors, bidirectional OTA with concurrent timers, and startup trial rollback. Host tests also cover abort/disable during every flash phase, including an outstanding journal commit-marker write.
 - [ ] Deferred by user: physical power-interruption qualification. Reset injection and host flash models do not replace power-cut tests.
 - [x] Qualification matrix: host 26/26, ASan/UBSan 26/26, fake 20/20, logging-disabled 27/27, TSan 25/25, formatting/lint, H563/H755 firmware and both standalone starters pass. H755 bootloader integration and hardware testing remain deferred.
