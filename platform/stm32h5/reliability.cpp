@@ -2,6 +2,7 @@
 
 #include <cstring>
 
+#include "flash_read.h"
 #include "stm32h563xx.h"
 #include "util/wire.h"
 
@@ -12,6 +13,7 @@ namespace daveos::platform::stm32h5 {
     constexpr std::uint32_t kFlashBase = 0x08000000;
     constexpr std::uint32_t kFlashEnd = 0x08200000;
     constexpr std::uint32_t kCacheWaitBudget = 64000;
+    constexpr std::uint32_t kEccWaitBudget = 10000;
     constexpr std::uint32_t kWatchdogUpdateBudget = 1000000;
     constexpr std::uint32_t kEarlyWarningTicks = 64;
     constexpr std::uint32_t kWatchdogUpdateFlags =
@@ -22,7 +24,14 @@ namespace daveos::platform::stm32h5 {
     constexpr std::uint32_t kBusy =
         FLASH_SR_BSY | FLASH_SR_WBNE | FLASH_SR_DBNE;
     // Interrupt bridge for the one CPU's currently executing validation read.
-    volatile bool reading = false, read_error = false;
+    volatile detail::ReadRegion read_region = detail::ReadRegion::none;
+    volatile std::uint32_t read_address = 0, read_size = 0;
+    volatile bool read_error = false;
+    volatile std::uint16_t failed_data = 0;
+    static_assert(detail::kOtpFlag == FLASH_ECCR_OTP_ECC);
+    static_assert(detail::kEccd == FLASH_ECCR_ECCD);
+    // Hardware may finish before its caller polls: retain ownership until then.
+    Flash* flash_owner = nullptr;
     util::Version fault_version;
     std::uint64_t fault_installation = 0;
     bool watchdog_failure_recorded = false;
@@ -37,6 +46,22 @@ namespace daveos::platform::stm32h5 {
       return budget != 0;
     }
 
+    // The ECC NMI can arrive several cycles after the load completes. Keep
+    // its guard alive through status synchronization and acknowledgement.
+    void FinishRead() {
+      __DSB();
+      __ISB();
+      std::uint32_t budget = kEccWaitBudget;
+      while ((FLASH->ECCDETR & FLASH_ECCR_ECCD) && --budget) {
+        __NOP();
+      }
+      if (!budget) {
+        DaveOS_FaultCapture(nullptr, 0, 0);
+      }
+      __DSB();
+      __ISB();
+    }
+
     bool Range(std::uint32_t address, std::size_t length) {
       return address >= kFlashBase && address < kFlashEnd &&
              length <= kFlashEnd - address;
@@ -44,7 +69,7 @@ namespace daveos::platform::stm32h5 {
   }  // namespace
 
   core::Status Flash::Unlock() {
-    if (pending_ || (FLASH->NSSR & kBusy)) {
+    if (flash_owner || pending_ || (FLASH->NSSR & kBusy)) {
       return core::Status::busy;
     }
     if (FLASH->NSCR & FLASH_CR_LOCK) {
@@ -55,6 +80,7 @@ namespace daveos::platform::stm32h5 {
       return core::Status::io_error;
     }
     FLASH->NSCCR = kErrors | FLASH_SR_EOP;
+    flash_owner = this;
     return core::Status::ok;
   }
 
@@ -62,16 +88,23 @@ namespace daveos::platform::stm32h5 {
     if (!Range(address, bytes.size())) {
       return core::Status::invalid_argument;
     }
+    if (flash_owner || (FLASH->NSSR & kBusy)) {
+      return core::Status::busy;
+    }
+    FLASH->ECCCORR = FLASH->ECCCORR | FLASH_ECCR_ECCC;
+    FLASH->ECCDETR = FLASH->ECCDETR | FLASH_ECCR_ECCD;
     read_error = false;
-    reading = true;
+    read_address = address;
+    read_size = bytes.size();
+    read_region = detail::ReadRegion::flash;
     __DSB();
     const auto* source =
         reinterpret_cast<const volatile std::uint8_t*>(address);
     for (std::size_t i = 0; i < bytes.size(); ++i) {
       bytes[i] = std::byte(source[i]);
     }
-    __DSB();
-    reading = false;
+    FinishRead();
+    read_region = detail::ReadRegion::none;
     return read_error ? core::Status::io_error : core::Status::ok;
   }
 
@@ -114,6 +147,9 @@ namespace daveos::platform::stm32h5 {
   }
 
   core::Status Flash::Poll() {
+    if (flash_owner && flash_owner != this) {
+      return core::Status::busy;
+    }
     if ((FLASH->NSSR & kBusy) || (ICACHE->SR & ICACHE_SR_BUSYF)) {
       return core::Status::busy;
     }
@@ -124,6 +160,7 @@ namespace daveos::platform::stm32h5 {
     FLASH->NSCR = FLASH_CR_LOCK;
     FLASH->NSCCR = kErrors | FLASH_SR_EOP;
     pending_ = false;
+    flash_owner = nullptr;
     __DSB();
     // ICACHE also services flash data reads on H563. A journal scan can cache
     // erased words, so invalidate after every completed write/erase before
@@ -236,7 +273,8 @@ namespace daveos::platform::stm32h5 {
   }
 
   bool handle_flash_ecc() {
-    if (reading && (FLASH->ECCDETR & FLASH_ECCR_ECCD)) {
+    if (detail::matches(read_region, read_address, read_size, FLASH->ECCDETR)) {
+      failed_data = std::uint16_t(FLASH->ECCDR);
       read_error = true;
       FLASH->ECCDETR = FLASH->ECCDETR | FLASH_ECCR_ECCD;
       __DSB();
@@ -244,6 +282,27 @@ namespace daveos::platform::stm32h5 {
     }
     return false;
   }
+
+  namespace detail {
+    bool flash_busy() { return flash_owner || (FLASH->NSSR & kBusy); }
+
+    Halfword read_otp(std::uint32_t address) {
+      FLASH->ECCCORR = FLASH->ECCCORR | FLASH_ECCR_ECCC;
+      FLASH->ECCDETR = FLASH->ECCDETR | FLASH_ECCR_ECCD;
+      read_error = false;
+      failed_data = 0;
+      read_address = address;
+      read_size = 2;
+      read_region = ReadRegion::otp;
+      __DSB();
+      auto value = *reinterpret_cast<const volatile std::uint16_t*>(address);
+      FinishRead();
+      const bool corrected = FLASH->ECCCORR & FLASH_ECCR_ECCC;
+      const auto state = classify(value, read_error, failed_data, corrected);
+      read_region = ReadRegion::none;
+      return {value, state};
+    }
+  }  // namespace detail
 
   void set_fault_identity(const util::Version& version,
                           std::uint64_t installation) {
@@ -328,4 +387,10 @@ extern "C" void DaveOS_FaultCapture(const std::uint32_t* frame,
     }
   }
   h5::reset();
+}
+
+extern "C" void DaveOS_FlashNmi() {
+  if (!daveos::platform::stm32h5::handle_flash_ecc()) {
+    DaveOS_FaultCapture(nullptr, 0, 0);
+  }
 }

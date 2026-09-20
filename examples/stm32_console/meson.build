@@ -34,6 +34,20 @@ if get_option('bootloader')
   component_modules += ', boot'
 endif
 
+if get_option('otp_backend') == 'flash-emulator'
+  component_deps += otp_dep
+  component_includes += '#include "otp.hpp"'
+  component_members += '    Otp otp{platform};'
+  component_modules += ', otp.module'
+endif
+
+if get_option('otp_backend') == 'h563'
+  component_deps += otp_dep
+  component_includes += '#include "otp_hardware.hpp"'
+  component_members += '    HardwareOtp otp{platform, ' + (get_option('otp_programming') ? 'true' : 'false') + '};'
+  component_modules += ', otp.module, otp'
+endif
+
 if get_option('networking')
   component_includes += '#include "platform/stm32/console/network.hpp"'
   component_members += '    stm32::Network<Event> network{platform};'

@@ -37,3 +37,13 @@ with a build system in meson and tools written in Python
   be passed as borrowed arguments; do not retain them beyond the tick.
 * Status snapshots (such as link state) and persistent image eligibility are
   data, not tick-driven machines; do not add artificial transitions to them.
+
+## Real OTP provisioning
+
+* The connected DUT may already contain OTP data and locks. Start with a
+  read-only scan; preserve unknown, damaged and provisioned blocks.
+* Report the scan and proposed block before any irreversible write or lock.
+* Once initial write/lock validation succeeds, automated hardware tests must
+  only read real OTP. Further real writes require explicit user instruction.
+* Use FileOtp or the bank-B emulator for repeated writes, failure injection,
+  exhaustion, and destructive tests. Factory main-flash erase is not OTP erase.

@@ -15,3 +15,7 @@ option('uart_console', type: 'boolean', value: true, description: 'Enable the ST
 option('usb_console', type: 'boolean', value: true, description: 'Enable the STM32 USB CDC command/log transport')
 option('networking', type: 'boolean', value: false, description: 'Enable optional lwIP IPv4 Ethernet support')
 option('tcp_console', type: 'boolean', value: true, description: 'Enable the single-client TCP console on port 1000 when networking is enabled')
+
+option('otp_backend', type: 'combo', choices: ['none', 'flash-emulator', 'h563'], value: 'none', description: 'Optional OTP console backend; emulator requires H563 boot layout')
+
+option('otp_programming', type: 'boolean', value: false, description: 'Explicit real H563 OTP provisioning; never enable for automated HIL')

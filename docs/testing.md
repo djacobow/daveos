@@ -47,7 +47,7 @@ Every selected hardware test **mass-erases main flash and programs/verifies the
 factory image** before it runs. This includes filtered and single-test runs;
 there is no reuse-installed-firmware option. Factory provisioning clears both
 slots and metadata, installs confirmed A, invalidates the old retained fault
-record in RAM, and leaves OTP untouched. Closing
+record in RAM, clears bank-B emulated OTP, and leaves real OTP untouched. Closing
 other UART/USB terminals and TCP console clients avoids competing readers or
 the console's single-client limit.
 
@@ -146,3 +146,21 @@ python tools/verify_version.py --build build/boot --number "$GITHUB_RUN_NUMBER"
 Portable `version-tool` tests exercise clean/dirty Git state, local/CI build
 numbers, invalid values and artifact mismatches. A separate build can override
 bootloader major/minor to verify they remain independent of application versions.
+
+### OTP emulator selection
+
+`tests/hil/h563/test_otp.py` requires `-Dotp_backend=flash-emulator`; it skips when
+that backend is absent. It covers all console transports, exact deduplication,
+confirmation rejection, reset retention, exhaustion, factory clearing, torn-lock
+recovery, bidirectional OTA retention and serial writes during OTA. Emulator
+fault injection is separate from physical OTP and power-interruption validation.
+
+### Real OTP is read-only in automation
+
+The DUT may already contain records or device keys. `test_otp_hardware.py` runs
+only with the real H563 backend and compares per-block read classifications,
+fingerprints and locks across repeated reads and reset. It makes no assumption
+of virgin contents and never sends serial setters or lock requests. HIL rejects
+`otp_programming=true` for every suite. Initial physical write/lock qualification
+is separate, deliberate work; after that validation succeeds, all subsequent
+automated real-OTP checks remain read-only. Use emulators for mutation tests.

@@ -8,15 +8,21 @@ namespace daveos::platform::stm32h5 {
 
 
   // Caller-owned flash driver. The injected clock is valid before scheduling;
-  // one owner serializes operations. Constructors do not touch hardware.
+  // used on the scheduler thread. All instances share peripheral ownership
+  // until the initiating instance polls completion. Other instances return
+  // busy without acknowledging its flags. Constructors do not touch hardware.
   class Flash {
    public:
     Flash(void* clock_context, core::Time (*clock)(void*))
         : clock_context_(clock_context), clock_(clock) {}
 
+    Flash(const Flash&) = delete;
+    Flash& operator=(const Flash&) = delete;
+
     boot::Flash driver();
 
    private:
+    friend class Otp;
     core::Status Read(std::uint32_t address, std::span<std::byte> bytes);
     core::Status Erase(std::uint32_t address);
     core::Status Program(std::uint32_t address,

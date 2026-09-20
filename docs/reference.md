@@ -45,6 +45,14 @@ All generated files, downloaded test sources, and analysis caches live under the
 ignored `build/` directory. It can be removed entirely and regenerated. Installed
 toolchains in `tools/external/` are separately ignored inputs, not build outputs.
 
+## OTP storage
+
+See [OTP records and host testing](otp.md) for the injected store, optional command
+module, persistent file backend, and optional H563 bank-B flash emulator.
+Real H563 OTP provisioning has passed one explicitly authorized write/lock
+validation. Provisioning is disabled by default; automated hardware tests only
+read OTP.
+
 ## Starting your own application
 
 Copy [`starters/application`](../starters/application/README.md) into a new repository

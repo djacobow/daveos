@@ -59,3 +59,26 @@ class Programming(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_boot_layout_reserves_flash_otp_inside_bank_b_placeholder(tmp_path, monkeypatch):
+    layout_spec = importlib.util.spec_from_file_location('boot_layout', Path(__file__).resolve().parents[2] / 'tools/boot_layout.py')
+    boot_layout = importlib.util.module_from_spec(layout_spec)
+    layout_spec.loader.exec_module(boot_layout)
+    import json
+    import sys
+
+    source = tmp_path / 'source.ld'
+    source.write_text('MEMORY { FLASH (rx) : ORIGIN = 0x08000000, LENGTH = 2048K }\n')
+    monkeypatch.setattr(boot_layout, 'flash_size', lambda _: 18328)
+    monkeypatch.setattr(sys, 'argv', ['boot_layout', '--probe', str(tmp_path / 'probe.elf'),
+                                     '--source-linker', str(source), '--directory', str(tmp_path)])
+    boot_layout.main()
+    layout = json.loads((tmp_path / 'layout.json').read_text())
+    assert layout['otp_emulator_base'] == 0x08100000
+    assert layout['otp_emulator_size'] == 8192
+    assert layout['otp_emulator_base'] + layout['otp_emulator_size'] <= layout['metadata'][1]
+    assert layout['metadata'] == [0x08008000, 0x08108000]
+    assert layout['slots'] == [0x0800a000, 0x0810a000]
+    assert 'kOtpEmulatorBase' in (tmp_path / 'layout.h').read_text()
+    assert 'ORIGIN = 0x0810a000' in (tmp_path / 'slot_b.ld').read_text()

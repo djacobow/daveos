@@ -24,11 +24,20 @@ if platform == 'stm32'
   add_project_link_arguments(cpu_flags, language: ['c', 'cpp'])
 endif
 
+if get_option('otp_backend') != 'none' and (platform != 'stm32h5' or not get_option('bootloader'))
+  error('OTP console backends require STM32 H563 with bootloader=true')
+endif
+
+if get_option('otp_programming') and get_option('otp_backend') != 'h563'
+  error('otp_programming requires otp_backend=h563')
+endif
+
 subdir('tools')
 subdir('core')
 subdir('util')
 subdir('boot')
 subdir('update')
+subdir('otp')
 subdir('console')
 if get_option('networking')
   subdir('net')

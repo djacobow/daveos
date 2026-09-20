@@ -16,6 +16,9 @@ else
   file_flash_lib = static_library('daveos-file-flash', 'host/flash.cpp', dependencies: core_dep)
   file_flash_dep = declare_dependency(link_with: file_flash_lib, dependencies: core_dep)
   meson.override_dependency('daveos-file-flash', file_flash_dep)
+  file_otp_lib = static_library('daveos-file-otp', 'host/otp.cpp', dependencies: otp_dep)
+  file_otp_dep = declare_dependency(link_with: file_otp_lib, dependencies: otp_dep)
+  meson.override_dependency('daveos-file-otp', file_otp_dep)
   subdir('fake')
   if platform == 'host'
     subdir('host')

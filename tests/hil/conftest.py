@@ -31,6 +31,8 @@ def hil_config(request):
     for key, value in dict(board='h563', bootloader=True, networking=True, usb_console=True, tcp_console=True).items():
         if options.get(key) != value:
             pytest.fail(f'HIL build requires {key}={value}')
+    if options.get('otp_programming', False):
+        pytest.fail('Automated HIL forbids real OTP programming; use -Dotp_programming=false')
     # Hold ownership before building/flashing, through every teardown.
     output = ROOT / 'build/hil'
     output.mkdir(parents=True, exist_ok=True)

@@ -10,6 +10,10 @@ BASE = 0x08000000
 BANK_SIZE = 1024 * 1024
 SECTOR = 8192
 BOOT_RESERVATION = 32 * 1024
+OTP_EMULATOR_BASE = BASE + BANK_SIZE
+OTP_EMULATOR_SIZE = SECTOR
+assert OTP_EMULATOR_BASE % SECTOR == 0
+assert OTP_EMULATOR_SIZE <= BOOT_RESERVATION
 
 
 def flash_size(path):
@@ -59,13 +63,18 @@ def main():
     metadata = [BASE + reserve, BASE + BANK_SIZE + reserve]
     layout = {"boot_size": size, "boot_reservation": reserve, "slot_size": BANK_SIZE - reserve - SECTOR,
               "slots": slots, "metadata": metadata, "sector_size": SECTOR, "write_size": 16,
-              "product": 0x563, "revision": 1}
+              "product": 0x563, "revision": 1,
+              "otp_emulator_base": OTP_EMULATOR_BASE, "otp_emulator_size": OTP_EMULATOR_SIZE}
     (directory / "layout.json").write_text(json.dumps(layout, indent=2) + "\n")
     header = ("#pragma once\n#include \"boot/flash.h\"\nnamespace daveos::boot {\n"
               "inline constexpr Layout kLayout{{"
               + ",".join(hex(x) for x in slots) + "},{"
               + ",".join(hex(x) for x in metadata)
-              + f"}}, {layout['slot_size']}, 8192, 16, 0x563, 1}};\n}}\n")
+              + f"}}, {layout['slot_size']}, 8192, 16, 0x563, 1}};\n"
+              f"inline constexpr std::uint32_t kOtpEmulatorBase = {OTP_EMULATOR_BASE:#x};\n"
+              f"inline constexpr std::uint32_t kOtpEmulatorSize = {OTP_EMULATOR_SIZE};\n"
+              "static_assert(kOtpEmulatorBase % 8192 == 0);\n"
+              "static_assert(kOtpEmulatorBase + kOtpEmulatorSize <= kLayout.metadata[1]);\n}\n")
     (directory / "layout.h").write_text(header)
     source = args.source_linker.read_text()
     (directory / "boot.ld").write_text(linker(source, BASE, reserve))

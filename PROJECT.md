@@ -1545,3 +1545,482 @@ rollover, both-images-invalid recovery, and OTA timeout/disable/reset/link-loss
 interruption and replacement. PHY power-down and CPU reset tests do not replace
 physical cable-unplug or power-interruption qualification. Watcher fixes belong upstream with tests;
 update the pinned published commit after validation.
+
+
+## OTP storage (agreed behavior and implementation design)
+
+Implementation status: the record codec, Store, optional module/commands and
+persistent host FileOtp and injected bank-B FlashOtp emulator are implemented.
+See [docs/otp.md](docs/otp.md) for composition and test usage. H563 emulator HIL
+covers factory/reset retention and bidirectional OTA. The real H563 OTP backend
+is implemented with provisioning disabled by default. Guarded read/NMI behavior
+has been tested on a previously provisioned H563. One explicitly authorized
+write stored `dave_nucleoh563_sn001` in block 1 and verified its permanent lock;
+all other blocks retained their fingerprints and locks. Read-only firmware was
+restored and HIL verified retention through factory programming and reset.
+Further automated real
+OTP tests are read-only. Physical power-cut qualification remains deferred.
+
+Provide an optional OTP service outside the scheduler core, with injected
+platform storage and CRC support. Constructors remain passive. During stage1,
+the module initializes its injected backend, scans storage and populates
+fixed-size RAM storage. It has no initialization dependency on other modules;
+its backend and CRC support must be usable within its own stage1. Its stage2 is
+a no-op. After successful stage1, the cache is available to every module during
+stage2 without depending on module registration order.
+
+Begin with a persistent host file backend, following the FileFlash approach, so
+development and repeatable tests consume no real OTP capacity.
+
+Read and write APIs are restricted to the scheduler thread, including module
+initialization callbacks. No interrupt-context or concurrent host-thread access
+is supported. Writes synchronously program and read back one block, verify the
+record, and return the result; no background task or asynchronous completion API
+is required for these infrequent provisioning operations.
+
+### Records and cached access
+
+Treat the available OTP storage as ordered, fixed-size slots, with exactly one
+record per hardware block. On H563 this gives 32 slots of 64 bytes each. Each
+record structure occupies the entire block; do not pack multiple records into
+one block or span a record across blocks. Each record has a type identifier,
+size, and CRC32 header followed by its payload. The H563 record layout is:
+
+| Offset | Field | Size |
+| --- | --- | --- |
+| 0 | Type identifier: enum class with std::uint16_t underlying type | 2 bytes |
+| 2 | Payload length: std::uint16_t, counting payload bytes only | 2 bytes |
+| 4 | CRC32: std::uint32_t | 4 bytes |
+| 8 | Payload | 56 bytes |
+
+The record totals 64 bytes. CRC32 uses the existing DaveOS CRC32 convention
+and covers the type, payload length, and all 56 payload bytes, in stored order,
+excluding the CRC field itself. Fill unused payload bytes with 0xFF before
+calculating the CRC using the intended final type identifier.
+
+Reserve type 0xFFFF as invalid/unwritten. Program the length, payload, and CRC
+before programming the type field last as the completion marker. A record is
+accepted only when its completion marker, length, CRC, and supported payload
+validation pass. A type field still at 0xFFFF does not prove the block is unused:
+partially programmed contents elsewhere in the block consume it. Unknown types
+other than 0xFFFF remain subject to the skip-and-consume policy below. Readback
+verification after the final type write is required before reporting success or
+updating the RAM cache.
+
+Permanently lock each successfully programmed and verified block as part of the
+write operation; locking is not deferred to a separate provisioning API. Verify
+the lock before returning success for a newly written record. Each record uses
+an entire block, so there is no remaining space in that block to preserve for
+future writes. If record verification succeeds but permanent locking fails,
+return an error and expose the verified new value in the RAM cache. The block
+remains consumed. This keeps runtime reads consistent with the valid record
+that initialization would find after reboot; do not fall back to the previous
+value solely because locking failed.
+
+Initialization scans every potential slot, validates records, and loads valid
+supported data into RAM. For a repeated type, the valid record later in physical
+slot order replaces the earlier cached value. An invalid later record must not
+replace a valid earlier value. Unknown record types do not fail initialization:
+skip their contents and treat their blocks as consumed, preserving compatibility
+with data written by newer firmware. Initialization also accepts a valid but
+unlocked record, for example after a reset between programming and locking.
+Cache its value, block identity and lock state, but do not program or lock OTP
+during initialization. A later identical write retries only that block's lock.
+Startup scanning is read-only with respect to OTP contents and permanent locks.
+Record validity and precedence depend on contents, CRC and physical slot order,
+not the lock bit. A valid unlocked record is usable; a locked corrupt record is
+not. Consult lock state for locking/verification and to exclude locked blocks
+from write candidates; being unlocked does not establish that a block is unused.
+Public read accessors use the RAM cache rather than rereading OTP.
+
+If a block has a genuine recoverable ECC read error, record the problem, treat
+the block as consumed, and continue scanning. It must not replace an earlier
+valid cached record or become a write candidate. Failure to initialize or access
+the backend as a whole fails module initialization. Expected ECC indications
+from never-written OTP are distinct from genuine per-block read errors.
+
+For every supported record type, compare a requested write with the current
+valid cached record of that type. If the type, payload length, and payload bytes
+are identical and its block is locked, return success without programming or
+consuming a block. If the valid cached record is unlocked, whether from a failed
+lock operation or the initialization scan, an identical write retries only the
+permanent lock on that existing block and verifies it. Do not rewrite data or consume another slot; return
+success once locking is verified, otherwise return the lock error and retain
+the verified cached value. These rules apply to all types, not only serial
+numbers, and require no free slots. Compare contents rather than relying on
+CRC equality. Deterministic padding and CRC make identical content an identical
+stored row.
+
+Changed records append immediately after the highest consumed block, starting
+at block zero when none have been consumed. Normal operation must use consecutive
+blocks and create no gaps. A partial or failed write consumes its block rather
+than creating a reusable gap. If externally produced contents contain an earlier
+unused gap, do not backfill it: physical slot order must continue to represent
+write order. Records never update a previously written record in place.
+Distinguish never-used storage from a used slot containing invalid or partially
+written data. A partially written or corrupt
+block is consumed permanently and must never be reused. Initialization skips
+such records and retains the latest earlier valid value for each type.
+
+After programming a record, read it back and verify it before updating the RAM
+cache. If verification fails, return an error, preserve the previous cached
+value, and leave the affected block consumed. A subsequent write uses a fresh
+block. If a changed value needs a new record and no never-used block remains,
+return core::Status::full without changing the RAM cache. Identical writes
+consume no storage when all blocks are used, and succeed if the existing block
+is already locked or the lock-only retry succeeds.
+
+The first and only implemented payload type is a serial number: ASCII text up
+to the maximum payload capacity. Device keys and additional types remain future
+work. On H563 the serial number may occupy all 56 payload bytes. The payload
+length field gives its character count; no NUL terminator is stored. The RAM
+accessor returns std::optional<std::string_view>, referring to the RAM cache.
+If no valid serial-number record exists, initialization still succeeds and the
+accessor returns std::nullopt. The application decides whether provisioning is
+required. Accept 1 through 56 printable ASCII characters
+(bytes 0x20 through 0x7E inclusive), including spaces. Preserve characters exactly;
+do not trim whitespace. Reject empty strings, overlength values, control
+characters (including NUL and DEL), and non-ASCII bytes before programming or
+consuming a slot. Apply the same serial-number validation during initialization
+before accepting a stored record into the RAM cache.
+
+### Demo commands
+
+Provide commands to show the cached serial number and report the backend,
+consumed/remaining slots and error counts. Setting the serial number uses an
+explicit serial set subcommand with two required string arguments: the proposed
+serial number and its confirmation. Compare the parsed strings exactly,
+including whitespace and case. If they differ, return core::Status::invalid_argument
+without programming data, retrying a lock, consuming a slot or changing the RAM
+cache. Matching values must still pass the normal serial-number validation.
+There is no single-argument setter shortcut.
+
+The setter is otp serial set "ABC 123" "ABC 123". The command namespace is
+otp, separate from ota firmware updates. The read/status commands are otp serial
+and otp status. The serial command adapter handles the explicit set form as
+described below, using the existing dispatcher tokens.
+
+### Backends and STM32 integration
+
+The host file backend must preserve contents across close/reopen and support
+tests of slot consumption, repeated types, invalid records, partial writes and
+exhaustion. Persist permanent block locks as well as contents across reopen.
+It should model the selected OTP programming restrictions; ordinary
+flash erase/rewrite semantics are not sufficient.
+
+After the host-file tests pass, implement a second test backend using flash in
+the reserved bank-B placeholder. Use it to exercise the OTP module on H563 before
+programming real OTP. This backend is part of the initial implementation plan.
+Reserve one 8 KiB erase sector from the bank-B placeholder. Expose the same
+32 logical 64-byte records as real H563 OTP; additional physical space within
+that sector stores simulated permanent locks and interrupted-write tracking.
+This allocation must not overlap boot metadata or either application slot and
+must not change their sizes or addresses. The emulator's physical layout must
+respect the underlying flash programming unit without reprogramming a unit to
+simulate OTP's smaller writes. Records and simulated permanent locks survive
+resets and OTA updates. Do not automatically erase the emulator during
+initialization or when it becomes full. Existing factory programming clears it
+as part of its main-flash mass erase; actual hardware OTP remains untouched by
+factory programming. Keep emulated OTP programming and permanent-lock semantics
+consistent with the host backend despite the underlying flash being erasable.
+
+Real H563 OTP support requires coordinated MPU/cache configuration and NMI
+handling. Use the reference OTP driver and interrupt handler below to guide the
+hardware adapter. The reference distinguishes 16-bit programming units from
+64-byte lockable blocks; do not equate these sizes or silently assume the same
+geometry on H755. Keep device geometry in the platform adapter.
+
+The NMI path must inspect FLASH ECC status and ECCDR, acknowledge ECCDETR as
+required for reads of unwritten OTP, and preserve handling of genuine ECC errors
+and unrelated NMIs. Integrate with the existing main-flash ECC handler rather
+than installing competing NMI handlers. MPU configuration must coexist with
+existing board memory attributes. Exact ECC classification and the hardware
+sequence for applying and verifying permanent block locks require reference
+verification; do not simply treat any ECC error as a free slot.
+
+References reviewed:
+
+- /home/david/form/g2/fw/src/common/form/hal/otp/
+- /home/david/form/g2/fw/src/middleware/cube/Src/stm32h5xx_it_user.c
+- ST guidance: https://community.st.com/stm32-mcus-60/handling-ecc-errors-in-stm32h5-series-reading-unwritten-otp-and-flash-data-area-143933
+- Pinned STM32CubeH5 HAL: stm32h5xx_hal_flash.c (HAL_FLASH_OB_Launch),
+  stm32h5xx_hal_flash_ex.c (OTP lock programming/current-state readback), and
+  stm32h563xx.h (OTP geometry and ECC register fields).
+- RM0481, FLASH OTP access/read operations and OTPBLR/ECC register descriptions,
+  for the real-adapter qualification checklist; emulator success is not a
+  substitute for verifying those hardware semantics.
+
+### Implementation design
+
+Keep the storage service in daveos::otp (otp/), independent of the scheduler,
+logger, commands and STM32 HAL. Provide otp::Module<Event = core::NoEvent> as a
+thin optional DaveOS adapter. It owns no peripheral or global singleton: the
+application constructs a backend, a Store with a borrowed driver and optional
+CRC service, and then the module referring to that Store. Constructors only
+store configuration/references. Module stage1 calls Store::init(); stage2 does
+nothing. No periodic task is needed.
+
+Use the existing borrowed context/function-pointer DI idiom, without virtual
+methods or heap allocation. The initial supported geometry is 32 blocks of
+64 bytes; an incompatible backend fails initialization before any mutation.
+Keep the geometry reported by the backend so another target's adapter cannot
+silently inherit H563 assumptions. Do not implement H755 OTP by assuming it is
+identical to H563.
+
+The driver provides these synchronous operations:
+
+- init(): prepare/open the backend and validate its geometry.
+- inspect(block, result): return the 64 logical bytes, lock state and an enum
+  describing unused, consumed/readable, or consumed/unreadable storage. A
+  recoverable block error is represented in that result; a non-ok operation
+  status means the backend could not reliably inspect storage.
+- program(block, record): program one fresh logical record, with the type field
+  committed last. Return status and an attempted flag. Busy/rejected operations
+  that never touch storage do not consume the next block. Once programming may
+  have started, a failed attempt consumes it. No automatic data-write retries.
+- lock(block): idempotently apply the permanent lock. Store then inspects the
+  block to verify the actual lock state; issuing a lock request is not proof.
+
+The backend owns physical programming order and the distinction between virgin,
+programmed and unreadable storage. The Store owns record validation, CRC, append
+position, equality checks and the RAM cache. There is no erase or arbitrary
+reprogram operation in the public OTP driver. It does not expose raw mapped OTP
+pointers to callers.
+
+Use explicit little-endian encoding rather than writing a compiler-dependent
+struct representation. Define serial_number = 1 in the record type enum and
+reserve 0xFFFF as the uncommitted value. Other identifiers are unknown types.
+Verify the header offsets and 64-byte total at compile time. Check payload
+length before using it; validate CRC over bytes 0..3 and 8..63, then validate
+the supported payload. Require canonical 0xFF padding. All-zero, malformed,
+uncommitted and checksum-invalid records are consumed but not cached.
+
+Store exposes init(), ready(), serial(), set_serial(string_view), and snapshot().
+Before successful initialization, serial() returns nullopt and set_serial()
+returns not_running; ready() distinguishes this from an initialized device with
+no serial number. Repeated successful init returns already_initialized; an init
+failure leaves the service unavailable. Returned serial views borrow fixed RAM
+storage and are valid until the next verified value change or Store destruction.
+Lock-only retries and identical no-op writes do not invalidate a view. Never
+return a view into driver staging storage or mapped OTP.
+
+Stage a proposed value before mutation, including when it aliases the current
+cached string. Invalid input and full/busy rejections leave cache and append
+position unchanged. A failed programming/readback attempt leaves the previous
+cache intact and consumes its target when the backend reports an attempt. A
+verified new value replaces the cache before lock completion; lock failure is
+reported separately without hiding that value. A reset during an operation may
+leave a valid unlocked record; the next scan is authoritative.
+
+Use existing core::Status values: invalid_argument for bad values/confirmation,
+full for exhausted append space, busy for unavailable shared hardware, io_error
+for read/program/lock failures, timeout for bounded operation timeouts, and
+checksum_error for mismatching record verification. Invalid backend geometry or
+host-file format is incompatible. Status snapshots identify the failing phase
+(scan, program, verify, lock), block and status so an io_error is diagnosable.
+Error returns after mutation are explicitly not rollback guarantees.
+
+Snapshots use fixed-size value types, including backend identity, readiness,
+consumed blocks, remaining appendable slots, invalid/unknown/unreadable block
+counts, latest record's block/lock state, and saturating operation-error counters.
+Report an anomalous earlier gap as unavailable for append, not free capacity.
+An expected unwritten-OTP ECC indication is not counted as a genuine read error.
+Counters are diagnostic data, not a tick-driven state machine.
+
+### Host file backend
+
+Provide platform::host::FileOtp with a passive constructor taking a borrowed
+path and explicit existing/create mode. Open during init, matching the stage1
+contract. Create is exclusive and never truncates an existing file; existing
+mode rejects missing, malformed, wrong-version or wrong-size files. No automatic
+reset or repair of a damaged backing file. Use bounded buffers and positional
+file I/O; successful mutations include persistence synchronization.
+
+Define a versioned file format: a 64-byte header describing the magic, format,
+geometry and header CRC, followed by 32 fixed 128-byte block images. Each image
+contains the 64 logical bytes, one state byte for each of its 32 halfwords,
+a persistent lock byte and reserved padding. Per-halfword states distinguish
+virgin, programming attempted/incomplete, programmed, and injected read failure.
+A programmed 0xFFFF halfword is not virgin. Lock state is sticky across reopen.
+Reject malformed simulator bookkeeping instead of treating it as erased.
+
+Before each simulated halfword write, persist its attempted state, then its data,
+then its completed state. Program length first, then the remaining non-type
+halfwords, and the type halfword last. Program each halfword at most once,
+including 0xFFFF padding. Data and lock faults are independently injectable at
+operation boundaries. Model failure before any mutation, partial programming,
+readback mismatch/ECC, and lock failure before/after persistence. Close/reopen
+must retain evidence of interrupted writes and lock state. Reset fixtures by
+creating a new test file, not by exposing erase through the service.
+
+This is a deterministic OTP model, not a claim about transistor-level failure
+behavior or storage guarantees after loss of power to the host itself.
+
+### Bank-B flash emulator
+
+Reserve 0x08100000..0x08101FFF, the first 8 KiB of the existing 32 KiB bank-B
+placeholder. Generate/export the reservation from the same layout tooling as
+boot metadata, with overlap/alignment assertions and programming-plan coverage.
+The rest of the placeholder, metadata B at 0x08108000 and application B at
+0x0810A000 remain unchanged. Require a compatible boot-layout build when this
+backend is selected; do not assume a standalone firmware image reserves it.
+
+Use 32 physical slots of 256 bytes each. A slot contains:
+
+| Relative offset | Physical contents |
+| --- | --- |
+| 0..15 | Claim marker identifying format and logical block, with integrity check |
+| 16..79 | 64-byte record body, with the type field left at 0xFFFF |
+| 80..95 | Commit marker containing final type and record identity/integrity check |
+| 96..255 | Ten independent 16-byte lock-attempt cells |
+
+Write the claim first, then the body, then the commit marker. All-0xFF body
+flash words carry no data and remain virgin; never program them merely as padding. Only a complete
+valid commit marker supplies the type when reconstructing the logical record.
+The service still sees the same 64-byte format and CRC convention; physical
+markers are backend bookkeeping. A nonvirgin or ECC-damaged claim/body/commit
+consumes the slot even when no valid record can be reconstructed. Unexpected
+contents must never cause the emulator to erase itself.
+
+Successful locking appends one valid lock marker tied to that block. Torn lock
+cells are consumed and a retry uses the next virgin lock cell, without changing
+the logical record or consuming another logical block. Any valid lock marker
+makes the block permanently locked. Exhausting the ten lock-attempt cells returns
+io_error with lock-phase diagnostics; do not rewrite a physical flash word or
+erase the sector to recover. This bound is an emulator implementation limit,
+not a limit imposed on the Store API or a hardware OTP lock operation.
+
+Wrap the injected flash driver and poll only operations the emulator itself
+started. Reject busy hardware before claiming a slot; never poll or clear another
+owner's completion. Keep all waits bounded and leave interrupts enabled. The
+emulator must coordinate with OTA/boot flash operations and use the existing
+ICACHE invalidation/readback discipline. Do not feed the watchdog directly from
+OTP code. The implementation bounds each flash-word wait to 100 ms and also
+has a finite polling budget for a stalled clock. A timeout retains the write
+buffer and makes that emulator instance unavailable until reset. Factory
+main-flash mass erase is the only normal reset of this backend.
+
+### H563 hardware adapter and ECC integration
+
+Real-DUT policy: this board may already be provisioned. Scan read-only and report
+existing blocks and locks before proposing any new record. Preserve unfamiliar
+records. After the initial explicitly approved write/lock validation, all
+automated real-OTP tests are read-only. Further real writes require explicit user
+instruction. Repeated writes/failure injection remain on FileOtp/FlashOtp. The
+HIL runner rejects builds with `otp_programming=true`.
+
+On the qualified H563, ADDR_ECC identifies OTP 32-bit address groups as
+`0x600 + (address - 0x08FFF000) / 4`; actual loads remain 16-bit. NMI delivery can
+lag the load by several cycles. Keep the borrowed read context through ECC
+status synchronization and acknowledgement, then remove it before returning.
+Tests pin the region/bank/address matching and check both halfwords of every
+OTP address group without broadening recovery to unrelated NMI sources.
+
+
+Use the existing Nucleo MPU mapping (region 0, 0x08FFF000..0x08FFFFFF,
+non-cacheable, execute-never) as the starting point. It is currently read-only.
+The board owns the mapping: the driver must request a scoped programming access
+change and restore permissions on every exit rather than resetting unrelated MPU
+regions or globally disabling the MPU for a whole scan/write. Preserve access
+to engineering/calibration bytes. Barriers accompany permission changes.
+
+Read OTP through volatile 16-bit accesses only. Program length first, then every
+remaining halfword other than type, and type last. Never program an OTP halfword
+twice; 0xFFFF data still has programmed ECC state and must not be mistaken for
+virgin storage. A locked blank block is consumed. A block with any programmed or
+uncertain halfword is consumed. In the running process, retain consumption after
+an attempted write even if subsequent readback fails.
+
+Centralize recovery of flash ECC NMIs. During an explicit read, publish a narrow
+borrowed read context identifying main flash versus OTP and the address/unit
+being read; remove it before returning. Inspect ECCDETR's ECCD, OTP/region and
+address information and capture ECCDR before acknowledging the event. The OTP
+path uses the documented unwritten-halfword indication to classify virgin reads;
+other recoverable errors become block read failures. The proposed virgin test
+requires a matching OTP read, ECCD and the full 16-bit all-ones failing datum;
+all halfwords in an unlocked block must qualify as virgin. A halfword read
+successfully without that indication is programmed even when its value is
+0xFFFF. Confirm this classification against the target before enabling real OTP
+writes; the public service consumes ambiguous blocks. Do not copy the reference's
+broad ECCDR low-byte truth test as a blanket exception suppressor. An NMI outside
+the matching guarded read retains the existing fault capture/reset behavior.
+Clear relevant stale ECC flags before the next read, preserve diagnostics, and
+avoid logging or dereferencing the failing location from NMI context.
+
+Peripherals cannot supply a historical record of a write attempt that leaves no
+observable change. Do not claim that an all-ones data read alone proves a block
+was never touched: classification must include ECC and lock evidence. Real-hardware
+qualification must establish the supported interrupted-programming behavior;
+ambiguous/damaged cells are never reused. Host failure injection does not replace
+this qualification, and physical power-interruption testing remains deferred.
+
+For locks, first finish and verify data programming, then update only the selected
+OTP lock bit while preserving existing locks and unrelated option bytes. The
+pinned HAL programs OTPBLR_PRG and applies options using OPTSTART; it reads locks
+from OTPBLR_CUR. Verify the effective lock there before reporting success, and
+restore flash/option-register locking on every exit. A PRG-register write alone
+is insufficient. Do not add an implicit MCU reset to the setter. If hardware
+requires a reset to make the lock effective, bring that constraint back for a
+behavior decision instead of silently changing the synchronous contract.
+
+The existing flash adapters and the new OTP adapter need shared controller
+ownership for program/erase/option updates, including pending asynchronous OTA
+operations. A separate driver object is not proof that the peripheral is free.
+Busy rejection must not alter another owner's flags, permissions or lock state.
+Test contention both while OTA writes B from A and writes A from B.
+
+### Command adaptation and composition
+
+Keep the command dispatcher unchanged. Register otp serial as a raw-arguments
+command adapter, with a normal typed no-argument otp status command. Serial
+accepts exactly zero arguments (read) or three arguments (literal set, value,
+confirmation). Validate this grammar and exact string equality before calling
+Store::set_serial. All strings come from the existing dispatcher tokenizer;
+there is no second splitting/quoting implementation. Do not accept a single-value
+shortcut. Help explicitly prints both forms and the confirmation requirement.
+
+The adapter is the only raw command boundary; service accessors/setters remain
+typed. Include quoted spaces, escaped quotes, and maximum-length serial numbers
+in command tests. Two maximally escaped 56-byte serials fit in the default
+256-byte line buffer and the command uses five tokens, within the default eight.
+Keep logging/command availability orthogonal to the Store and backend.
+
+Use Meson composition files to select none, host file, H563 flash emulator or
+H563 hardware backend; never silently fall back between them. Demo H563 testing
+selects the emulator explicitly. Real OTP programming is a separate deliberate
+qualification step, after host and emulator coverage. H755 OTP is outside this
+initial adapter implementation. File paths and injected objects outlive their
+borrowers and remain valid for file-scope construction.
+
+### Implementation and validation sequence
+
+1. Add record encoding, Store, injected driver, diagnostics and unit tests.
+   Cover empty storage, all slot boundaries, unknown/invalid/repeated records,
+   read-only scans, unlocked valid records, full storage, exact deduplication,
+   string validation, cache/view behavior, and all error paths.
+2. Add FileOtp and reopen-based fault tests. Interrupt each halfword/commit/lock
+   boundary; verify previous-value recovery or a valid unlocked new value,
+   consumed slots, no data reprogramming, and lock-only retry. Test genuine ECC
+   failure separately from expected virgin reads and fatal backend failures.
+3. Add the module/commands and Meson composition. Test stage1 independence,
+   stage2 consumers, count/confirmation errors, exact whitespace/case behavior,
+   serial/status output, and logging-disabled operation.
+4. Add the flash emulator and exercise it against FileFlash first. Test every
+   claim/body/commit/lock boundary, physical write-once rules, retry exhaustion,
+   layout overlap checks, resets/reopens, no erase-on-full and controller busy.
+5. Add H563 HIL cases starting from the factory image: serial read/set/duplicate/
+   mismatch, reset retention, A/B OTA retention, exhaustion, lock retries via
+   test injection, and factory clearing. Verify adjacent placeholder bytes,
+   metadata and both application slots are untouched by OTP operations. Preserve
+   existing console, boot, OTA and watchdog coverage.
+6. Integrate the real H563 backend with guarded ECC/MPU/controller handling.
+   Exercise classification and register-operation seams in host tests, then
+   validate non-programming hardware access before any deliberate OTP write.
+   Real fuse/lock qualification and physical power-cut evidence remain distinct
+   from emulator success; do not claim them from a passing file/flash suite.
+
+No new tick-driven state machine is needed for these synchronous operations.
+If implementation introduces one, use core::StateMachine and the AGENTS.md
+single-transition structure. Keep named constants for geometry, formats and
+operation timeouts at the top of their relevant files. Run the full supported
+host/fake/sanitizer, ARM, formatting/lint and selected HIL checks before pushing.
