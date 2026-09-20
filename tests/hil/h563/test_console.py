@@ -1,3 +1,4 @@
+from pathlib import Path
 import pytest
 
 pytestmark = pytest.mark.hil
@@ -30,3 +31,20 @@ def test_reset_and_usb_reconnect(board):
     board.ready()
     usb = board.connect('usb')
     board.query(usb, 'health status', 'Watchdog running')
+
+
+def test_version_identity(board):
+    import json
+    import re
+
+    version = json.loads((Path(board.config['build']) / 'util/version.json').read_text())
+    build = 'local' if version['build'] == 0xffffffff else str(version['build'])
+    expected = f"Application {version['major']}.{version['minor']}.{build}; Git {version['commit']}"
+    if version['dirty']:
+        expected += ' dirty'
+    board.query(board.uart, 'board version', re.escape(expected))
+    boot = json.loads((Path(board.config['build']) / 'util/boot_version.json').read_text())
+    transcript = (board.output / 'uart-1.log').read_text(errors='replace')
+    assert f"DaveOS bootloader {boot['major']}.{boot['minor']}" in transcript
+    build = 'local' if boot['build'] == 0xffffffff else str(boot['build'])
+    assert f"Build {build}; Git {boot['commit']}" in transcript

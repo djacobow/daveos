@@ -4,6 +4,7 @@
 
 #include "board_config.h"
 #include "core/schedule/module.hpp"
+#include "util/version_stamp.h"
 
 namespace daveos::platform::stm32 {
   namespace core = daveos::core;
@@ -27,6 +28,8 @@ namespace daveos::platform::stm32 {
           DAVEOS_COMMAND(Board, Led, "led", "Set LED on/off or toggle",
                          core::arg("led").range(1u, 3u), core::arg("action")),
           DAVEOS_COMMAND(Board, Button, "button", "Read button level"),
+          DAVEOS_COMMAND(Board, Version, "version",
+                         "Show application build identity"),
           DAVEOS_COMMAND(Board, Stats, "stats", "Log scheduler statistics"),
           DAVEOS_COMMAND(Board, Timer, "timer", "Start a timer",
                          core::arg("microseconds").min(1u)),
@@ -41,6 +44,19 @@ namespace daveos::platform::stm32 {
     }
 
    private:
+    core::Status Version() {
+      const auto& version = daveos::build::kApplicationVersion;
+      if (version.build == daveos::util::Version::kLocal) {
+        I_("Application %" PRIu32 ".%" PRIu32 ".local; Git %s%s", version.major,
+           version.minor, version.commit, version.dirty ? " dirty" : "");
+      } else {
+        I_("Application %" PRIu32 ".%" PRIu32 ".%" PRIu32 "; Git %s%s",
+           version.major, version.minor, version.build, version.commit,
+           version.dirty ? " dirty" : "");
+      }
+      return core::Status::ok;
+    }
+
     core::Status Timer(std::uint32_t delay) {
       return this->template timer<&Board::TimerFired>(delay);
     }

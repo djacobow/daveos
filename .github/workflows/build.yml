@@ -34,7 +34,7 @@ jobs:
           build/ci-tools/cppcheck/bin/cppcheck --version
           echo "$PWD/build/ci-tools/cppcheck/bin" >> "$GITHUB_PATH"
       - run: git submodule update --init net/lwip
-      - run: meson setup build/host --native-file meson/clang.ini -Db_sanitize=${{ matrix.sanitizer }} -Db_lundef=false -Dnetworking=true
+      - run: meson setup build/host --native-file meson/clang.ini -Db_sanitize=${{ matrix.sanitizer }} -Db_lundef=false -Dnetworking=true -Dversion_build="$GITHUB_RUN_NUMBER"
       - run: meson compile -C build/host -j 2
       - run: meson test -C build/host --print-errorlogs
       - if: matrix.sanitizer == 'none'
@@ -64,12 +64,12 @@ jobs:
       - run: |
           git submodule update --init platform/stm32h5/STM32CubeH5 platform/stm32/STM32_USB_Device_Library
           git -C platform/stm32h5/STM32CubeH5 submodule update --init --recursive Drivers/CMSIS/Device/ST/STM32H5xx Drivers/STM32H5xx_HAL_Driver
-      - run: meson setup build/arm --cross-file meson/stm32.ini -Dexamples=true
+      - run: meson setup build/arm --cross-file meson/stm32.ini -Dexamples=true -Dversion_build="$GITHUB_RUN_NUMBER"
       - run: meson compile -C build/arm
       - run: |
           git submodule update --init platform/stm32h7/STM32CubeH7
           git -C platform/stm32h7/STM32CubeH7 submodule update --init --recursive Drivers/CMSIS/Device/ST/STM32H7xx Drivers/STM32H7xx_HAL_Driver
-      - run: meson setup build/h755 --cross-file meson/stm32.ini -Dboard=h755 -Dexamples=true
+      - run: meson setup build/h755 --cross-file meson/stm32.ini -Dboard=h755 -Dexamples=true -Dversion_build="$GITHUB_RUN_NUMBER"
       - run: meson compile -C build/h755
       - name: Switch boards without replacing the cross file
         run: |
@@ -99,6 +99,11 @@ jobs:
             meson configure build/$target -Duart_console=false -Dusb_console=false
             meson compile -C build/$target
           done
+      - name: Build A/B bootloader and verify CI version propagation
+        run: |
+          meson setup build/boot --cross-file meson/stm32.ini -Dexamples=true -Dbootloader=true -Dnetworking=true -Dversion_build="$GITHUB_RUN_NUMBER"
+          meson compile -C build/boot -j 2
+          python tools/verify_version.py --build build/boot --number "$GITHUB_RUN_NUMBER"
       - name: Build standalone device starters
         run: |
           python -B -m pytest tests/starter/test_starter.py --starter-board h563 --starter-work "$PWD/build/device-starters"

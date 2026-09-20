@@ -15,6 +15,7 @@ def u32(text):
 
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument("--component", choices=("application", "bootloader"), default="application")
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--major", type=u32, required=True)
     parser.add_argument("--minor", type=u32, required=True)
@@ -33,7 +34,7 @@ def main():
         commit, dirty = "unknown", False
     content = ("#pragma once\n\n#include \"util/version.h\"\n\n"
                "namespace daveos::build {\n"
-               "inline constexpr util::Version kApplicationVersion{"
+               f"inline constexpr util::Version k{args.component.title()}Version{{"
                f"{args.major}u, {args.minor}u, {args.build}u, "
                f"{json.dumps(commit)}, {'true' if dirty else 'false'}"
                "};\n}\n")

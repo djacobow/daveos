@@ -59,7 +59,7 @@ uv pip install --python build/hil-venv/bin/python --reinstall-package watcher \
   -r requirements-hil.txt
 
 meson setup build/boot-h563 --cross-file meson/stm32.ini \
-  -Dbootloader=true -Dnetworking=true -Dusb_console=true -Dtcp_console=true
+  -Dexamples=true -Dbootloader=true -Dnetworking=true -Dusb_console=true -Dtcp_console=true
 cp tests/hil/h563.toml.example build/hil.toml
 ```
 
@@ -102,12 +102,13 @@ checks only; HIL requires explicit selection and the physical board.
 
 | Tests | Checks |
 | --- | --- |
-| Console | UART/USB/TCP commands and timers, software reset, USB reconnect |
+| Console | UART/USB/TCP commands and timers, software reset, USB reconnect, application/bootloader version identity |
 | Network | 1,400-byte ping and repeated TCP reconnect |
 | UART | Two stress cycles: bursts, maximum-length lines, recovery, TX counters |
-| Faults | Individual UsageFault, BusFault, MemManage and HardFault frame/CRC/status checks and reset recovery |
-| Watchdog | Latched task-progress failure; startup-hang capture and rollback of unconfirmed B |
-| OTA | Disabled listener, corrupt chunk, disconnect abort, A-to-B-to-A updates and automatic confirmation while TCP timers remain responsive |
+| Faults | UsageFault, BusFault, MemManage and HardFault frame/CRC/status; valid PSP, stack-limit overflow, inaccessible PSP; reset with core debugging disabled |
+| Watchdog | Latched task-progress failure; startup-hang capture and rollback of unconfirmed B; interrupt-masked hang resets without a new frame |
+| OTA | Disabled listener, corrupt chunk, disconnect/timeout/disable/reset/link-loss interruption, restart from zero, pending-image replacement, A-to-B-to-A updates with concurrent timers |
+| Boot metadata | Journal rollover and sector reclamation; both eligible images failing CRC, reset loop and factory recovery |
 
 Watcher manages asynchronous text streams and their cleanup. Binary OTA keeps
 its protocol client; byte-level UART stress uses a helper under `tests/hil/h563/`
@@ -120,5 +121,28 @@ Artifacts live under `build/hil/`: a build log, configuration and SHA-256 artifa
 manifest, per-test raw transport transcripts, OpenOCD/GDB logs, retained records,
 and the requested JUnit report. Fixed artifact paths describe the latest run;
 archive that directory before another run if its evidence needs preserving.
-Physical cable-unplug tests, LED appearance and button presses are not automated
-by this suite. H755 hardware testing remains deferred.
+The unattended fault test disables core debugging while leaving ST-LINK physically
+connected. Link-loss injection powers down the Ethernet PHY through its management
+register; it does not unplug the cable. Physical power interruption remains
+deferred; reset tests do not substitute for power-cut qualification. Cable-unplug
+tests, LED appearance and button presses are not automated by this suite. H755
+hardware testing remains deferred.
+
+## Version identity checks
+
+Application major/minor come from the top-level Meson project version. Bootloader
+major/minor use `boot_version_major` and `boot_version_minor`. Both stamps include
+the Git commit, dirty flag, and `version_build`; its local default is `4294967295`,
+displayed as `local`. `board version` prints application identity, and the
+bootloader prints its identity on UART before selecting an image.
+
+CI passes `GITHUB_RUN_NUMBER` as `-Dversion_build` and checks the generated
+application and bootloader JSON stamps against the OTA header:
+
+```sh
+python tools/verify_version.py --build build/boot --number "$GITHUB_RUN_NUMBER"
+```
+
+Portable `version-tool` tests exercise clean/dirty Git state, local/CI build
+numbers, invalid values and artifact mismatches. A separate build can override
+bootloader major/minor to verify they remain independent of application versions.

@@ -8,6 +8,7 @@
 #include "support.hpp"
 #include "update/engine.h"
 #include "update/module.hpp"
+#include "util/boot_version_stamp.h"
 #include "util/crc32.h"
 #include "util/fault.h"
 #include "util/version_stamp.h"
@@ -105,6 +106,12 @@ TEST_CASE("CRC ISR fallback never calls a shared peripheral") {
 
 TEST_CASE("Version stamp carries reproducible diagnostic fields") {
   REQUIRE(daveos::build::kApplicationVersion.major == 0);
+  REQUIRE(daveos::build::kApplicationVersion.build == TEST_VERSION_BUILD);
+  REQUIRE(daveos::build::kBootloaderVersion.build == TEST_VERSION_BUILD);
+  REQUIRE(daveos::build::kBootloaderVersion.major == TEST_BOOT_MAJOR);
+  REQUIRE(daveos::build::kBootloaderVersion.minor == TEST_BOOT_MINOR);
+  REQUIRE(std::string_view(daveos::build::kApplicationVersion.commit) ==
+          daveos::build::kBootloaderVersion.commit);
   REQUIRE(std::strlen(daveos::build::kApplicationVersion.commit) > 0);
 }
 
@@ -607,4 +614,57 @@ TEST_CASE(
     REQUIRE(confirmation.tick(20000000, true) == core::Status::io_error);
     REQUIRE(result.calls == 1);
   }
+}
+
+TEST_CASE(
+    "OTA cancellation at every flash phase leaves no bootable candidate") {
+  using State = update::Engine::State;
+  const auto phase =
+      GENERATE(State::invalidating, State::receiving, State::writing,
+               State::verifying, State::committing);
+  const auto disable = GENERATE(false, true);
+  const auto package = ReadFile(REFERENCE_PACKAGE);
+  reliability::MemoryFlash memory;
+  boot::Snapshot initial;
+  initial.counter = 1;
+  initial.images[0] = {1, 16, 0, boot::ImageState::confirmed, 1, 1};
+  boot::Journal journal(memory.driver(), memory.layout());
+  REQUIRE(journal.commit(initial, 1000000, true) == core::Status::ok);
+  update::Engine engine(memory.driver(), memory.layout(), 0);
+  engine.enable(true);
+  REQUIRE(engine.begin(std::span(package).first(128)) == core::Status::ok);
+  bool injected = false;
+  for (std::uint32_t i = 0; i < 20000 && engine.active(); ++i) {
+    if (!injected && engine.state() == phase) {
+      // Hit outstanding erase/program writes, including the commit marker.
+      if ((phase == State::writing && !memory.pending) ||
+          (phase == State::committing &&
+           (!memory.pending || memory.pending->erase ||
+            memory.pending->address % 256 != 240))) {
+        engine.tick();
+        continue;
+      }
+      if (disable) {
+        engine.enable(false);
+      } else {
+        engine.abort();
+      }
+      injected = true;
+    }
+    engine.tick();
+    if (!injected && engine.ready()) {
+      auto data = std::span(package).subspan(128 + engine.next_offset());
+      REQUIRE(engine.chunk(engine.next_offset(), data, crc::calculate(data)) ==
+              core::Status::ok);
+    }
+  }
+  REQUIRE(injected);
+  REQUIRE_FALSE(engine.active());
+  REQUIRE_FALSE(memory.pending);
+  REQUIRE(journal.load(initial) == core::Status::ok);
+  REQUIRE(initial.images[0].state == boot::ImageState::confirmed);
+  REQUIRE(initial.images[1].state == boot::ImageState::incomplete);
+  engine.enable(true);
+  REQUIRE(engine.begin(std::span(package).first(128)) == core::Status::ok);
+  REQUIRE(engine.next_offset() == 0);
 }

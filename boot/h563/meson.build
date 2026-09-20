@@ -1,10 +1,8 @@
 boot_sources = files('main.cpp', '../../platform/stm32h5/fault_handlers.S',
   '../../platform/stm32/nucleo/h563/startup_stm32h563xx.s',
   '../../platform/stm32/nucleo/h563/Core/Src/system_stm32h5xx.c')
-boot_dependencies = [boot_dep, stm32h5_dep, stm32h5_cmsis_dep]
-boot_compile_args = ['-fno-rtti', '-fno-freestanding', '-D_GLIBCXX_NO_ASSERTIONS',
-  '-DBOOT_VERSION_MAJOR=' + get_option('boot_version_major').to_string(),
-  '-DBOOT_VERSION_MINOR=' + get_option('boot_version_minor').to_string()]
+boot_dependencies = [boot_dep, stm32h5_dep, stm32h5_cmsis_dep, boot_version_dep]
+boot_compile_args = ['-fno-rtti', '-fno-freestanding', '-D_GLIBCXX_NO_ASSERTIONS']
 boot_link_args = cpu_flags + ['--specs=nosys.specs', '--specs=nano.specs', '-Wl,--gc-sections', '-Wl,--print-memory-usage']
 subdir('probe')
 boot_layout_tool = files('../../tools/boot_layout.py')

@@ -111,7 +111,50 @@ class Board:
     def close(self):
         self.group.close()
 
-    def fault_experiment(self, script, slot='A'):
+    def stub(self, name, assembly):
+        """Assemble a RAM-only test injection and return its binary and labels."""
+        source = self.output / f'{name}.s'
+        obj = self.output / f'{name}.o'
+        binary = self.output / f'{name}.bin'
+        prefix = str(Path(self.config['gdb']).resolve()).removesuffix('gdb')
+        source.write_text('.syntax unified\n.cpu cortex-m33\n.thumb\n.text\n' + assembly + '\n')
+        self.run(name + '-as', [prefix + 'as', '-mcpu=cortex-m33', '-mthumb', str(source), '-o', str(obj)])
+        self.run(name + '-objcopy', [prefix + 'objcopy', '-O', 'binary', str(obj), str(binary)])
+        symbols = subprocess.check_output([prefix + 'nm', '-n', '--defined-only', str(obj)], text=True)
+        labels = {line.split()[2]: 0x20000400 + int(line.split()[0], 16)
+                  for line in symbols.splitlines() if len(line.split()) == 3}
+        return binary, labels
+
+    def prepare_execution(self, script, slot='A'):
+        """Arrange an injected fault/hang, then detach and leave it running."""
+        commands = self.output / 'prepare.gdb'
+        commands.write_text(f'''set pagination off
+set confirm off
+target remote :{self.config.get('gdb_port', 3333)}
+hbreak app::Health::Heartbeat
+continue
+delete breakpoints
+{script}
+detach
+quit
+''')
+        elf = 'stm32-console.elf' if slot == 'A' else 'stm32-console-b.elf'
+        self.run('prepare', [self.config['gdb'], '-q', '-batch', str(self.firmware / elf), '-x', str(commands)])
+        self.control('resume')
+
+    def phy_power(self, enabled):
+        """Change the PHY BCR power-down bit through the real MDIO driver."""
+        operation = '& ~0x0800' if enabled else '| 0x0800'
+        self.prepare_execution(f'''set $result = HAL_ETH_ReadPHYRegister(&'(anonymous namespace)::eth', '(anonymous namespace)::phy'.DevAddr, 0, (unsigned int*)0x20000440)
+if $result != 0
+ quit 1
+end
+set $result = HAL_ETH_WritePHYRegister(&'(anonymous namespace)::eth', '(anonymous namespace)::phy'.DevAddr, 0, (*(unsigned int*)0x20000440) {operation})
+if $result != 0
+ quit 1
+end''')
+
+    def fault_experiment(self, script, slot='A', frame_valid=True):
         import binascii
         import struct
         record = self.output / 'retained.bin'
@@ -131,7 +174,7 @@ quit
         elf = 'stm32-console.elf' if slot == 'A' else 'stm32-console-b.elf'
         self.run('gdb', [self.config['gdb'], '-q', '-batch', str(self.firmware / elf), '-x', str(commands)], 30)
         data = record.read_bytes()
-        assert len(data) == 256 and data[70]
+        assert len(data) == 256 and bool(data[70]) == frame_valid
         assert struct.unpack_from('<3I', data) == (0x46534f44, 1, 256)
         assert binascii.crc32(data[:252]) == struct.unpack_from('<I', data, 252)[0]
         self.control('resume')

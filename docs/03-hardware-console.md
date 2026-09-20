@@ -26,7 +26,7 @@ lwIP service. These headers/components have separate dependencies so unused
 transports stay out of the build.
 
 The library's `stm32::Board<Event>` provides `board led`, `board button`,
-`board stats`, `board timer`, and `board reset`. Board commands use the configured
+`board stats`, `board timer`, `board version`, and `board reset`. Board commands use the configured
 board's hardware functions; the scheduler itself knows nothing about LEDs or
 console transports.
 

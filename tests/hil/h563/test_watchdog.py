@@ -39,3 +39,10 @@ jump *Default_Handler''', slot='B')
     board.uart.watch_for(r'Boot slot B \(trial\)', timeout=5)
     board.ready()
     board.query(board.uart, 'health fault', 'iwdg_early_warning')
+
+
+def test_interrupt_masked_hang_resets_without_frame(board):
+    board.uart.drain()
+    board.prepare_execution('set $primask = 1\nset $pc = Default_Handler')
+    board.ready()
+    board.query(board.uart, 'health fault', 'No retained failure')

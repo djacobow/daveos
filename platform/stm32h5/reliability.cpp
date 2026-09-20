@@ -304,8 +304,9 @@ extern "C" void DaveOS_FaultCapture(const std::uint32_t* frame,
   // The basic registers are first; extended floating-point state follows them.
   // Stacking errors make even an in-RAM frame unreliable.
   auto address = reinterpret_cast<std::uintptr_t>(frame);
-  constexpr std::uint32_t kStackErrors =
-      (1u << 3) | (1u << 4) | (1u << 5) | (1u << 11) | (1u << 12) | (1u << 13);
+  constexpr std::uint32_t kStackErrors = (1u << 3) | (1u << 4) | (1u << 5) |
+                                         (1u << 11) | (1u << 12) | (1u << 13) |
+                                         SCB_CFSR_STKOF_Msk;
   if (!(data.cfsr & kStackErrors) && address >= 0x20000800 &&
       address <= 0x200a0000 - 32 && !(address & 3)) {
     const auto* source =

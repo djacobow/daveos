@@ -14,23 +14,25 @@
 - [x] FileFlash for host/fake simulations: raw persistent files, erase/program rules, injected clock, close/reopen tests. Does not model hardware latency or STM32 ECC.
 - [x] Watchdog controller, injected IWDG driver, scheduler-progress snapshots, and retained-fault record foundations; integration work follows below.
 
-### Next: startup and runtime health
+### Startup and runtime health
 
 - [x] Start H563 IWDG before clock/peripheral/module initialization; reset on explicit init failure and let startup hangs expire.
 - [x] Feed only after heartbeat and every active repeating task's progress checks; latch failures and preserve their diagnostics across reset.
 - [x] Automatically confirm a trial after five seconds of healthy scheduling; USB/Ethernet/DHCP availability must not gate confirmation.
 - [x] Validate H563 debugger freeze, latched task-rate failure, an interrupt-enabled runtime hang, early-warning exception-frame/CRC capture, natural watchdog reset, retained reporting, and automatic trial confirmation.
 - [x] Stall H563 trial B in SystemClock_Config before clock setup: verify IWDG early-warning frame/CRC, natural reset, rejection of unconfirmed B, and healthy confirmed-A fallback.
-- [ ] Add dedicated interrupt-masked-hang assertions (reset without a new frame), invalid-stack/PSP fault cases, and fault recovery without an attached debugger.
+- [x] Add H563 interrupt-masked-hang assertions (reset without a new frame), valid PSP, inaccessible PSP, stack-limit faults, and fault recovery with core debugging disabled. ST-LINK stays physically connected. Fix frame validation to reject CFSR.STKOF; hardware verifies invalid frames are not copied.
 - [x] Report retained watchdog/init failures on startup and provide health status/fault/clear commands.
 - [x] Integrate H563 application HardFault/BusFault/MemManage/UsageFault handlers with retained capture; trigger all four CPU faults on hardware and verify type/status bits, frame PC, CRC, reset and next-boot reporting. Add tests/hil/h563/test_faults.py for repeatable injection. ASan 24/24, format/lint, H563 boot/standalone/starter builds pass.
 - [x] IWDG validation: ASan 24/24, fake 18/18, formatting/lint, H563 boot/standalone and H755 builds; OTA with the watchdog active and automatic confirmation on H563. H755 hardware remains deferred.
 
 ### Remaining qualification and follow-ups
 
-- [ ] Complete independent bootloader version stamping (CI build, Git commit/dirty), expose application identity, and verify CI version propagation.
-- [ ] Exercise hardware journal rollover, both-images-invalid recovery, physical power interruption, and comprehensive OTA timeout/link-loss/disable/replacement cases.
-- [ ] Run the full host/fake/sanitizer matrix, format/lint, and H563/H755/starter builds before pushing. H755 bootloader integration and hardware testing remain deferred.
+- [x] Generate independent bootloader/application stamps, print boot identity and expose board version. Local CI-equivalent host/ARM builds verified build 12345 and independent boot version 7.9; GitHub workflow now checks both stamps and the OTA package.
+- [ ] Verify the new version-propagation job on GitHub after the next push.
+- [x] H563 journal rollover/reclamation, both-images-invalid reset loop/factory recovery, and OTA timeout/disable/reset/PHY-link-loss/replacement tests. All 26 HIL cases passed across the main run and focused completion runs after fixing a GDB file-local-symbol lookup in the PHY test helper. Includes 1,160 UART burst replies without drops/errors, bidirectional OTA with concurrent timers, and startup trial rollback. Host tests also cover abort/disable during every flash phase, including an outstanding journal commit-marker write.
+- [ ] Deferred by user: physical power-interruption qualification. Reset injection and host flash models do not replace power-cut tests.
+- [x] Qualification matrix: host 26/26, ASan/UBSan 26/26, fake 20/20, logging-disabled 27/27, TSan 25/25, formatting/lint, H563/H755 firmware and both standalone starters pass. H755 bootloader integration and hardware testing remain deferred.
 - [ ] Add an OTP driver for serial numbers and optional device keys; design provisioning/locking separately.
 - [x] Add the CRTP state-machine helper with deferred hooks, dwell/per-state statistics, read-only snapshots, and unit tests; convert the OTA Engine using a private nested machine.
 - [x] Convert the journal, OTA writer/package reader/protocol, watchdog controller/confirmation, host FileFlash, and scheduler lifecycle to the shared state-machine helper. Keep state enums and implementation classes nested; derived status snapshots and persistent image metadata remain data. Validation: host 25/25, ASan/UBSan 25/25, fake 19/19, logging-disabled 26/26, TSan 24/24; H563/H755 ARM builds, format/lint, and H563 HIL 13/13 passed. Bootloader is 18,224 bytes of its 32 KiB reservation. H755 hardware remains deferred.
@@ -110,14 +112,14 @@
 - [x] Add a standalone H563/H755 device starter and CI consumer-build/programming-plan checks.
 - [x] Organize the documentation into hello, logging/commands, hardware console, and custom-component levels.
 - [x] Validate the reusable console on H563 over UART/USB/TCP, including Ethernet ping and reset recovery; validate the standalone device starter's periodic worker, commands, and reset over UART. H755 has build/programming-plan coverage only for these changes.
-- [ ] create DaveOS::Util space
-- [ ] add crc32 driver to DaveOS::Util, perhaps allow for DI allow a hardware implementation if one is available as in most stm32 chips
+- [x] Add daveos::util for CRC, version identity, and retained-fault records.
+- [x] Add software CRC32 with injected hardware support and H563 hardware CRC implementation.
 - [ ] create a hal layer that allows us to abstract away SPI and I2C devices independent of vendor HAL, using DI to be part of "platform". hal layer should support interrupt based api and a polling based api, but not a blocking api
 
 ## For STM32
 
-- [ ] Implement flash layout that support an A/B bootloader
-- [ ] Implement simple bootloader that chooses latest valid image and starts it
-- [ ] Implement a module that can perform an OTA to the opposite flash A/B bank. We'll want a protocol that crc's chunks as they come, as well as finally checking the whole image. The actual writing to flash should be via routines that come from the platform. Details about an image size, flash boundaries etc, should come from knowledge TBD
+- [x] Implement H563 A/B flash layout; see bootloader and reliability above.
+- [x] Implement H563 bootloader selection by installation order and CRC-valid eligibility.
+- [x] Implement cooperative inactive-slot OTA with chunk/final CRC, injected flash driver, and explicit flash layout.
 - [ ] Implement a FAT filesystem reader/writer module using FATFS (as a git submodule), again with DI of the SPI bus via the hal layer mentioned above
 - [ ] Implememnt a display driver module for ssd1306 devices using DI of the I2C via the layer above

@@ -181,7 +181,7 @@ Separate build directories are convenient, but `meson configure build/arm
 vendor submodules first).
 Both boards run the same console commands: `help`,
 `board led <1|2|3> <on|off|toggle>`, `board button`, `board stats`,
-`board timer <microseconds>`, and `board reset`.
+`board timer <microseconds>`, `board version`, and `board reset`.
 LEDs are PB0/PF4/PG4 and the button is PC13. USART3 uses PD8 TX / PD9 RX at
 1,000,000 baud, 8N1, no flow control; disable terminal local echo.
 
@@ -589,6 +589,9 @@ unsigned decimal delay. Its interrupt-time callback queues a `Timer fired` log;
 normal idle-time logging delivers it to the console outputs. Issuing the command
 again replaces the pending timer. Invalid, zero, or overflowing arguments are
 rejected. This command is shared by the H755 and H563 board consoles.
+
+`board version` prints the application major/minor/build, Git commit and dirty
+flag. Local build numbers appear as `local`; see [version identity checks](testing.md#version-identity-checks).
 
 `board reset` takes no arguments and immediately resets the MCU (both cores),
 discarding pending logs/output. The board module calls `platform.reset()` directly;

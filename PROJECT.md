@@ -1342,7 +1342,11 @@ Application and bootloader have independent version stamps containing uint32_t
 major/minor/build, Git commit ID, and dirty-tree flag. Major/minor are defined in
 the application's top-level meson.build. CI supplies build through a Meson
 option; local builds use reserved UINT32_MAX and display `local`. Omit timestamps
-by default for reproducibility. Images carry an application-defined product ID
+by default for reproducibility. Bootloader major/minor use the boot_version_major
+and boot_version_minor options; version_build applies to both components. The
+board version command prints application identity; the bootloader prints its own
+identity on UART. CI checks generated stamps and the packaged OTA identity against
+its build number. Images carry an application-defined product ID
 and flash-layout revision; updater and bootloader reject mismatches. Use a
 versioned image format with space for future signing; v1 integrity uses CRC only.
 
@@ -1441,7 +1445,10 @@ the record; the bootloader preserves it. Reset retention is supported; power-los
 retention is not promised.
 
 Capture HardFault, MemManage, BusFault, and UsageFault frames/status registers.
-Validate frame accessibility and avoid logging from fault context. Record first,
+Validate frame accessibility and avoid logging from fault context. Reject frames
+when exception stacking or a hardware stack-limit check failed, even when the
+reported stack pointer is inside RAM. Preserve fault status without copying an
+invalid frame. Record first,
 then break if debugger control is enabled; otherwise reset. Resuming that
 breakpoint proceeds to reset. Watchdog failures use the same retained record.
 H563 Nucleo board support supplies the assembly handlers and enables configurable
@@ -1532,5 +1539,9 @@ OTA binary protocol and byte-level UART stress retain appropriate direct I/O.
 
 Cover all three console transports, reset/reconnect, Ethernet ping, UART bursts,
 CPU fault frames, watchdog failures, startup trial rollback, and bidirectional
-OTA with concurrent command traffic. Watcher fixes belong upstream with tests;
+OTA with concurrent command traffic. Also cover PSP and invalid-stack capture,
+interrupt-masked watchdog reset, faults with core debugging disabled, journal
+rollover, both-images-invalid recovery, and OTA timeout/disable/reset/link-loss
+interruption and replacement. PHY power-down and CPU reset tests do not replace
+physical cable-unplug or power-interruption qualification. Watcher fixes belong upstream with tests;
 update the pinned published commit after validation.

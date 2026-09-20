@@ -8,6 +8,7 @@
 #include "platform/stm32h5/crc32.h"
 #include "platform/stm32h5/reliability.h"
 #include "stm32h563xx.h"
+#include "util/boot_version_stamp.h"
 
 namespace {
   namespace core = daveos::core;
@@ -137,10 +138,17 @@ extern "C" void NMI_Handler() {
 
 extern "C" int main() {
   Initialize();
-  const daveos::util::Version version{BOOT_VERSION_MAJOR, BOOT_VERSION_MINOR};
+  const auto& version = daveos::build::kBootloaderVersion;
   h5::set_fault_identity(version, 0);
   Log(core::Level::info, "DaveOS bootloader %" PRIu32 ".%" PRIu32,
       version.major, version.minor);
+  if (version.build == daveos::util::Version::kLocal) {
+    Log(core::Level::info, "Build local; Git %s%s", version.commit,
+        version.dirty ? " dirty" : "");
+  } else {
+    Log(core::Level::info, "Build %" PRIu32 "; Git %s%s", version.build,
+        version.commit, version.dirty ? " dirty" : "");
+  }
   boot::Control control(flash.driver(), boot::kLayout, crc);
   auto selection = control.select();
   if (selection.status == core::Status::ok) {
