@@ -283,6 +283,15 @@ extern "C" void DaveOS_FaultCapture(const std::uint32_t* frame,
     IWDG->EWCR = IWDG->EWCR | IWDG_EWCR_EWIC;
     NVIC_DisableIRQ(IWDG_IRQn);
   }
+  if (kind <= static_cast<std::uint32_t>(fault::Kind::usage_fault)) {
+    constexpr const char* kFaultNames[] = {"hard_fault", "memory_fault",
+                                           "bus_fault", "usage_fault"};
+    fault::copy_name(data.check, kFaultNames[kind]);
+    fault::copy_name(data.module, "core");
+    fault::copy_name(data.task, "exception");
+    data.status =
+        static_cast<std::uint32_t>(daveos::core::Status::health_failed);
+  }
   data.kind = static_cast<fault::Kind>(kind);
   data.version = h5::fault_version;
   data.installation = h5::fault_installation;

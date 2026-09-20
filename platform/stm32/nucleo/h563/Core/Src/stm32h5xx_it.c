@@ -51,6 +51,12 @@
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+/* Assembly handlers preserve the exception frame before changing stacks.
+ * Keep generated fallbacks weak so CubeMX regeneration preserves this wiring. */
+#pragma weak HardFault_Handler
+#pragma weak MemManage_Handler
+#pragma weak BusFault_Handler
+#pragma weak UsageFault_Handler
 
 /* USER CODE END 0 */
 

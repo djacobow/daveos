@@ -205,9 +205,13 @@ namespace app {
       if (fault::read(h5::retained_fault(), data)) {
         W_("Retained failure: %s %s.%s status %s", data.check, data.module,
            data.task, enum_name(static_cast<core::Status>(data.status)));
+        W_("CFSR=%08" PRIx32 " HFSR=%08" PRIx32 " SP=%08" PRIx32, data.cfsr,
+           data.hfsr, data.stack);
         if (data.frame_valid) {
           W_("Frame PC=%08" PRIx32 " LR=%08" PRIx32 " xPSR=%08" PRIx32,
              data.frame[6], data.frame[5], data.frame[7]);
+        } else {
+          W_("Exception frame unavailable");
         }
       } else {
         I_("No retained failure");

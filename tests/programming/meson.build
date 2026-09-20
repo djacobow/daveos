@@ -1,1 +1,1 @@
-test('programming', python, args: ['-B', files('programming.py')], suite: 'unit')
+test('programming', python, args: ['-B', '-m', 'pytest', '-q', files('test_programming.py')], suite: 'unit')

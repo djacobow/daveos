@@ -1,0 +1,8 @@
+# Every selected test mass-erases main flash and installs the factory image.
+# OpenOCD must already be serving this H563 (ST-LINK, CN13 USB and CN14 LAN).
+build = "build/boot-h563"
+uart = "/dev/serial/by-id/<ST-LINK-UART>"
+usb = "/dev/serial/by-id/<DaveOS-USB-CDC>"
+gdb = "tools/external/<toolchain>/bin/arm-none-eabi-gdb"
+gdb_port = 3333
+tcl_port = 6666

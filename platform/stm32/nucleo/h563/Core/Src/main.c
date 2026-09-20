@@ -75,6 +75,11 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
+  /* Route configurable faults to their own frame-capturing handlers. */
+  SCB->SHCSR |= SCB_SHCSR_MEMFAULTENA_Msk | SCB_SHCSR_BUSFAULTENA_Msk |
+                SCB_SHCSR_USGFAULTENA_Msk;
+  __DSB();
+  __ISB();
   app_early_init();
 
   /* USER CODE END 1 */

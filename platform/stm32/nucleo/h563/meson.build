@@ -1,4 +1,4 @@
-firmware_deps = [stm32_console_dep, stm32h5_dep, stm32h5_hal_dep]
+firmware_deps = [stm32_console_dep, stm32h5_dep, stm32h5_hal_dep, util_dep]
 if get_option('usb_console')
   subdir('usb')
   firmware_deps += h563_usb_dep
@@ -22,6 +22,6 @@ board_sources = files(
   'Core/Src/main.c', 'Core/Src/stm32h5xx_it.c',
   'Core/Src/stm32h5xx_hal_msp.c', 'Core/Src/system_stm32h5xx.c',
   'Core/Src/sysmem.c', 'Core/Src/syscalls.c', 'startup_stm32h563xx.s',
-  'console.cpp')
+  'console.cpp', '../../../stm32h5/fault_handlers.S')
 board_includes = include_directories('.', 'Core/Inc')
 board_args = []

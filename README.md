@@ -17,9 +17,13 @@ and command source. Stop at the level your application needs.
 
 ## Build and try
 
-Install Meson, Ninja, a C++20 compiler, and Python 3, then run from this directory:
+Install Meson, Ninja, a C++20 compiler, Python 3, and uv, then run from this directory:
 
 ```sh
+export UV_CACHE_DIR="$PWD/build/uv-cache"
+uv venv build/venv
+source build/venv/bin/activate
+uv pip install meson ninja -r requirements-test.txt
 meson setup build/host --native-file meson/clang.ini
 meson compile -C build/host
 meson test -C build/host --print-errorlogs
@@ -32,6 +36,7 @@ Build outputs stay under the ignored `build/` directory.
 
 ## References and starters
 
+- [Testing: portable checks and H563 HIL](docs/testing.md)
 - [Application API guide](docs/application-guide.md)
 - [Build, board setup, programming, and API reference](docs/reference.md)
 - [Host/fake application starter](starters/application/README.md)

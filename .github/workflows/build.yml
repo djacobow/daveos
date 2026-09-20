@@ -2,6 +2,8 @@ name: Build and test
 on: [push, pull_request]
 permissions:
   contents: read
+env:
+  UV_CACHE_DIR: ${{ github.workspace }}/build/uv-cache
 jobs:
   host:
     runs-on: ubuntu-24.04
@@ -14,7 +16,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python -m pip install meson==1.10.1 ninja==1.13.0
+      - run: python -m pip install meson==1.10.1 ninja==1.13.0 uv==0.9.28
+      - run: uv pip install --system -r requirements-test.txt
       - if: matrix.sanitizer == 'none'
         run: sudo apt-get update && sudo apt-get install -y clang-format-15
       # Ubuntu 24.04's cppcheck 2.13 cannot expand C++20 __VA_OPT__.
@@ -55,7 +58,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python -m pip install meson==1.10.1 ninja==1.13.0
+      - run: python -m pip install meson==1.10.1 ninja==1.13.0 uv==0.9.28
+      - run: uv pip install --system -r requirements-test.txt
       - run: sudo apt-get update && sudo apt-get install -y gcc-arm-none-eabi libstdc++-arm-none-eabi-dev libstdc++-arm-none-eabi-newlib
       - run: |
           git submodule update --init platform/stm32h5/STM32CubeH5 platform/stm32/STM32_USB_Device_Library
@@ -97,5 +101,5 @@ jobs:
           done
       - name: Build standalone device starters
         run: |
-          python tests/starter/stm32.py "$PWD" "$PWD/build/device-starter-h563" h563
-          python tests/starter/stm32.py "$PWD" "$PWD/build/device-starter-h755" h755
+          python -B -m pytest tests/starter/test_starter.py --starter-board h563 --starter-work "$PWD/build/device-starters"
+          python -B -m pytest tests/starter/test_starter.py --starter-board h755 --starter-work "$PWD/build/device-starters"

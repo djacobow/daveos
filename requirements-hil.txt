@@ -1,0 +1,2 @@
+-r requirements-test.txt
+watcher[serial] @ git+https://github.com/djacobow/watcher.git@3f5ce6a342fcae9f69618ba76675b38132a7e7c7

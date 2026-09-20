@@ -1,0 +1,124 @@
+# Testing
+
+C++ tests use Catch2 and run through Meson. Python checks use pytest, including
+factory/package tooling, programming plans, host process behavior, consumer
+builds, and H563 hardware-in-the-loop (HIL) tests. Existing unittest assertions
+remain compatible with the pytest runner.
+
+## Portable tests
+
+Install the Python test dependencies into your development environment:
+
+```sh
+export UV_CACHE_DIR="$PWD/build/uv-cache"
+uv venv build/venv
+source build/venv/bin/activate
+uv pip install meson ninja -r requirements-test.txt
+meson test -C build/host --print-errorlogs
+python3 -B -m pytest -q
+```
+
+Meson supplies the built executables to the host process tests and selects the
+external starter build. A direct pytest run executes portable tooling tests;
+checks needing a Meson-built executable or explicitly selected starter skip.
+It does not import Watcher or access hardware. Fixture-generating scripts remain
+build tools rather than collected tests. CI installs the same pinned pytest.
+
+To select a consumer build explicitly:
+
+```sh
+python3 -B -m pytest tests/starter/test_starter.py --starter-board host
+# ARM toolchain and board dependencies must already be available:
+python3 -B -m pytest tests/starter/test_starter.py --starter-board h563
+```
+
+Use `python -B` to keep Python bytecode out of the source tree. pytest's cache
+lives under `build/pytest-cache/`.
+
+## H563 HIL prerequisites
+
+- NUCLEO-H563ZI connected through ST-LINK (SWD and its UART).
+- CN13 USB-C data connection to the host.
+- CN14 Ethernet connected to a DHCP LAN reachable from the host.
+- ARM compiler, GDB, OpenOCD, Python 3.11+, and the pinned HIL dependencies.
+- A DaveOS H563 build with bootloader, UART, USB, networking and TCP console.
+
+Every selected hardware test **mass-erases main flash and programs/verifies the
+factory image** before it runs. This includes filtered and single-test runs;
+there is no reuse-installed-firmware option. Factory provisioning clears both
+slots and metadata, installs confirmed A, invalidates the old retained fault
+record in RAM, and leaves OTP untouched. Closing
+other UART/USB terminals and TCP console clients avoids competing readers or
+the console's single-client limit.
+
+```sh
+export UV_CACHE_DIR="$PWD/build/uv-cache"
+uv venv build/hil-venv
+# Reinstall Watcher to honor commit-pin changes even with the same package version.
+uv pip install --python build/hil-venv/bin/python --reinstall-package watcher \
+  -r requirements-hil.txt
+
+meson setup build/boot-h563 --cross-file meson/stm32.ini \
+  -Dbootloader=true -Dnetworking=true -Dusb_console=true -Dtcp_console=true
+cp tests/hil/h563.toml.example build/hil.toml
+```
+
+Edit `build/hil.toml` with the ST-LINK UART and DaveOS USB paths from
+`/dev/serial/by-id/`, the build directory, and GDB path. Keep the ARM toolchain's
+`bin/` directory on `PATH` for Meson. The suite recompiles the selected build
+before programming, so the factory HEX, both slot ELFs and OTA package match.
+
+Start a dedicated OpenOCD server for this board if one is not already running:
+
+```sh
+~/install/stmicro/openocd/bin/openocd \
+  -f interface/stlink-dap.cfg -c 'transport select dapdirect_swd' \
+  -f target/stm32h5x.cfg -c 'adapter speed 1800' \
+  -c 'reset_config srst_only srst_nogate connect_assert_srst'
+```
+
+The configuration defaults to local GDB port 3333 and Tcl port 6666. HIL uses
+this existing server; it does not stop another debugger or start a second
+OpenOCD process. Close GDB before running the suite.
+
+```sh
+build/hil-venv/bin/python -B -m pytest --hil --hil-config build/hil.toml \
+  tests/hil -q --junitxml=build/hil/results.xml
+
+# Shorter selections still start each test from factory firmware:
+build/hil-venv/bin/python -B -m pytest --hil --hil-config build/hil.toml \
+  tests/hil -m 'not slow' -q
+build/hil-venv/bin/python -B -m pytest --hil --hil-config build/hil.toml \
+  tests/hil/h563/test_watchdog.py -q
+```
+
+One fixture owns board access for the run. HIL rejects pytest-xdist and holds
+an exclusive lock against concurrent runs in this checkout. Tests execute
+serially and must not depend on their order. Missing prerequisites or failed
+programming are setup errors, not skipped tests. Ordinary CI runs portable
+checks only; HIL requires explicit selection and the physical board.
+
+## Coverage and diagnostics
+
+| Tests | Checks |
+| --- | --- |
+| Console | UART/USB/TCP commands and timers, software reset, USB reconnect |
+| Network | 1,400-byte ping and repeated TCP reconnect |
+| UART | Two stress cycles: bursts, maximum-length lines, recovery, TX counters |
+| Faults | Individual UsageFault, BusFault, MemManage and HardFault frame/CRC/status checks and reset recovery |
+| Watchdog | Latched task-progress failure; startup-hang capture and rollback of unconfirmed B |
+| OTA | Disabled listener, corrupt chunk, disconnect abort, A-to-B-to-A updates and automatic confirmation while TCP timers remain responsive |
+
+Watcher manages asynchronous text streams and their cleanup. Binary OTA keeps
+its protocol client; byte-level UART stress uses a helper under `tests/hil/h563/`
+with an exclusive UART lease. GDB experiments stop at known execution points
+and preserve fault records before resuming reset. Teardown releases connections
+and resets the board, including after a failed assertion. A subsequent test
+always reprograms factory state.
+
+Artifacts live under `build/hil/`: a build log, configuration and SHA-256 artifact
+manifest, per-test raw transport transcripts, OpenOCD/GDB logs, retained records,
+and the requested JUnit report. Fixed artifact paths describe the latest run;
+archive that directory before another run if its evidence needs preserving.
+Physical cable-unplug tests, LED appearance and button presses are not automated
+by this suite. H755 hardware testing remains deferred.

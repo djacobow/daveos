@@ -7,4 +7,4 @@ reliability_test = executable('test-reliability', 'reliability.cpp', 'file_flash
              '-DFACTORY_METADATA="' + meson.current_build_dir() / 'factory-metadata.bin' + '"'],
   dependencies: [test_support_dep, util_dep, boot_dep, update_dep, file_flash_dep])
 test('reliability', reliability_test, suite: 'unit', timeout: 30)
-test('factory-tool', python, args: files('factory_test.py'), suite: 'unit')
+test('factory-tool', python, args: ['-B', '-m', 'pytest', '-q', files('test_factory.py')], suite: 'unit')

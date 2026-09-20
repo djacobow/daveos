@@ -79,16 +79,10 @@ the build fails. The B binary alone does not make the slot bootable: installatio
 must verify flash and commit pending metadata. Factory programming still clears
 both slots and installs confirmed A; it is not a slot-B update command.
 
-With UART, USB CDC and DHCP Ethernet connected, repeat the reset/console checks
-against an already-programmed board using:
-
-```sh
-python3 tools/hardware/boot_smoke.py --uart /dev/serial/by-id/<ST-LINK-port> --usb /dev/serial/by-id/<DaveOS-port> --repeat 5
-```
-
-The script requires pyserial and checks boot messages, timer callbacks on all
-three transports, and 1,400-byte ping after each software reset. It does not flash.
-Pass `--slot B` when validating an installed, confirmed B image.
+The [pytest HIL suite](testing.md) provisions a factory image before every
+selected test, then checks UART/USB/TCP commands, reset recovery and networking.
+Use its local board configuration instead of passing transport paths to separate
+smoke scripts.
 
 ## TCP firmware updates
 
@@ -116,11 +110,9 @@ and aborts unfinished work. Updates start disabled after every reset. Disconnect
 mid-upload discards progress: a new connection restarts from the beginning.
 UART and USB remain text-only console transports.
 
-`tools/hardware/ota_smoke.py --host ADDRESS --image PACKAGE --uart UART_PATH`
-repeats the hardware regression: bad CRC, disconnect, two full updates with
-concurrent TCP console timers, reboot and confirmation. It replaces **both**
-application slots and leaves the original slot confirmed. Use `--slot B` if
-starting from confirmed B. Close other TCP console clients before running it.
+The HIL OTA test checks CRC rejection, disconnect abort, bidirectional uploads,
+concurrent TCP timers, reboot and automatic health-based confirmation. It starts
+from a fresh factory image; see [Testing](testing.md).
 
 Without `-Dbootloader=true`, the example retains its standalone linker layout
 and normal programming behavior. H755 bootloader integration remains deferred.
@@ -134,3 +126,14 @@ An early-warning interrupt saves the interrupted frame before the watchdog
 resets the CPU. With a debugger attached it breaks first; resume past the
 breakpoint to allow the reset. Masked interrupts can prevent capture, but do
 not prevent the watchdog reset. H755 watchdog integration remains deferred.
+
+H563 board support also links assembly HardFault, MemManage, BusFault and
+UsageFault handlers, using the same reserved stack and retained record. Startup
+enables the configurable fault exceptions. CubeMX's C fallback handlers are
+weak through its preserved USER CODE block. Capture never logs from exception
+context; startup reports the fault name, CFSR/HFSR, stack pointer and available
+PC/LR/xPSR. Resume past the debugger breakpoint to reset.
+
+The HIL fault tests independently inject all four CPU faults and verify retained
+frames, status registers and recovery. They build and program matching firmware
+before using GDB; see [Testing](testing.md).

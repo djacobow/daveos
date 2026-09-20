@@ -20,9 +20,10 @@
 - [x] Feed only after heartbeat and every active repeating task's progress checks; latch failures and preserve their diagnostics across reset.
 - [x] Automatically confirm a trial after five seconds of healthy scheduling; USB/Ethernet/DHCP availability must not gate confirmation.
 - [x] Validate H563 debugger freeze, latched task-rate failure, an interrupt-enabled runtime hang, early-warning exception-frame/CRC capture, natural watchdog reset, retained reporting, and automatic trial confirmation.
-- [ ] Exercise startup hangs and trial rollback with the integrated watchdog; test interrupt-masked hangs (reset without frame capture).
+- [x] Stall H563 trial B in SystemClock_Config before clock setup: verify IWDG early-warning frame/CRC, natural reset, rejection of unconfirmed B, and healthy confirmed-A fallback.
+- [ ] Add dedicated interrupt-masked-hang assertions (reset without a new frame), invalid-stack/PSP fault cases, and fault recovery without an attached debugger.
 - [x] Report retained watchdog/init failures on startup and provide health status/fault/clear commands.
-- [ ] Finish application HardFault/BusFault/MemManage/UsageFault handler integration (IWDG early warning already uses shared capture).
+- [x] Integrate H563 application HardFault/BusFault/MemManage/UsageFault handlers with retained capture; trigger all four CPU faults on hardware and verify type/status bits, frame PC, CRC, reset and next-boot reporting. Add tests/hil/h563/test_faults.py for repeatable injection. ASan 24/24, format/lint, H563 boot/standalone/starter builds pass.
 - [x] IWDG validation: ASan 24/24, fake 18/18, formatting/lint, H563 boot/standalone and H755 builds; OTA with the watchdog active and automatic confirmation on H563. H755 hardware remains deferred.
 
 ### Remaining qualification and follow-ups
@@ -33,12 +34,19 @@
 - [ ] Add an OTP driver for serial numbers and optional device keys; design provisioning/locking separately.
 - [ ] Convert existing state machines to the AGENTS.md enum/cs/ns/switch/single-commit convention as separate work.
 
+## Test organization
+
+- [x] Keep Catch2 C++ tests and migrate Python tooling/process/starter runners to pytest; install the pinned test dependency in CI.
+- [x] Group H563 console/network/UART/fault/watchdog/OTA tests under tests/hil with shared ownership, factory programming before every selected test, artifacts and JUnit reporting. All 13 HIL cases passed against the published Watcher pin; host 24/24, ASan 24/24, fake 18/18, logging-disabled 25/25, both ARM starters, format and lint passed.
+- [x] Fix Watcher's serial read timeout being treated as EOF; publish 3f5ce6a with two PTY regression cases (37 tests passed, one optional skip), and pin the fix for HIL.
+- [ ] Add a dedicated physical HIL CI runner once its board/probe/network ownership is arranged; ordinary GitHub CI remains hardware-free.
+
 ## Existing work
 
 - [x] Add capacity-first application factories and document the raw-handler token-limit migration; keep explicit handler-name extraction tests.
 - [x] Reflash and verify the final H563 image; pass another 120 command checks across UART/USB/TCP, two runs of the checked-in UART stress tool (1,160 burst commands), 1,400-byte ping, TCP reconnect, and software-reset recovery. All transmit counters remained clean; no visual LED/button confirmation in this run.
 - [x] Fix the UART DMA completion race: a post-start control-register read/modify/write could re-enable an exhausted H563 GPDMA transfer (captured HAL_DMA_ERROR_USE). Leave HAL half-transfer handling enabled on both boards; reduce echo pressure by appending only new input bytes.
-- [x] Repeat H563 hardware validation: the baseline failed 8/10 cycles; with both UART fixes, all 10 cycles passed 1,200 UART/USB/TCP command checks and 5,800 unpaced burst commands, with zero dropped frames/transmit errors. Add tools/hardware/uart_stress.py for repeatable UART regression checks. H755 remains build-tested only, with hardware testing deferred.
+- [x] Repeat H563 hardware validation: the baseline failed 8/10 cycles; with both UART fixes, all 10 cycles passed 1,200 UART/USB/TCP command checks and 5,800 unpaced burst commands, with zero dropped frames/transmit errors. Add tests/hil/h563/uart_stress.py for repeatable UART regression checks. H755 remains build-tested only, with hardware testing deferred.
 
 - [x] Default event-free modules/factories to NoEvent; add named application capacities and full logger constraints.
 - [x] Compact command metadata into one shared static table per module and emit one specific diagnostic per adapter failure. With six typed parameters, 32-bit/float bounds and variant policies, at `88f03b5`, the H563 debug (-O0) full network-console image shrank by 7,016 flash bytes (text+data: 332,292 to 325,276) and 64 bytes of static RAM. ARM metadata: 28 bytes per argument, 32 bytes per compact command. Build measurement only.

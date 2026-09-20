@@ -630,17 +630,11 @@ rewriting the DMA control register after starting a transfer: hardware can clear
 H563 GPDMA transfer with a user-setting error. The HAL half-transfer callback is
 otherwise a no-op.
 
-For repeated UART hardware regression checks (requires pyserial), run:
-
-```sh
-python3 tools/hardware/uart_stress.py /dev/serial/by-id/usb-STMicroelectronics_STLINK-V3_YOUR_BOARD-if02 --repeat 10
-```
-
-This resets the board before each cycle and checks short/max-length commands,
-16-line bursts, overlength recovery, and UART-specific transmit counters.
-It saves logs under `build/hardware/uart-stress/` and fails on missing replies,
-dropped frames, or transmit errors. It does not replace USB/TCP or physical
-LED/button validation. Keep other UART readers and debuggers detached.
+The [pytest HIL suite](testing.md) includes UART burst/max-length/overflow
+recovery and transmit-counter checks. Each selected test begins with factory
+programming; its transcripts and counters are saved under `build/hil/`. Keep
+other UART readers and debuggers detached. The suite also checks USB and TCP;
+physical LED/button validation remains separate.
 
 The H755 also exposes a USB CDC ACM console on **CN13 (Micro-AB)**. Connect a
 USB data cable there and keep ST-LINK connected for power/debugging. On Linux,

@@ -612,8 +612,9 @@ initial host simulation scope.
 
 ## Build system
 
-Use Meson. Python helpers currently use only the standard library; use uv if
-Python package dependencies are introduced.
+Use Meson. Use uv for Python test dependencies: pytest for portable checks and
+pinned Watcher/pyserial for optional HIL. Virtual environments and uv caches
+live under build/. Production packaging/programming tools remain standard-library Python.
 Build configurations live under `build/` (for example `build/host`, `build/fake`,
 `build/asan`, `build/arm`, and `build/h755`). All generated intermediates and caches belong under
 that ignored directory and can be removed and regenerated.
@@ -1414,6 +1415,11 @@ Capture HardFault, MemManage, BusFault, and UsageFault frames/status registers.
 Validate frame accessibility and avoid logging from fault context. Record first,
 then break if debugger control is enabled; otherwise reset. Resuming that
 breakpoint proceeds to reset. Watchdog failures use the same retained record.
+H563 Nucleo board support supplies the assembly handlers and enables configurable
+fault exceptions before application initialization. CubeMX USER CODE weak
+pragmas keep generated fallback handlers from replacing the assembly entry points.
+The console reports fault identity, CFSR/HFSR, stack pointer and available frame
+registers at the next boot; health clear explicitly removes the record.
 
 ### OTA engine and streaming
 
@@ -1475,3 +1481,27 @@ debugger/watchdog behavior, and UART/USB/TCP responsiveness during OTA. Measure
 bootloader size and metadata stalls against the 100 ms progress allowance. Run
 all repository tests, formatting, lint and existing H563/H755 builds; identify
 hardware-tested results separately. H755 hardware testing remains deferred.
+
+
+### Test organization and H563 HIL
+
+Keep Catch2 for C++ tests. Run Python tests through pytest, including Meson-driven
+host process and consumer checks. Hardware tests live in tests/hil/h563 and are
+excluded from ordinary pytest collection and normal CI. Explicit --hil selection
+requires a local configuration, matching H563 bootloader/network/USB/TCP build,
+ST-LINK UART/SWD, USB CDC and reachable DHCP Ethernet.
+
+Every selected HIL test starts with a main-flash mass erase, factory programming
+and verification, clearing the retained RAM fault record as well. There is no
+reuse-installed-image option. A shared fixture
+owns the board, serializes access, builds matching artifacts, captures transcripts
+and controls OpenOCD/GDB. Missing prerequisites and provisioning failures fail
+setup. Tests must be independent of execution order; cleanup closes transports
+and resets the board even on failure. Store all generated artifacts under
+build/. Watcher is a pinned test-only dependency for asynchronous text streams;
+OTA binary protocol and byte-level UART stress retain appropriate direct I/O.
+
+Cover all three console transports, reset/reconnect, Ethernet ping, UART bursts,
+CPU fault frames, watchdog failures, startup trial rollback, and bidirectional
+OTA with concurrent command traffic. Watcher fixes belong upstream with tests;
+update the pinned published commit after validation.
