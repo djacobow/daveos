@@ -24,6 +24,16 @@ namespace app {
 
     auto sources() { return console().sources(); }
 
+    template <typename Scheduler>
+    void early([[maybe_unused]] Scheduler& scheduler) {
+@EARLY@
+    }
+
+    void failed([[maybe_unused]] core::Status status,
+                [[maybe_unused]] const char* module) {
+@FAILURE@
+    }
+
     void log_statistics(core::SchedulerInterface<Event>& scheduler) {
       console().log_statistics(scheduler);
     }

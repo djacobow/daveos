@@ -1,28 +1,37 @@
 # Follow-up work
 
-## Bootloader and reliability implementation
+## Bootloader and reliability
 
-- [x] Add injected file-backed host/fake flash with persistent raw images, erase/program rules, and tests that upload, close/reopen, select a trial, confirm it, and reboot again using the real OTA engine and boot policy.
+### Completed
 
-- [x] Wire the optional H563 TCP OTA listener (1001), enable/disable/status commands, and delayed reboot callback. On hardware, reject a bad chunk, abort on disconnect, then install A→B and B→A over TCP; each transfer took about 35.45 s including flash CRC and metadata commit. Concurrent console timer requests passed (167/172 checks, maximum 13 ms response); both reboot requests, trial boots, and manual confirmations passed. Add fragmented-protocol and failed-final-commit regression tests. Automatic health-based confirmation remains outstanding.
-- [x] Repeat the TCP round trip with the final build: two more installations/reboots/confirmations passed (35.46 s each), with 331 concurrent console timer checks and maximum 13 ms response. Leave A confirmed and OTA disabled. ASan passed 24/24, format/lint passed, and the standalone H755 firmware still builds. H755 hardware remains deferred.
-- [x] Link H563 slot B from the same application objects as A; build a paired relocation package that reconstructs B exactly. On hardware, verify B trial boot, unconfirmed-reset rejection and fallback to A, durable/idempotent `boot confirm`, three confirmed-B reset cycles, and CRC rejection/fallback after erasing B's first sector. Restore and leave B confirmed; preserve A. Fix ICACHE-stale metadata readback after flash programming. These installations used ST-LINK; TCP OTA and automatic health-based confirmation remain outstanding.
-- [x] Repeat five software resets of the restored confirmed B: UART/USB/TCP timers, DHCP, and 1,400-byte ping passed after every boot. ASan passed 24/24, including paired-package layout/version checks. Current linked applications are 217,796 bytes each; the paired package is 223,714 bytes.
-- [x] Build an ST-LINK-programmable H563 factory HEX with the fixed 32 KiB bootloader, confirmed slot A, and redundant initial metadata; mass-erase main flash before programming, preserving OTP. First hardware boot verified the CRC and started the relocated application successfully.
-- [x] Validate the H563 factory boot through five software-reset cycles: CRC verification, UART/USB/TCP commands and timers, DHCP, and 1,400-byte ping passed in every cycle. Fix a false UART start bit by enabling the transmitter before selecting the TX pin alternate function. Bootloader uses 17,404 bytes; slot A uses 202,368 bytes. ASan passed 24/24; formatting/lint and standalone H755 build passed. H755 hardware remains deferred; OTA and slot-B hardware validation are still outstanding.
-- [ ] Implement the bootloader/OTA specification in PROJECT.md; validate H563 and host/fake first. H755 bootloader integration and hardware validation remain deferred.
-- [ ] Use `-Os` for every STM32 compilation, including dependencies, M4, and device starters; retain debug information.
-- [ ] Add independent application/bootloader version stamps from Meson: u32 major/minor/CI build, local UINT32_MAX sentinel, Git commit and dirty flag.
-- [ ] Implement software and injected STM32 CRC-32 matching Python binascii.crc32, including caller-owned incremental state and software fallback from interrupts.
-- [ ] Add injected flash operations, redundant metadata journal, one-trial boot selection, explicit durable confirmation, and corruption/power-loss tests.
-- [ ] Measure the complete bootloader at `-Os` and enforce its fixed 32 KiB reservation. Layout: bank 1 [BL][metaA][A], bank 2 [32 KiB placeholder][metaB][B]; metadata sectors are 8 KiB each, A/B capacities are 984 KiB each.
-- [ ] Prove block-local device-side relocation against both independently linked images and on H563; use separate slot-specific images if feasibility fails.
-- [ ] Add transport-independent incremental OTA, a dedicated TCP listener on port 1001, Python uploader with optional --reboot, and application-controlled enable/disable/status.
-- [ ] Add an injected, explicitly started watchdog with latched health/feed failures, early startup coverage, scheduler progress checking, and debugger freeze.
-- [ ] Add one magic/version/size/CRC-protected retained fault record, shared by bootloader and application; capture faults before debugger break or reset.
-- [ ] Repeatedly validate A/B updates, confirmation, rejection/rollback, flash corruption, initialization failures, watchdogs, and console responsiveness on H563.
-- [ ] Add an OTP driver for serial numbers and optional device keys/other provisioning data; design provisioning and locking separately.
-- [ ] Audit and convert existing state machines to the AGENTS.md enum/cs/ns/switch/single-commit structure in separate work.
+- [x] H563 bootloader with fixed 32 KiB reservation, redundant metadata, equal 984 KiB A/B slots, CRC verification, one-trial policy, and explicit durable/idempotent confirmation.
+- [x] Factory HEX/programming targets: erase main flash, preserve OTP, install confirmed A. Compile STM32 sources with `-Os` and debug information.
+- [x] Link the same objects for A/B and build a paired relocation package; validate exact reconstruction and execute both slots on H563.
+- [x] Injected software/hardware CRC and flash drivers; invalidate H563 ICACHE after flash mutations before readback.
+- [x] Cooperative TCP OTA on port 1001, application enable/disable/status, Python uploader and optional reboot. Binary updates remain separate from text consoles.
+- [x] H563 validation: trial rejection, confirmation, corrupted-confirmed-image fallback, repeated A/B resets, and four TCP uploads in both directions. Uploads took about 35.5 s with 670 concurrent console timer checks (maximum 13 ms response).
+- [x] Host tests for journal power-loss boundaries, fragmented uploads, CRC rejection, disconnect/abort paths, failed-final-commit recovery, and persisted file-backed OTA/boot/confirmation.
+- [x] FileFlash for host/fake simulations: raw persistent files, erase/program rules, injected clock, close/reopen tests. Does not model hardware latency or STM32 ECC.
+- [x] Watchdog controller, injected IWDG driver, scheduler-progress snapshots, and retained-fault record foundations; integration work follows below.
+
+### Next: startup and runtime health
+
+- [x] Start H563 IWDG before clock/peripheral/module initialization; reset on explicit init failure and let startup hangs expire.
+- [x] Feed only after heartbeat and every active repeating task's progress checks; latch failures and preserve their diagnostics across reset.
+- [x] Automatically confirm a trial after five seconds of healthy scheduling; USB/Ethernet/DHCP availability must not gate confirmation.
+- [x] Validate H563 debugger freeze, latched task-rate failure, an interrupt-enabled runtime hang, early-warning exception-frame/CRC capture, natural watchdog reset, retained reporting, and automatic trial confirmation.
+- [ ] Exercise startup hangs and trial rollback with the integrated watchdog; test interrupt-masked hangs (reset without frame capture).
+- [x] Report retained watchdog/init failures on startup and provide health status/fault/clear commands.
+- [ ] Finish application HardFault/BusFault/MemManage/UsageFault handler integration (IWDG early warning already uses shared capture).
+- [x] IWDG validation: ASan 24/24, fake 18/18, formatting/lint, H563 boot/standalone and H755 builds; OTA with the watchdog active and automatic confirmation on H563. H755 hardware remains deferred.
+
+### Remaining qualification and follow-ups
+
+- [ ] Complete independent bootloader version stamping (CI build, Git commit/dirty), expose application identity, and verify CI version propagation.
+- [ ] Exercise hardware journal rollover, both-images-invalid recovery, physical power interruption, and comprehensive OTA timeout/link-loss/disable/replacement cases.
+- [ ] Run the full host/fake/sanitizer matrix, format/lint, and H563/H755/starter builds before pushing. H755 bootloader integration and hardware testing remain deferred.
+- [ ] Add an OTP driver for serial numbers and optional device keys; design provisioning/locking separately.
+- [ ] Convert existing state machines to the AGENTS.md enum/cs/ns/switch/single-commit convention as separate work.
 
 ## Existing work
 

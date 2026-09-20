@@ -61,6 +61,9 @@ static void MX_USART3_UART_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+/* Optional application hooks; constructors have completed, HAL has not. */
+__attribute__((weak)) void app_early_init(void) {}
+__attribute__((weak)) void app_init_failed(void) {}
 
 /* USER CODE END 0 */
 
@@ -72,6 +75,7 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
+  app_early_init();
 
   /* USER CODE END 1 */
 
@@ -371,6 +375,8 @@ void MPU_Config(void)
 void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
+  app_init_failed();
+  NVIC_SystemReset();
   /* User can add his own implementation to report the HAL error return state */
   __disable_irq();
   while (1)

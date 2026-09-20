@@ -6,7 +6,8 @@ extern "C" {
 
 // Enter the application after CubeMX clock/peripheral initialization. The
 // implementation owns the file-scope modules, logger, and scheduler, performs
-// staged initialization, and runs the scheduler. Terminal failure halts.
+// staged initialization, and runs the scheduler. On H563, terminal failure
+// records diagnostics and resets.
 void appmain(void);
 
 #ifdef __cplusplus

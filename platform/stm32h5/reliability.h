@@ -28,6 +28,8 @@ namespace daveos::platform::stm32h5 {
     bool pending_ = false;
   };
 
+  // Enables early warning as well as reset. Link iwdg_handler.S for retained
+  // frame capture and reserve the same fault RAM/stack as the H563 board.
   class Watchdog {
    public:
     watchdog::Driver driver();
@@ -44,6 +46,9 @@ namespace daveos::platform::stm32h5 {
   bool handle_flash_ecc();
   void set_fault_identity(const util::Version& version,
                           std::uint64_t installation);
+  // Copy current image identity and remember whether this boot recorded a
+  // watchdog health failure, so early-warning capture can enrich its frame.
+  void record_failure(util::fault::Data data);
   [[noreturn]] void reset();
 
 

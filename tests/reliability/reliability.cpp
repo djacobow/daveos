@@ -12,6 +12,7 @@
 #include "util/fault.h"
 #include "util/version_stamp.h"
 #include "util/wire.h"
+#include "watchdog/confirmation.h"
 #include "watchdog/watchdog.hpp"
 
 namespace crc = daveos::util::crc32;
@@ -553,4 +554,42 @@ TEST_CASE("OTA invalidates a candidate when the final commit reports failure") {
   REQUIRE(journal.load(initial) == core::Status::ok);
   REQUIRE(initial.images[1].state == boot::ImageState::incomplete);
   REQUIRE(initial.images[0].state == boot::ImageState::confirmed);
+}
+
+TEST_CASE(
+    "Trial confirmation requires a continuous healthy interval and never "
+    "retries") {
+  struct Result {
+    unsigned calls = 0;
+    core::Status status = core::Status::ok;
+  } result;
+
+  wd::Confirmation confirmation(std::chrono::seconds{5});
+  confirmation.callback(&result, [](void* p) {
+    auto& value = *static_cast<Result*>(p);
+    ++value.calls;
+    return value.status;
+  });
+  REQUIRE(confirmation.tick(100000, true) == core::Status::ok);
+  REQUIRE(confirmation.tick(5099999, true) == core::Status::ok);
+  REQUIRE(result.calls == 0);
+  SECTION("confirms at boundary exactly once") {
+    REQUIRE(confirmation.tick(5100000, true) == core::Status::ok);
+    REQUIRE(result.calls == 1);
+    REQUIRE(confirmation.state() == wd::Confirmation::State::confirmed);
+    confirmation.tick(20000000, true);
+    REQUIRE(result.calls == 1);
+  }
+  SECTION("recovered health cannot revive a failed trial gate") {
+    REQUIRE(confirmation.tick(5100000, false) == core::Status::health_failed);
+    REQUIRE(confirmation.tick(20000000, true) == core::Status::health_failed);
+    REQUIRE(result.calls == 0);
+  }
+  SECTION("durable confirmation failure is terminal") {
+    result.status = core::Status::io_error;
+    REQUIRE(confirmation.tick(5100000, true) == core::Status::io_error);
+    result.status = core::Status::ok;
+    REQUIRE(confirmation.tick(20000000, true) == core::Status::io_error);
+    REQUIRE(result.calls == 1);
+  }
 }

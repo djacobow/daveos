@@ -33,6 +33,14 @@ extern "C" void TIM2_IRQHandler() {
   }
 }
 
+extern "C" void app_early_init() {
+  app::components.early(app::application.scheduler());
+}
+
+extern "C" void app_init_failed() {
+  app::components.failed(app::core::Status::initialization_failed, "hardware");
+}
+
 extern "C" void appmain() {
   app::last_status = app::platform.init(board::TimerClock());
   if (app::last_status != app::core::Status::ok) {
@@ -41,6 +49,7 @@ extern "C" void appmain() {
   app::active_platform = &app::platform;
   app::last_status = app::application.run();
   app::initialization_failure = app::application.initialization_failure();
+  app::components.failed(app::last_status, app::initialization_failure.module);
   // Initialization failure is terminal. Release transports before halting.
   app::components.stop();
   app::platform.quiesce();

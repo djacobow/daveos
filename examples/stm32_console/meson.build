@@ -12,6 +12,22 @@ component_members = []
 component_consoles = []
 component_modules = []
 component_stop = []
+component_early = []
+component_failure = []
+if board == 'h563'
+  component_deps += util_dep
+  component_deps += declare_dependency(sources: files('../../platform/stm32h5/iwdg_handler.S'))
+  component_includes += '#include "health.hpp"'
+  component_members += '    Health health{platform};'
+  component_modules += ', health'
+  component_early += '      health.attach_progress(scheduler);'
+  if get_option('bootloader')
+    component_early += '      health.confirmation(&boot, [](void* p) { return static_cast<Boot*>(p)->Confirm(); });'
+  endif
+  component_early += '      auto result = health.early_start();'
+  component_early += '      if (result != core::Status::ok) { health.initialization_failed(result); }'
+  component_failure += '      health.initialization_failed(status, module);'
+endif
 if get_option('bootloader')
   component_includes += '#include "boot.hpp"'
   component_members += '    Boot boot{platform};'
@@ -53,6 +69,8 @@ composition.set('MEMBERS', '\n'.join(component_members))
 composition.set('CONSOLES', ', '.join(component_consoles))
 composition.set('MODULES', ''.join(component_modules))
 composition.set('STOP', '\n'.join(component_stop))
+composition.set('EARLY', '\n'.join(component_early))
+composition.set('FAILURE', '\n'.join(component_failure))
 configure_file(input: 'composition.hpp.in', output: 'composition.hpp', configuration: composition)
 
 firmware = executable('stm32-console', 'appmain.cpp',

@@ -12,6 +12,10 @@ namespace daveos::platform::stm32h5 {
     constexpr std::uint32_t kFlashBase = 0x08000000;
     constexpr std::uint32_t kFlashEnd = 0x08200000;
     constexpr std::uint32_t kCacheWaitBudget = 64000;
+    constexpr std::uint32_t kWatchdogUpdateBudget = 1000000;
+    constexpr std::uint32_t kEarlyWarningTicks = 64;
+    constexpr std::uint32_t kWatchdogUpdateFlags =
+        IWDG_SR_PVU | IWDG_SR_RVU | IWDG_SR_WVU | IWDG_SR_EWU;
     constexpr std::uint32_t kErrors =
         FLASH_SR_WRPERR | FLASH_SR_PGSERR | FLASH_SR_STRBERR | FLASH_SR_INCERR |
         FLASH_SR_OBKERR | FLASH_SR_OBKWERR | FLASH_SR_OPTCHANGEERR;
@@ -21,6 +25,17 @@ namespace daveos::platform::stm32h5 {
     volatile bool reading = false, read_error = false;
     util::Version fault_version;
     std::uint64_t fault_installation = 0;
+    bool watchdog_failure_recorded = false;
+
+    // Independent of SysTick so startup failures remain bounded.
+    bool WatchdogSynchronized() {
+      std::uint32_t budget = kWatchdogUpdateBudget;
+      // ONF remains set while enabled; only synchronization flags clear.
+      while ((IWDG->SR & kWatchdogUpdateFlags) && --budget) {
+        __NOP();
+      }
+      return budget != 0;
+    }
 
     bool Range(std::uint32_t address, std::size_t length) {
       return address >= kFlashBase && address < kFlashEnd &&
@@ -162,7 +177,9 @@ namespace daveos::platform::stm32h5 {
       if (timeout > core::kForever / 32000) {
         return core::Status::invalid_argument;
       }
-      ticks = (timeout * 32000 + divisor * 1000000 - 1) / (divisor * 1000000);
+      const auto numerator = timeout * 32000;
+      const auto denominator = divisor * 1000000;
+      ticks = numerator / denominator + (numerator % denominator != 0);
       if (ticks && ticks <= 4096) {
         break;
       }
@@ -176,15 +193,23 @@ namespace daveos::platform::stm32h5 {
     IWDG->KR = 0x5555;
     IWDG->PR = prescaler;
     IWDG->RLR = static_cast<std::uint32_t>(ticks - 1);
-    // Bounded register synchronization independent of SysTick/clock init.
-    std::uint32_t budget = 1000000;
-    while (IWDG->SR && --budget) {
-      __NOP();
+    // Reload must be synchronized before programming the early comparator.
+    if (!WatchdogSynchronized()) {
+      return core::Status::timeout;
     }
-    if (!budget) {
+    IWDG->EWCR = IWDG_EWCR_EWIC |
+                 (ticks > 1 ? IWDG_EWCR_EWIE | static_cast<std::uint32_t>(
+                                                   ticks > kEarlyWarningTicks
+                                                       ? kEarlyWarningTicks
+                                                       : ticks - 1)
+                            : 0u);
+    if (!WatchdogSynchronized()) {
       return core::Status::timeout;
     }
     IWDG->KR = 0xaaaa;
+    NVIC_ClearPendingIRQ(IWDG_IRQn);
+    NVIC_SetPriority(IWDG_IRQn, 0);
+    NVIC_EnableIRQ(IWDG_IRQn);
     return core::Status::ok;
   }
 
@@ -226,6 +251,14 @@ namespace daveos::platform::stm32h5 {
     fault_installation = installation;
   }
 
+  void record_failure(util::fault::Data data) {
+    data.version = fault_version;
+    data.installation = fault_installation;
+    util::fault::save(retained_fault(), data);
+    watchdog_failure_recorded = data.kind == util::fault::Kind::watchdog;
+    __DSB();
+  }
+
   [[noreturn]] void reset() { NVIC_SystemReset(); }
 
 
@@ -237,6 +270,19 @@ extern "C" void DaveOS_FaultCapture(const std::uint32_t* frame,
   namespace h5 = daveos::platform::stm32h5;
   namespace fault = daveos::util::fault;
   fault::Data data;
+  // A cooperative health check may already have recorded the precise failing
+  // task. Enrich that current-boot record with the interrupted frame.
+  if (kind == static_cast<std::uint32_t>(fault::Kind::watchdog)) {
+    if (h5::watchdog_failure_recorded) {
+      fault::read(h5::retained_fault(), data);
+    }
+    if (!data.check[0]) {
+      fault::copy_name(data.check, "iwdg_early_warning");
+      data.status = static_cast<std::uint32_t>(daveos::core::Status::timeout);
+    }
+    IWDG->EWCR = IWDG->EWCR | IWDG_EWCR_EWIC;
+    NVIC_DisableIRQ(IWDG_IRQn);
+  }
   data.kind = static_cast<fault::Kind>(kind);
   data.version = h5::fault_version;
   data.installation = h5::fault_installation;
@@ -246,12 +292,9 @@ extern "C" void DaveOS_FaultCapture(const std::uint32_t* frame,
   data.hfsr = SCB->HFSR;
   data.mmfar = SCB->MMFAR;
   data.bfar = SCB->BFAR;
-  // Extended FP frames place the basic frame after 18 words. Stacking errors
-  // make frame contents unreliable even when the pointer happens to be in RAM.
+  // The basic registers are first; extended floating-point state follows them.
+  // Stacking errors make even an in-RAM frame unreliable.
   auto address = reinterpret_cast<std::uintptr_t>(frame);
-  if (!(exc_return & (1u << 4))) {
-    address += 18 * sizeof(std::uint32_t);
-  }
   constexpr std::uint32_t kStackErrors =
       (1u << 3) | (1u << 4) | (1u << 5) | (1u << 11) | (1u << 12) | (1u << 13);
   if (!(data.cfsr & kStackErrors) && address >= 0x20000800 &&
@@ -267,6 +310,12 @@ extern "C" void DaveOS_FaultCapture(const std::uint32_t* frame,
   __DSB();
   if (DCB->DHCSR & DCB_DHCSR_C_DEBUGEN_Msk) {
     __BKPT(0);
+  }
+  if (kind == static_cast<std::uint32_t>(fault::Kind::watchdog)) {
+    // Never return to code that might feed again. Hardware supplies the reset.
+    while (true) {
+      __WFI();
+    }
   }
   h5::reset();
 }

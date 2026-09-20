@@ -68,9 +68,9 @@ At 1 Mb/s on the ST-LINK UART, expect `Boot slot A (confirmed), CRC verified`
 followed by the normal application messages. `board reset` returns through the
 bootloader and repeats CRC verification. Bootloader-enabled builds also provide
 `boot status` (executing slot and eligibility) and `boot confirm` (explicit,
-durable, idempotent confirmation by the running application). During bring-up,
-confirmation is manual. OTA must be explicitly enabled as described below;
-automatic health-based confirmation remains future work.
+durable, idempotent confirmation by the running application). The H563 health
+module confirms automatically after five healthy seconds.
+OTA must still be explicitly enabled as described below.
 
 The same build links `stm32-console-b.elf` at `0x0810A000`, reusing the exact
 objects compiled for A. It also builds `application.ota`: packaging must reproduce
@@ -108,7 +108,8 @@ polls readiness and sends one checked chunk at a time. `--reboot` requests a
 delayed application reset only after successful installation; omit it to keep
 the current application running. This does not confirm the new image.
 
-After the trial boots, inspect `boot status` and use `boot confirm` when satisfied.
+After the trial boots, inspect `boot status`; health-based confirmation takes
+five seconds. `boot confirm` remains an explicit bring-up override.
 A reset before confirmation rejects that trial and returns to the other valid,
 confirmed image. `ota status` reports progress; `ota disable` closes the listener
 and aborts unfinished work. Updates start disabled after every reset. Disconnecting
@@ -125,3 +126,11 @@ Without `-Dbootloader=true`, the example retains its standalone linker layout
 and normal programming behavior. H755 bootloader integration remains deferred.
 
 Next: [custom components](04-custom-components.md).
+
+The H563 demo starts IWDG before clock/peripheral initialization and feeds it
+only after heartbeat and repeating-task progress checks pass. `health status`,
+`health fault`, and `health clear` inspect health and retained diagnostics.
+An early-warning interrupt saves the interrupted frame before the watchdog
+resets the CPU. With a debugger attached it breaks first; resume past the
+breakpoint to allow the reset. Masked interrupts can prevent capture, but do
+not prevent the watchdog reset. H755 watchdog integration remains deferred.

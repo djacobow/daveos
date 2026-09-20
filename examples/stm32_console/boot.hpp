@@ -6,12 +6,13 @@
 #include "layout.h"
 #include "platform/stm32h5/reliability.h"
 #include "stm32h563xx.h"
+#include "util/version_stamp.h"
 
 namespace app {
 
 
-  // Explicit confirmation for bring-up. The application will later decide
-  // when its health criteria permit calling the same Control API.
+  // Boot identity and confirmation API. Health applies the automatic policy;
+  // the command remains available as an explicit bring-up override.
   class Boot : public core::Module<Boot, Event> {
    public:
     explicit Boot(Platform& platform)
@@ -20,6 +21,25 @@ namespace app {
           control_(flash_.driver(), daveos::boot::kLayout) {}
 
     static constexpr const char* name() { return "boot"; }
+
+    core::Status init(core::InitStage stage) {
+      if (stage != core::InitStage::stage1) {
+        return core::Status::ok;
+      }
+      daveos::boot::Snapshot snapshot;
+      auto status = control_.status(snapshot);
+      const auto slot = Slot();
+      if (status != core::Status::ok) {
+        return status;
+      }
+      if (slot >= 2) {
+        return core::Status::incompatible;
+      }
+      daveos::platform::stm32h5::set_fault_identity(
+          daveos::build::kApplicationVersion,
+          snapshot.images[slot].installation);
+      return core::Status::ok;
+    }
 
     static constexpr auto commands() {
       return std::array{DAVEOS_COMMAND(Boot, Status, "status",

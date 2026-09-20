@@ -1392,6 +1392,15 @@ Resetting diagnostic statistics must not hide progress deficits. Latch failures
 with task/module identity and expected/actual counts. This policy is optional
 application health checking, not an unconditional core scheduler overload policy.
 
+On H563, enable the IWDG early-warning interrupt with a nominal 128 ms
+remaining at the demo timeout. Capture the interrupted basic register frame
+using the reserved fault stack and retained CRC-protected record. Preserve an
+already-latched health failure while adding its frame. Do not feed or return;
+let IWDG reset. If a debugger is attached, break before waiting for reset.
+Interrupt masking or an unpreemptible handler may prevent capture; watchdog
+reset must remain independent. Freeze the scheduler clock with IWDG during
+debugger halts to avoid false task-progress failures after resuming.
+
 ### Retained fault diagnostics
 
 Reserve one fixed RAM record shared by bootloader/application, excluded from
