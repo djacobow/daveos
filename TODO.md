@@ -2,6 +2,8 @@
 
 ## Bootloader and reliability implementation
 
+- [x] Add injected file-backed host/fake flash with persistent raw images, erase/program rules, and tests that upload, close/reopen, select a trial, confirm it, and reboot again using the real OTA engine and boot policy.
+
 - [x] Wire the optional H563 TCP OTA listener (1001), enable/disable/status commands, and delayed reboot callback. On hardware, reject a bad chunk, abort on disconnect, then install A→B and B→A over TCP; each transfer took about 35.45 s including flash CRC and metadata commit. Concurrent console timer requests passed (167/172 checks, maximum 13 ms response); both reboot requests, trial boots, and manual confirmations passed. Add fragmented-protocol and failed-final-commit regression tests. Automatic health-based confirmation remains outstanding.
 - [x] Repeat the TCP round trip with the final build: two more installations/reboots/confirmations passed (35.46 s each), with 331 concurrent console timer checks and maximum 13 ms response. Leave A confirmed and OTA disabled. ASan passed 24/24, format/lint passed, and the standalone H755 firmware still builds. H755 hardware remains deferred.
 - [x] Link H563 slot B from the same application objects as A; build a paired relocation package that reconstructs B exactly. On hardware, verify B trial boot, unconfirmed-reset rejection and fallback to A, durable/idempotent `boot confirm`, three confirmed-B reset cycles, and CRC rejection/fallback after erasing B's first sector. Restore and leave B confirmed; preserve A. Fix ICACHE-stale metadata readback after flash programming. These installations used ST-LINK; TCP OTA and automatic health-based confirmation remain outstanding.

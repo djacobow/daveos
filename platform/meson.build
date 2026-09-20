@@ -12,6 +12,10 @@ if platform in ['stm32h5', 'stm32h7']
   endif
 else
   threads = dependency('threads')
+  # File storage works with either the real host clock or an injected fake clock.
+  file_flash_lib = static_library('daveos-file-flash', 'host/flash.cpp', dependencies: core_dep)
+  file_flash_dep = declare_dependency(link_with: file_flash_lib, dependencies: core_dep)
+  meson.override_dependency('daveos-file-flash', file_flash_dep)
   subdir('fake')
   if platform == 'host'
     subdir('host')

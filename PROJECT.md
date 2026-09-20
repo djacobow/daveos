@@ -1254,6 +1254,14 @@ Conversion of existing state machines is a separate TODO.
 
 ### Flash layout and executable images
 
+Boot policy and the OTA engine receive an injected `boot::Flash` interface.
+Host/fake simulations can use `platform::host::FileFlash`, a raw persistent file
+with caller-supplied geometry and an optional injected clock. It models bounds,
+sector erase, aligned 16-byte programming, and one-to-zero NOR bits, with fsync
+before successful completion. Reopening preserves images and metadata across
+simulated boots. It does not model STM32 ECC or torn in-flight mutations; the
+memory-backed fault-injection tests cover those failure boundaries separately.
+
 Reserve 32 KiB (four 8 KiB sectors) for the bootloader, including room to grow.
 Measure the feature-complete bootloader at `-Os` and fail the build if it exceeds
 that fixed reservation; never silently move the application slots. H563 main
