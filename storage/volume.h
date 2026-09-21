@@ -10,7 +10,7 @@
 namespace daveos::storage {
 
 
-  // Application-owned, nonmoving read-only volume. Explicit attach() reserves
+  // Application-owned, nonmoving volume. Explicit attach() reserves
   // a numbered FatFs drive; construction does nothing. The injected device
   // must outlive this object. Destroy only after operations have unwound.
   // One file OR directory may be open. Every public operation rejects nested
@@ -27,7 +27,14 @@ namespace daveos::storage {
     Volume& operator=(const Volume&) = delete;
 
     FRESULT attach();
-    FRESULT mount();
+    // Mode cannot change while mounted: unmount before opting into writes.
+    FRESULT mount(bool writable = false);
+    FRESULT create(std::string_view path);  // New files only; never truncate.
+    FRESULT write(std::span<const std::uint8_t> bytes, std::uint32_t& count);
+    FRESULT sync();
+    // Read-write mounts only. Reject directories and open handles; sync
+    // metadata.
+    FRESULT remove(std::string_view path);
     FRESULT unmount();
     FRESULT open(std::string_view path, std::uint32_t offset = 0);
     FRESULT read(std::span<std::uint8_t> bytes, std::uint32_t& count);
@@ -72,7 +79,7 @@ namespace daveos::storage {
     DIR directory_{};
     std::array<char, 3> drive_{};
     bool attached_ = false, mounted_ = false, busy_ = false;
-    bool file_open_ = false, directory_open_ = false;
+    bool file_open_ = false, directory_open_ = false, writable_ = false;
   };
 
   const char* result_name(FRESULT result);

@@ -60,6 +60,10 @@ subdirectories, a long filename, sector/cluster boundaries and EOF behavior;
 watchdog/fault checks stayed healthy. No card sectors were written. See the
 [storage validation notes](../storage.md#validation) for scope and limits.
 See [SPI/I2C](../spi-i2c.md).
+The optional filesystem now supports explicit read-write mounting and
+create-only text files. H563 write/sync/close/remount/readback passed, with
+overwrite refusal, healthy watchdog and zero heap requests; see the storage
+notes for the initial busy-release fix and retained test files.
 For the STM32H5 SPI backend, manage each attached device's CS as a GPIO output,
 not through the SPI peripheral's hardware NSS output. The backend owns GPIO
 assertion/deassertion according to the portable transaction and error-cleanup

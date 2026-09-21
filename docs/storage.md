@@ -1,4 +1,4 @@
-# Read-only FAT storage
+# FAT storage
 
 Enable `-Dfatfs=true` and initialize the pinned submodule:
 
@@ -11,14 +11,14 @@ meson test -C build/host storage --print-errorlogs
 `daveos-storage` provides an application-owned `storage::Volume` and optional
 `storage::Module<Event>` command worker. Both receive a borrowed
 `storage::BlockDevice`; neither depends on STM32 or a particular bus.
-`daveos-file-block` supplies a host file backend opened strictly read-only.
+`daveos-file-block` supplies a host file backend opened read-only by default (`open(path, true)` opts into writes).
 The source is FatFs R0.16 patch 2 from the Zephyr mirror, pinned as a submodule.
 Only its generic filesystem and Unicode sources are compiled; no Zephyr runtime
 or disk driver is used.
 
 The configuration supports FAT12/16/32, 512-byte sectors, UTF-8 long filenames,
-four volumes, and 32-bit sector addresses. There is no heap allocation, formatting,
-file creation, or write API. exFAT is not enabled. Long-name work buffers use the
+four volumes, and 32-bit sector addresses. There is no heap allocation or formatting API. Mounts default to read-only;
+new-file creation requires an explicit read-write mount. exFAT is not enabled. Long-name work buffers use the
 calling stack. Paths are volume-relative, at most 255 bytes; drive prefixes
 and embedded NULs are rejected.
 
@@ -75,13 +75,72 @@ rejects another probe until unmounted. Listing stops after 256 entries.
 Read emits hex/ASCII, defaults to offset zero and 128 bytes, and accepts 1–4096
 bytes per request. It never sends binary file contents directly to a console.
 
-The current initialized-card reader uses CMD17 and verifies each sector's CRC16.
+The initialized-card transport uses CMD17 and verifies each sector's CRC16.
 It reuses the probe's fixed capture window at 1 MHz, including clocks for a
 100 ms response allowance even when the card answers early. This prioritizes
 reuse and validation over throughput; staged response capture, multiblock reads
 and SPI DMA remain future work. Only SDHC/SDXC cards are supported.
 On a read failure, unmount and run `sd probe` again before remounting.
 There is no hot-plug automount or card-detect pin contract.
+
+## Opt-in file creation
+
+```text
+fs unmount
+fs mount rw
+fs create "new-file.txt" "Hello from DaveOS"
+fs unmount
+fs mount
+fs read "new-file.txt"
+```
+
+`fs mount` and `fs mount ro` mount read-only. Changing mode requires unmounting
+first. The C++ API is `Volume::mount(bool writable = false)`; write mounts
+require injected `write` and `sync` callbacks. Read-only protection is enforced
+both in the wrapper and the FatFs disk bridge, even with a write-capable device.
+
+`Volume::create(path)` uses `FA_CREATE_NEW`: existing files are never truncated.
+`write(bytes, count)` reports the actual count (including short writes on full
+media); `sync()` and `close()` report errors. The console command copies up to
+128 bytes of text, creates a new file, writes, syncs and closes before logging
+success. It adds no newline. Failure may leave an empty or partial new file;
+creation is not an atomic transaction, and there is no automatic deletion,
+overwrite, retry or power-loss guarantee. This phase does not expose append,
+rename or formatting commands. With no RTC, FatFs uses the fixed date
+in `storage/config.h`.
+
+The SD writer sends CMD24, checks R1 before sending the token/data/CRC16,
+checks the data-response token, and holds CS through a conservative 500 ms
+programming allowance. It then requires ready and clean CMD13 status. Each
+sector has a one-second HAL deadline; failures invalidate the example's media
+readiness. The next operation requires unmount/probe/remount. The fixed allowance
+is deliberately slow; adaptive busy polling is future work. Other tasks can
+run through yield during the wait.
+
+Protocol reference: [Elm-Chan's SD SPI write sequence](https://elm-chan.org/docs/mmc/mmc_e.html).
+The SPI response-check action inspects already received bytes while CS remains
+asserted and aborts later actions on mismatch.
+
+## Removing files
+
+```text
+fs unmount
+fs mount rw
+fs rm "some directory/file.txt"
+```
+
+`fs rm` removes one file, including its long name and allocated clusters; it
+does not accept directories or perform recursive deletion. Read-only mounts
+return `write_protected`, missing files return `no_file`, and directories
+return `denied` (the root path may return `invalid_name`). The C++ operation is
+`Volume::remove(path)`. Open file/directory handles and nested operations are
+rejected as `locked`.
+
+The worker owns a copy of the path and reports completion asynchronously.
+Lookup and unlink share one volume guard across yielded work. FatFs flushes
+metadata and calls the device's sync hook before success. As with creation,
+a write/sync failure can leave an operation partially applied; there is no undo
+or power-loss guarantee.
 
 ## Validation
 
@@ -121,3 +180,37 @@ These checks establish read/seek consistency, not byte-for-byte comparison
 against independently obtained originals or qualification of fragmented files
 on hardware (fragmented-file coverage remains in the host tests). No card data
 was written. Card-removal recovery and large-directory workloads remain open.
+
+The opt-in write HIL case subsequently created
+`daveos-write-test-20260921-c.txt`, synced/closed it, refused a second creation
+of the same name, remounted read-only and verified all 63 bytes. Read-only
+mounting rejected creation as expected. Watchdog/fault checks passed; the stack
+watermark was 3,488 bytes with zero heap requests. Two initial attempts left
+empty `daveos-write-test-20260921.txt` and `daveos-write-test-20260921-b.txt`
+files when the first busy-release byte was 0x03. The writer now clocks an
+eight-byte ready window and checks its final byte; the partial-byte case is
+covered by a scripted regression test. The empty files were left intact.
+
+Host write tests cover remount/readback across clusters, preservation of an
+existing file, create-only semantics, empty files, disk-full short writes,
+write/sync failures, read-only enforcement and copied command arguments.
+Scripted SPI tests reject command/data/status errors and a still-busy card.
+Write HIL is opt-in through `DAVEOS_HIL_SD_WRITE_PATH`; ordinary HIL runs do not
+create files. The current opt-in case also removes its newly created file,
+remounts and verifies absence. It never selects an existing file for deletion.
+This is initial write validation, not power-loss qualification.
+
+After creation, all 69 original-file checks passed again and the saved
+pre-write content-sample hashes matched. Full ASan/UBSan passed 32/32; targeted
+HAL/storage tests passed under TSan and with logging disabled. Formatting and
+cppcheck passed. H563 A/B firmware was built/programmed for these checks;
+H755 remains build-only for the bus changes.
+
+Removal validation passed in ASan/UBSan and logging-disabled storage tests:
+subdirectory/long-name removal, persistence across remount, preservation of
+another file, rejection of directories/root/read-only/open-handle operations,
+missing/invalid paths, sync-error propagation and borrowed command-path copying.
+On H563 the opt-in cycle created and removed `daveos-rm-test-20260921.txt`,
+then remounted and confirmed `no_file`. Read-only and root-path rejection,
+watchdog health and retained-fault checks also passed. Only that newly created
+test file was removed; previous files remain. Formatting and lint passed.

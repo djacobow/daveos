@@ -236,6 +236,16 @@ namespace daveos::hal {
               break;
             }
             const auto& action = c.actions_[c.completed_];
+            if (detail::Checks(action)) {
+              if (detail::Matches(action)) {
+                ++c.completed_;
+              } else {
+                c.status_ = Status::response_mismatch;
+                ns = State::finish;
+              }
+              c.again_ = true;
+              break;
+            }
             if (const auto pause = detail::Pause(action)) {
               c.pause_due_ = c.timing_.now();
               if (!detail::Add(c.pause_due_, pause) ||
@@ -405,7 +415,8 @@ namespace daveos::hal {
                              : Status::invalid_argument;
       if (status == Status::ok) {
         for (const auto& action : actions) {
-          status = backend_.validate_action(action);
+          status = detail::Checks(action) ? Status::ok
+                                          : backend_.validate_action(action);
           if (status != Status::ok) {
             break;
           }

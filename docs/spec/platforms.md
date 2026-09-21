@@ -427,6 +427,17 @@ General CS changes are not actions in the initial API; devices that need CS
 released between command and result use separate transactions. A dedicated
 unselected-clock operation is the exception described below.
 
+### SPI response checks
+
+`spi::check_response(bytes, expected, mask=0xff, idle=0xff)` examines 1–32
+borrowed bytes already populated by an earlier read, without clocking or
+releasing CS. Skip leading idle bytes, then compare the first non-idle byte
+under the mask. No response or mismatch completes with `response_mismatch`
+and prevents all later actions. The scan is bounded and runs in interrupt
+context, invokes no application code, and adds no read/write attempts. Reject
+invalid lengths/masks during admission. Like pauses, checks remain subject to
+the whole-transaction deadline and normal cleanup.
+
 ### SPI initialization clocks with CS inactive
 
 Provide a dedicated SPI operation type for generating clocks while CS remains
@@ -763,7 +774,7 @@ card or display. Full device-protocol models are not required for this phase.
   This is not filesystem consistency testing or qualification of every SPI
   mode. H755 bus adapters have ARM compile coverage; physical I2C and H755
   bus qualification require fixtures. See [SD inspection](../spi-i2c.md#h563-sd-fixture-and-validation).
-- The optional [read-only FatFs worker](../storage.md) uses the initialized card
+- The optional [FatFs worker](../storage.md) uses the initialized card
   through an injected SD reader. SPI DMA, efficient staged/multiblock capture,
   automatic I2C bus-release pulses, and wider
   bus/device hardware qualification remain separate work.

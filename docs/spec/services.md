@@ -467,7 +467,7 @@ qualification step, after host and emulator coverage. H755 OTP is outside this
 initial adapter implementation. File paths and injected objects outlive their
 borrowers and remain valid for file-scope construction.
 
-## Read-only filesystem service
+## Filesystem service
 
 The optional `storage/` component owns no hardware. Its injected block-device
 contract supplies readiness, capacity, synchronous reads and an exclusive mount
@@ -476,9 +476,13 @@ completion with task-only yield. Accepted I/O must complete or time out before
 borrowed buffers are released. All volumes are accessed on one execution thread;
 same-volume re-entry fails immediately rather than waiting.
 
-FatFs is a pinned submodule, configured without heap allocation or writes.
+FatFs is a pinned submodule, configured without heap allocation. Mounts are
+read-only by default; an explicit read-write mount requires injected write/sync
+callbacks. New-file creation never overwrites an existing file. Removal requires a
+read-write mount, rejects directories, holds the volume guard across lookup and
+unlink, and reports success only after metadata synchronization.
 Application-owned volumes attach explicitly to a fixed C-ABI drive registry.
 The optional module serializes requests in a one-shot worker and returns between
 output records. Paths are copied before command dispatch returns. The initial
-commands mount, unmount, list and preview files; FAT12/16/32 and 512-byte sectors
+commands mount, unmount, list, preview, create and remove files; FAT12/16/32 and 512-byte sectors
 are supported. See [storage](../storage.md) for limits, configuration and tests.

@@ -53,7 +53,7 @@ def main():
                              if path.suffix in (".h", ".hpp"))
         hal_headers += [str(ROOT / name) for name in (
             "platform/fake/bus.hpp", "platform/stm32/bus/driver.h",
-            "storage/module.hpp", "storage/sd/reader.h")]
+            "storage/module.hpp", "storage/sd/transport.h")]
         subprocess.run(command + ["--language=c++", *hal_headers], cwd=ROOT, check=True)
 
 

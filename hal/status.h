@@ -19,6 +19,7 @@ namespace daveos::hal {
   X(nack)                           \
   X(arbitration_lost)               \
   X(hardware_error)                 \
+  X(response_mismatch)              \
   X(faulted)
   DAVEOS_ENUM(Status, std::uint8_t, DAVEOS_HAL_STATUS_VALUES)
 #undef DAVEOS_HAL_STATUS_VALUES

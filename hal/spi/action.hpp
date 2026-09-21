@@ -10,7 +10,8 @@ namespace daveos::hal::spi {
     read,
     exchange,
     pause,
-    idle_clocks
+    idle_clocks,
+    check_response
   };
 
   // Borrowed buffers: exchange spans must be equal-sized and nonoverlapping.
@@ -45,6 +46,20 @@ namespace daveos::hal::spi {
 
   constexpr Action idle_clocks(std::uint64_t cycles) {
     return {Operation::idle_clocks, {}, {}, cycles};
+  }
+
+  // Examine a previously received response without clocking or releasing CS.
+  // Skip leading idle bytes; compare the first response under mask. At most
+  // 32 bytes are scanned in interrupt context. No match aborts the transaction.
+  constexpr Action check_response(std::span<const std::uint8_t> bytes,
+                                  std::uint8_t expected,
+                                  std::uint8_t mask = 0xff,
+                                  std::uint8_t idle = 0xff) {
+    return {Operation::check_response,
+            bytes,
+            {},
+            std::uint64_t{expected} | (std::uint64_t{mask} << 8),
+            idle};
   }
 
   using Result = hal::Result<Action>;

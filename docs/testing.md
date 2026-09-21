@@ -253,8 +253,13 @@ missing-file errors, media reservation, unmount/remount and watchdog health.
 The `storage` host test exercises actual FatFs over a synthetic file image plus
 scripted async SD completion/error paths. See [storage](storage.md).
 The portable `sd-inspect` test covers wire decoding and malformed on-card data.
-It factory-provisions main flash through the normal HIL fixture and never
-writes the card or real OTP. See [SPI/I2C](spi-i2c.md) for wiring and scope.
+The read-only cases factory-provision main flash through the normal HIL fixture
+and never write the card or real OTP. The separate `test_create_file_opt_in`
+case requires `DAVEOS_HIL_SD_WRITE_PATH=new-unique-name.txt`; it creates that
+new file, refuses overwrite, syncs/closes, remounts and verifies the contents.
+It then removes its newly created file and verifies absence after remounting,
+including read-only/root-directory rejection checks. A used name is an error,
+not permission to replace or remove an existing file. Real OTP remains untouched. See [SPI/I2C](spi-i2c.md) for wiring and scope.
 The portable `hal` test covers both buses using scripted backends, including
 callback chaining, stale alarms, contention, and concurrent result publication.
 

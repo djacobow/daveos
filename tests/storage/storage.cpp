@@ -284,3 +284,236 @@ TEST_CASE(
 #endif
   CHECK(image.device.close());
 }
+
+TEST_CASE(
+    "write mounts are opt-in and new files survive sync close and remount") {
+  Image image;
+  REQUIRE(image.device.close());
+  REQUIRE(image.device.open(image.path.c_str(), true));
+  storage::Volume volume(image.device.device());
+  REQUIRE(volume.attach() == FR_OK);
+  REQUIRE(volume.mount() == FR_OK);
+  CHECK(volume.create("new.txt") == FR_WRITE_PROTECTED);
+  CHECK(volume.mount(true) == FR_LOCKED);
+  REQUIRE(volume.unmount() == FR_OK);
+  REQUIRE(volume.mount(true) == FR_OK);
+  CHECK(volume.create("Long name.txt") == FR_EXIST);
+  REQUIRE(volume.create("new long name.txt") == FR_OK);
+  std::array<std::uint8_t, 1700> data{};
+  for (std::size_t i = 0; i < data.size(); ++i) {
+    data[i] = static_cast<std::uint8_t>(i * 13);
+  }
+  std::uint32_t count = 0;
+  REQUIRE(volume.write(data, count) == FR_OK);
+  CHECK(count == data.size());
+  REQUIRE(volume.sync() == FR_OK);
+  REQUIRE(volume.close() == FR_OK);
+  CHECK(volume.create("new long name.txt") == FR_EXIST);
+  REQUIRE(volume.unmount() == FR_OK);
+  REQUIRE(volume.mount() == FR_OK);
+  REQUIRE(volume.open("new long name.txt") == FR_OK);
+  std::array<std::uint8_t, 1800> read{};
+  REQUIRE(volume.read(read, count) == FR_OK);
+  CHECK(count == data.size());
+  CHECK(std::equal(data.begin(), data.end(), read.begin()));
+  REQUIRE(volume.close() == FR_OK);
+  REQUIRE(volume.open("Long name.txt") == FR_OK);
+  REQUIRE(volume.read(read, count) == FR_OK);
+  CHECK(count == image.contents.size());
+  CHECK(std::equal(image.contents.begin(), image.contents.end(), read.begin()));
+  REQUIRE(volume.unmount() == FR_OK);
+}
+
+TEST_CASE(
+    "readonly backends reject write mounts and write sync failures propagate") {
+  Image image;
+  {
+    storage::Volume volume(image.device.device());
+    REQUIRE(volume.attach() == FR_OK);
+    CHECK(volume.mount(true) == FR_WRITE_PROTECTED);
+  }
+  REQUIRE(image.device.close());
+  REQUIRE(image.device.open(image.path.c_str(), true));
+  auto device = image.device.device();
+  device.write = [](void*, std::uint32_t, std::span<const std::uint8_t>) {
+    return false;
+  };
+  {
+    storage::Volume volume(device);
+    REQUIRE(volume.attach() == FR_OK);
+    REQUIRE(volume.mount(true) == FR_OK);
+    const auto created = volume.create("fail.txt");
+    if (created == FR_OK) {
+      CHECK(volume.sync() == FR_DISK_ERR);
+    } else {
+      CHECK(created == FR_DISK_ERR);
+    }
+  }
+  device = image.device.device();
+  device.sync = [](void*) { return false; };
+  storage::Volume volume(device);
+  REQUIRE(volume.attach() == FR_OK);
+  REQUIRE(volume.mount(true) == FR_OK);
+  const auto created = volume.create("syncfail.txt");
+  if (created == FR_OK) {
+    CHECK(volume.sync() == FR_DISK_ERR);
+  } else {
+    CHECK(created == FR_DISK_ERR);
+  }
+}
+
+TEST_CASE("filesystem create command owns its text until the worker syncs it") {
+  Image image;
+  REQUIRE(image.device.close());
+  REQUIRE(image.device.open(image.path.c_str(), true));
+  testing::Fake platform;
+  storage::Module<testing::Event> fs(image.device.device());
+  testing::TestModule control;
+  auto scheduler = core::make_scheduler<testing::Event>(
+      platform, core::ModuleList{&fs, &control});
+  REQUIRE(scheduler.init() == core::Status::ok);
+  control.first_action = [&] {
+    CHECK(fs.Mount(storage::MountMode::rw) == core::Status::ok);
+  };
+  control.second_action = [&] {
+    std::string name = "copied.txt", text = "Copied command text.";
+    CHECK(fs.Create(name, text) == core::Status::ok);
+    CHECK(fs.Create("other.txt", "no") == core::Status::busy);
+    name.assign("wrong.txt");
+    text.assign("discarded");
+  };
+  control.third_action = [&] {
+    CHECK(fs.Unmount() == core::Status::ok);
+    scheduler.timer(
+        10000, +[] { testing::timer_action(); });
+  };
+  testing::timer_action = [&] { scheduler.stop(); };
+  scheduler.schedule(control, &testing::TestModule::first, 0);
+  scheduler.schedule(control, &testing::TestModule::second, 10000);
+  scheduler.schedule(control, &testing::TestModule::third, 20000);
+  REQUIRE(scheduler.run() == core::Status::ok);
+  storage::Volume volume(image.device.device());
+  REQUIRE(volume.attach() == FR_OK);
+  REQUIRE(volume.mount() == FR_OK);
+  REQUIRE(volume.open("copied.txt") == FR_OK);
+  std::array<std::uint8_t, 100> bytes{};
+  std::uint32_t count = 0;
+  REQUIRE(volume.read(bytes, count) == FR_OK);
+  CHECK(std::string_view(reinterpret_cast<const char*>(bytes.data()), count) ==
+        "Copied command text.");
+}
+
+TEST_CASE("FatFs reports short writes on full media and handles empty files") {
+  Image image;
+  REQUIRE(image.device.close());
+  REQUIRE(image.device.open(image.path.c_str(), true));
+  storage::Volume volume(image.device.device());
+  REQUIRE(volume.attach() == FR_OK);
+  REQUIRE(volume.mount(true) == FR_OK);
+  REQUIRE(volume.create("empty.txt") == FR_OK);
+  REQUIRE(volume.sync() == FR_OK);
+  REQUIRE(volume.close() == FR_OK);
+  REQUIRE(volume.create("full.bin") == FR_OK);
+  std::vector<std::uint8_t> bytes(8192 * 512, 0x5a);
+  std::uint32_t count = 0;
+  REQUIRE(volume.write(bytes, count) == FR_OK);
+  CHECK(count > 0);
+  CHECK(count < bytes.size());
+  REQUIRE(volume.sync() == FR_OK);
+  REQUIRE(volume.close() == FR_OK);
+  REQUIRE(volume.unmount() == FR_OK);
+  REQUIRE(volume.mount() == FR_OK);
+  REQUIRE(volume.open("empty.txt") == FR_OK);
+  REQUIRE(volume.read(bytes, count) == FR_OK);
+  CHECK(count == 0);
+}
+
+TEST_CASE("file removal requires rw rejects directories and survives remount") {
+  Image image;
+  REQUIRE(image.device.close());
+  REQUIRE(image.device.open(image.path.c_str(), true));
+  storage::Volume volume(image.device.device());
+  REQUIRE(volume.attach() == FR_OK);
+  CHECK(volume.remove("HELLO.TXT") == FR_NOT_READY);
+  REQUIRE(volume.mount() == FR_OK);
+  CHECK(volume.remove("HELLO.TXT") == FR_WRITE_PROTECTED);
+  REQUIRE(volume.unmount() == FR_OK);
+  REQUIRE(volume.mount(true) == FR_OK);
+  REQUIRE(volume.create("/EMPTY/remove this.txt") == FR_OK);
+  const std::array<std::uint8_t, 1300> contents{};
+  std::uint32_t count = 0;
+  REQUIRE(volume.write(contents, count) == FR_OK);
+  REQUIRE(count == contents.size());
+  CHECK(volume.remove("HELLO.TXT") == FR_LOCKED);
+  REQUIRE(volume.close() == FR_OK);
+  CHECK(volume.remove("/EMPTY") == FR_DENIED);
+  CHECK(volume.remove("/EMPTY/") == FR_DENIED);
+  CHECK(volume.remove("/") != FR_OK);
+  CHECK(volume.remove("1:/HELLO.TXT") == FR_INVALID_NAME);
+  CHECK(volume.remove("missing.txt") == FR_NO_FILE);
+  REQUIRE(volume.open_directory("/EMPTY") == FR_OK);
+  CHECK(volume.remove("/EMPTY/remove this.txt") == FR_LOCKED);
+  REQUIRE(volume.close() == FR_OK);
+  REQUIRE(volume.remove("/EMPTY/remove this.txt") == FR_OK);
+  CHECK(volume.remove("/EMPTY/remove this.txt") == FR_NO_FILE);
+  REQUIRE(volume.unmount() == FR_OK);
+  REQUIRE(volume.mount() == FR_OK);
+  CHECK(volume.open("/EMPTY/remove this.txt") == FR_NO_FILE);
+  REQUIRE(volume.open("Long name.txt") == FR_OK);
+  std::array<std::uint8_t, 700> original{};
+  REQUIRE(volume.read(original, count) == FR_OK);
+  CHECK(original == image.contents);
+  REQUIRE(volume.close() == FR_OK);
+  REQUIRE(volume.open_directory("/EMPTY") == FR_OK);
+  FILINFO entry{};
+  REQUIRE(volume.next(entry) == FR_OK);
+  CHECK(entry.fname[0] == 0);
+}
+
+TEST_CASE("file removal propagates sync errors") {
+  Image image;
+  REQUIRE(image.device.close());
+  REQUIRE(image.device.open(image.path.c_str(), true));
+  auto device = image.device.device();
+  device.sync = [](void*) { return false; };
+  storage::Volume volume(device);
+  REQUIRE(volume.attach() == FR_OK);
+  REQUIRE(volume.mount(true) == FR_OK);
+  CHECK(volume.remove("HELLO.TXT") == FR_DISK_ERR);
+}
+
+TEST_CASE("filesystem remove command copies its path before dispatch returns") {
+  Image image;
+  REQUIRE(image.device.close());
+  REQUIRE(image.device.open(image.path.c_str(), true));
+  testing::Fake platform;
+  storage::Module<testing::Event> fs(image.device.device());
+  testing::TestModule control;
+  auto scheduler = core::make_scheduler<testing::Event>(
+      platform, core::ModuleList{&fs, &control});
+  REQUIRE(scheduler.init() == core::Status::ok);
+  control.first_action = [&] {
+    CHECK(fs.Mount(storage::MountMode::rw) == core::Status::ok);
+  };
+  control.second_action = [&] {
+    std::string path = "Long name.txt";
+    CHECK(fs.Remove(path) == core::Status::ok);
+    CHECK(fs.Remove("other.txt") == core::Status::busy);
+    path.assign("discarded");
+  };
+  control.third_action = [&] {
+    CHECK(fs.Unmount() == core::Status::ok);
+    scheduler.timer(
+        10000, +[] { testing::timer_action(); });
+  };
+  testing::timer_action = [&] { scheduler.stop(); };
+  scheduler.schedule(control, &testing::TestModule::first, 0);
+  scheduler.schedule(control, &testing::TestModule::second, 10000);
+  scheduler.schedule(control, &testing::TestModule::third, 20000);
+  REQUIRE(scheduler.run() == core::Status::ok);
+  storage::Volume volume(image.device.device());
+  REQUIRE(volume.attach() == FR_OK);
+  REQUIRE(volume.mount() == FR_OK);
+  CHECK(volume.open("Long name.txt") == FR_NO_FILE);
+  REQUIRE(volume.open_directory("/EMPTY") == FR_OK);
+}

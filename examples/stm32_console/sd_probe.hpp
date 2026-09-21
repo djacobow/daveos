@@ -9,7 +9,7 @@
 #include "hal/controller.hpp"
 #include "platform/stm32h5/bus.h"
 #include "sd_inspect.h"
-#include "storage/sd/reader.h"
+#include "storage/sd/transport.h"
 
 namespace app {
 
@@ -109,16 +109,7 @@ namespace app {
                 if (!self.ready_ || !self.leased_) {
                   return false;
                 }
-                daveos::storage::sd::Reader reader(
-                    self.bus_.device<0>(), self.rx_, self.backend_.rate(0),
-                    self.card_.sectors,
-                    {&self, [](void* context) {
-                       const auto status =
-                           static_cast<SdProbe*>(context)->scheduler().yield();
-                       return status == core::Status::ok ||
-                              status == core::Status::empty ||
-                              status == core::Status::depth_limit;
-                     }});
+                auto reader = self.Transport();
                 if (!reader.read(sector, bytes)) {
                   self.ready_ = false;
                   return false;
@@ -134,12 +125,61 @@ namespace app {
                 self.leased_ = true;
                 return true;
               },
-              [](void* p) { static_cast<SdProbe*>(p)->leased_ = false; }};
+              [](void* p) { static_cast<SdProbe*>(p)->leased_ = false; },
+              [](void* p, std::uint32_t sector,
+                 std::span<const std::uint8_t> bytes) {
+                auto& self = *static_cast<SdProbe*>(p);
+                if (!self.ready_ || !self.leased_) {
+                  return false;
+                }
+                auto transport = self.Transport();
+                if (!transport.write(sector, bytes)) {
+                  self.WriteFailure(sector, transport.write_diagnostics());
+                  self.ready_ = false;
+                  return false;
+                }
+                return true;
+              },
+              [](void* p) {
+                const auto& self = *static_cast<SdProbe*>(p);
+                // Every successful sector write waits for ready and CMD13.
+                return self.ready_ && self.leased_;
+              }};
     }
 
     void Tick() { machine_.tick(*this); }
 
    private:
+    void WriteFailure(
+        std::uint32_t sector,
+        const daveos::storage::sd::Transport::WriteDiagnostics& d) {
+      E_("SD write LBA %" PRIu32 " CMD%" PRIu32 ": %s after %" PRIu32
+         " actions; R1 %02" PRIx32 " %02" PRIx32 " token %02" PRIx32
+         " ready %02" PRIx32 " status %02" PRIx32 " %02" PRIx32,
+         sector, d.command, enum_name(d.status),
+         static_cast<std::uint32_t>(d.completed_actions),
+         static_cast<std::uint32_t>(d.response[0]),
+         static_cast<std::uint32_t>(d.response[1]),
+         static_cast<std::uint32_t>(d.accepted[0]),
+         static_cast<std::uint32_t>(d.ready.back()),
+         static_cast<std::uint32_t>(d.card_status[0]),
+         static_cast<std::uint32_t>(d.card_status[1]));
+    }
+
+    daveos::storage::sd::Transport Transport() {
+      return {bus_.device<0>(),
+              rx_,
+              backend_.rate(0),
+              card_.sectors,
+              {this, [](void* context) {
+                 const auto status =
+                     static_cast<SdProbe*>(context)->scheduler().yield();
+                 return status == core::Status::ok ||
+                        status == core::Status::empty ||
+                        status == core::Status::depth_limit;
+               }}};
+    }
+
     enum class State { idle, clocks, command, gap, done, failed, count };
 
     struct Machine

@@ -150,7 +150,17 @@ section supersedes older H755 hardware deferrals; remaining gaps are explicit.
 - [x] Implement cooperative inactive-slot OTA with chunk/final CRC, injected flash driver, and explicit flash layout.
 - [x] Expand H563 `sd probe` with CSD/CID, CRC16-checked CMD17 reads, repeated 250 kHz/1 MHz comparisons, and read-only MBR/FAT BPB inspection. Five HIL probes passed (60 sector reads); connected 32 GB card reports FAT32, 32 KiB clusters. No card writes or filesystem mount.
 - [x] Add read-only FatFs as a pinned submodule, injected block-device/volume APIs, file-backed host tests and an optional serialized filesystem module.
-- [ ] Plan and implement filesystem writes, including media removal and power-loss behavior; current FatFs configuration is strictly read-only.
+- [x] Add opt-in read-write mounting and new-file creation with sync/close,
+  injected write/sync callbacks, host file writes and SPI response checks.
+  H563 creation/remount/readback and overwrite refusal passed; 69 original-file
+  read checks still pass with matching saved content samples. Two empty files
+  from the initial busy-release diagnosis remain on the card; see storage docs.
+- [x] Add `fs rm` / `Volume::remove`: files only, read-write mounts, copied
+  command paths, metadata sync and open-handle/reentry protection. ASan/UBSan
+  and logging-disabled storage tests passed; H563 create/remove/remount HIL
+  passed with only its newly created temporary file removed.
+- [ ] Qualify write power-loss/media-removal behavior; add efficient SD busy
+  polling, multiblock writes and further file operations separately.
 - [ ] Implememnt a display driver module for ssd1306 devices using DI of the I2C via the layer above
 
 - [x] Add task-only nested `yield()`, one eligible callback per call, bounded depth, context diagnostics and elapsed/self/nested accounting.

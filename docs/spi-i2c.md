@@ -42,7 +42,12 @@ original references and may reuse them to start another transaction immediately.
 An exchange requires equal-length, nonoverlapping TX/RX buffers.
 
 SPI actions are `write`, `read` (fill byte defaults to 0xff), `exchange`, and
-`pause(chrono_duration)`. CS stays asserted across the list, including pauses.
+`pause(chrono_duration)`, and `check_response(bytes, expected, mask, idle)`.
+The response check scans at most 32 previously received bytes, skips leading
+idle bytes (default 0xff), and compares the first response under the mask
+(default 0xff). Mismatch or no response ends the transaction with
+`response_mismatch`; subsequent actions never start. It performs no bus I/O.
+CS stays asserted across the list, including pauses.
 `idle_clocks(80)` is a standalone transaction: MOSI high, CS inactive, positive
 multiple of eight clock cycles. Idle clocks count as a transaction, not a
 read/write action. There is no internal transaction queue, retry or cancellation.
@@ -181,8 +186,9 @@ overlap. The formats follow the [SD physical-layer specification](https://www.sd
 and [Microsoft FAT specification](https://www.scs.stanford.edu/~zyedidia/docs/_other/fat.pdf).
 
 `tests/hil/h563/test_spi.py` requires this build option and a connected card.
-Like other HIL cases, it factory-provisions main flash first; it never writes
-the card or real OTP. Five consecutive complete inspections passed on H563:
+Like other HIL cases, it factory-provisions main flash first. The inspection
+and read-only filesystem cases never write the card or real OTP. A separate
+file-creation case requires explicit opt-in; see [storage](storage.md). Five consecutive complete inspections passed on H563:
 60 sector reads with matching CRCs/data at both rates, followed by healthy
 watchdog and empty retained-fault checks. The connected card reports:
 

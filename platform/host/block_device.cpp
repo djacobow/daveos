@@ -15,11 +15,11 @@ namespace daveos::platform::host {
     }
   }
 
-  bool FileBlockDevice::open(const char* path) {
+  bool FileBlockDevice::open(const char* path, bool writable) {
     if (!path || descriptor_ >= 0 || leased_) {
       return false;
     }
-    auto fd = ::open(path, O_RDONLY | O_CLOEXEC);
+    auto fd = ::open(path, (writable ? O_RDWR : O_RDONLY) | O_CLOEXEC);
     if (fd < 0) {
       return false;
     }
@@ -32,6 +32,7 @@ namespace daveos::platform::host {
       return false;
     }
     descriptor_ = fd;
+    writable_ = writable;
     sectors_ = static_cast<std::uint64_t>(info.st_size) / storage::kSectorBytes;
     return true;
   }
@@ -45,6 +46,7 @@ namespace daveos::platform::host {
       descriptor_ = -1;
     }
     sectors_ = 0;
+    writable_ = false;
     return true;
   }
 
@@ -73,24 +75,62 @@ namespace daveos::platform::host {
     return true;
   }
 
+  bool FileBlockDevice::Write(std::uint32_t sector,
+                              std::span<const std::uint8_t> bytes) {
+    if (!writable_ || !leased_ || descriptor_ < 0 || bytes.empty() ||
+        bytes.size() % storage::kSectorBytes ||
+        std::uint64_t{sector} + bytes.size() / storage::kSectorBytes >
+            sectors_) {
+      return false;
+    }
+    const auto offset = std::uint64_t{sector} * storage::kSectorBytes;
+    std::size_t done = 0;
+    while (done < bytes.size()) {
+      const auto written =
+          ::pwrite(descriptor_, bytes.data() + done, bytes.size() - done,
+                   static_cast<off_t>(offset + done));
+      if (written < 0 && errno == EINTR) {
+        continue;
+      }
+      if (written <= 0) {
+        return false;
+      }
+      done += static_cast<std::size_t>(written);
+    }
+    return true;
+  }
+
   storage::BlockDevice FileBlockDevice::device() {
-    return {this,
-            [](void* p) {
-              return static_cast<FileBlockDevice*>(p)->descriptor_ >= 0;
-            },
-            [](void* p) { return static_cast<FileBlockDevice*>(p)->sectors_; },
-            [](void* p, std::uint32_t sector, std::span<std::uint8_t> bytes) {
-              return static_cast<FileBlockDevice*>(p)->Read(sector, bytes);
-            },
-            [](void* p) {
-              auto& self = *static_cast<FileBlockDevice*>(p);
-              if (self.leased_ || self.descriptor_ < 0) {
-                return false;
-              }
-              self.leased_ = true;
-              return true;
-            },
-            [](void* p) { static_cast<FileBlockDevice*>(p)->leased_ = false; }};
+    storage::BlockDevice result{
+        this,
+        [](void* p) {
+          return static_cast<FileBlockDevice*>(p)->descriptor_ >= 0;
+        },
+        [](void* p) { return static_cast<FileBlockDevice*>(p)->sectors_; },
+        [](void* p, std::uint32_t sector, std::span<std::uint8_t> bytes) {
+          return static_cast<FileBlockDevice*>(p)->Read(sector, bytes);
+        },
+        [](void* p) {
+          auto& self = *static_cast<FileBlockDevice*>(p);
+          if (self.leased_ || self.descriptor_ < 0) {
+            return false;
+          }
+          self.leased_ = true;
+          return true;
+        },
+        [](void* p) { static_cast<FileBlockDevice*>(p)->leased_ = false; }};
+    if (writable_) {
+      result.write = [](void* p, std::uint32_t sector,
+                        std::span<const std::uint8_t> bytes) {
+        return static_cast<FileBlockDevice*>(p)->Write(sector, bytes);
+      };
+      result.sync = [](void* p) {
+        auto& self = *static_cast<FileBlockDevice*>(p);
+        return self.leased_ && self.writable_ && self.descriptor_ >= 0 &&
+               ::fsync(self.descriptor_) == 0;
+      };
+    }
+    return result;
   }
 
 

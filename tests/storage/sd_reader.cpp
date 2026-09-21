@@ -1,6 +1,6 @@
 #include "hal/controller.hpp"
 #include "platform/fake/bus.hpp"
-#include "storage/sd/reader.h"
+#include "storage/sd/transport.h"
 #include "support.hpp"
 
 namespace {
@@ -14,10 +14,10 @@ namespace {
     fake::SpiBus backend;
     hal::Controller<fake::SpiBus, fake::BusClock<>, fake::BusCritical, 1> bus{
         backend, clock, critical, {{{1, 1000000}}}};
-    std::array<std::uint8_t, sd::Reader::kCaptureBytes> scratch{};
+    std::array<std::uint8_t, sd::Transport::kCaptureBytes> scratch{};
     bool keep_going = true;
     std::uint32_t pumps = 0;
-    sd::Reader reader{
+    sd::Transport reader{
         bus.device<0>(),
         scratch,
         1000000,
@@ -44,7 +44,7 @@ TEST_CASE("SD command CRC and asynchronous sector adapter validate data") {
   REQUIRE(sd::command(0, 0)[5] == 0x95);
   REQUIRE(sd::command(8, 0x1aa)[5] == 0x87);
   Fixture f;
-  std::array<std::uint8_t, sd::Reader::kCaptureBytes - 1> wire;
+  std::array<std::uint8_t, sd::Transport::kCaptureBytes - 1> wire;
   wire.fill(0xff);
   wire[0] = 0;
   wire[1] = 0xfe;
@@ -83,16 +83,16 @@ TEST_CASE("SD reader waits for timeout before releasing buffers after abort") {
   f.backend.script(script);
   // Preflight succeeds; the first in-flight pump requests abort. Hardware is
   // hung, so the reader must continue pumping until the HAL timeout fires.
-  sd::Reader reader{f.bus.device<0>(),
-                    f.scratch,
-                    1000000,
-                    8192,
-                    {&f, [](void* p) {
-                       auto& fixture = *static_cast<Fixture*>(p);
-                       const auto first = fixture.pumps == 0;
-                       fixture.Pump();
-                       return first;
-                     }}};
+  sd::Transport reader{f.bus.device<0>(),
+                       f.scratch,
+                       1000000,
+                       8192,
+                       {&f, [](void* p) {
+                          auto& fixture = *static_cast<Fixture*>(p);
+                          const auto first = fixture.pumps == 0;
+                          fixture.Pump();
+                          return first;
+                        }}};
   std::array<std::uint8_t, 512> bytes{};
   CHECK_FALSE(reader.read(0, bytes));
   CHECK(f.pumps >= 250);
@@ -109,7 +109,7 @@ TEST_CASE("SD reader waits for timeout before releasing buffers after abort") {
 
 TEST_CASE("SD reader handles consecutive sectors and rejects reentry") {
   Fixture f;
-  std::array<std::uint8_t, sd::Reader::kCaptureBytes - 1> wire;
+  std::array<std::uint8_t, sd::Transport::kCaptureBytes - 1> wire;
   wire.fill(0xff);
   wire[0] = 0;
   wire[1] = 0xfe;
@@ -126,19 +126,19 @@ TEST_CASE("SD reader handles consecutive sectors and rejects reentry") {
 
   struct Context {
     Fixture& fixture;
-    sd::Reader* reader = nullptr;
+    sd::Transport* reader = nullptr;
   } context{f};
 
-  sd::Reader reader{f.bus.device<0>(),
-                    f.scratch,
-                    1000000,
-                    8192,
-                    {&context, [](void* p) {
-                       auto& c = *static_cast<Context*>(p);
-                       std::array<std::uint8_t, 512> nested{};
-                       CHECK_FALSE(c.reader->read(0, nested));
-                       return c.fixture.Pump();
-                     }}};
+  sd::Transport reader{f.bus.device<0>(),
+                       f.scratch,
+                       1000000,
+                       8192,
+                       {&context, [](void* p) {
+                          auto& c = *static_cast<Context*>(p);
+                          std::array<std::uint8_t, 512> nested{};
+                          CHECK_FALSE(c.reader->read(0, nested));
+                          return c.fixture.Pump();
+                        }}};
   context.reader = &reader;
   std::array<std::uint8_t, 1024> bytes{};
   REQUIRE(reader.read(10, bytes));
@@ -147,4 +147,58 @@ TEST_CASE("SD reader handles consecutive sectors and rejects reentry") {
   CHECK(
       f.backend.begins ==
       4);  // Two command/data transactions and two trailing-clock transactions.
+}
+
+TEST_CASE(
+    "SD writes gate payload and require acceptance ready and clean status") {
+  for (int failure = 0; failure < 5; ++failure) {
+    Fixture f;
+    const auto command = sd::command(24, 7);
+    const auto status_command = sd::command(13, 0);
+    std::array<std::uint8_t, 512> payload{};
+    payload.fill(0x35);
+    const auto crc = sd::crc16(payload);
+    const std::array<std::uint8_t, 2> prefix{0xff, 0xfe};
+    const std::array<std::uint8_t, 2> suffix{
+        static_cast<std::uint8_t>(crc >> 8), static_cast<std::uint8_t>(crc)};
+    std::array<std::uint8_t, 8> r1{}, response{};
+    r1.fill(0xff);
+    response.fill(0xff);
+    r1[1] = failure == 1 ? 4 : 0;
+    response[0] = failure == 2 ? 0x0b : 0xe5;
+    // Busy release can straddle a byte: only the final ready sample must be ff.
+    std::array<std::uint8_t, 8> ready{};
+    ready.fill(failure == 3 ? 0 : 0xff);
+    if (failure != 3) {
+      ready[0] = 3;
+    }
+    std::array<std::uint8_t, 10> status{};
+    status.fill(0xff);
+    status[0] = 0;
+    status[1] = failure == 4 ? 0x20 : 0;
+    const std::array script{
+        fake::SpiBus::Step{hal::spi::write(command)},
+        fake::SpiBus::Step{hal::spi::read(f.scratch), r1},
+        fake::SpiBus::Step{hal::spi::write(prefix)},
+        fake::SpiBus::Step{hal::spi::write(payload)},
+        fake::SpiBus::Step{hal::spi::write(suffix)},
+        fake::SpiBus::Step{hal::spi::read(f.scratch), response},
+        fake::SpiBus::Step{hal::spi::read(f.scratch), ready},
+        fake::SpiBus::Step{hal::spi::idle_clocks(8)},
+        fake::SpiBus::Step{hal::spi::write(status_command)},
+        fake::SpiBus::Step{hal::spi::read(f.scratch), status},
+        fake::SpiBus::Step{hal::spi::idle_clocks(8)}};
+    f.backend.script(script);
+    CHECK(f.reader.write(7, payload) == (failure == 0));
+    CHECK_FALSE(f.backend.selected);
+    if (failure == 1) {
+      CHECK(f.backend.trace_count == 2);
+    }
+    if (failure == 2) {
+      CHECK(f.backend.trace_count == 6);
+    }
+    if (failure == 0 || failure >= 3) {
+      CHECK(f.pumps >= 500);
+    }
+  }
 }

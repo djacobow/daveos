@@ -12,7 +12,7 @@ Run these commands from the DaveOS repository root. For a guided introduction,
 start with [the learning path](../README.md).
 
 Optional FAT12/16/32 storage is enabled with `-Dfatfs=true`; see
-[read-only storage](storage.md) for the injected block-device API and SD commands.
+[FAT storage](storage.md) for the injected block-device API and SD commands.
 
 ## Build and run
 

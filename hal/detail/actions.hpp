@@ -57,6 +57,24 @@ namespace daveos::hal::detail {
     return a.operation == i2c::Operation::write;
   }
 
+  inline bool Checks(const spi::Action& a) {
+    return a.operation == spi::Operation::check_response;
+  }
+
+  inline bool Checks(const i2c::Action&) { return false; }
+
+  inline bool Matches(const spi::Action& a) {
+    const auto mask = static_cast<std::uint8_t>(a.amount >> 8);
+    for (auto byte : a.tx) {
+      if (byte != a.fill) {
+        return (byte & mask) == static_cast<std::uint8_t>(a.amount);
+      }
+    }
+    return false;
+  }
+
+  inline bool Matches(const i2c::Action&) { return false; }
+
   inline std::uint64_t Pause(const spi::Action& a) {
     return a.operation == spi::Operation::pause ? a.amount : 0;
   }
@@ -88,6 +106,12 @@ namespace daveos::hal::detail {
         }
         n = a.tx.size();
         break;
+      case spi::Operation::check_response:
+        return !a.tx.empty() && a.tx.size() <= 32 && a.rx.empty() &&
+                       a.amount <= 0xffff && (a.amount >> 8) &&
+                       !(static_cast<std::uint8_t>(a.amount) & ~(a.amount >> 8))
+                   ? Status::ok
+                   : Status::invalid_argument;
       case spi::Operation::pause:
         return a.amount && a.tx.empty() && a.rx.empty() && Add(pauses, a.amount)
                    ? Status::ok

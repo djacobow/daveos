@@ -21,4 +21,4 @@ option('otp_backend', type: 'combo', choices: ['none', 'flash-emulator', 'h563']
 option('otp_programming', type: 'boolean', value: false, description: 'Explicit real H563 OTP provisioning; never enable for automated HIL')
 
 option('spi_sd_probe', type: 'boolean', value: false, description: 'H563 read-only SPI1 SD inspection fixture (PA5/PG9/PB5, PD14 CS)')
-option('fatfs', type: 'boolean', value: false, description: 'Read-only FatFs storage service')
+option('fatfs', type: 'boolean', value: false, description: 'FatFs storage service (read-only mounts by default)')

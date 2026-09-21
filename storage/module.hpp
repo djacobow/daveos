@@ -11,6 +11,10 @@
 namespace daveos::storage {
 
 
+#define DAVEOS_MOUNT_MODES(X) X(ro) X(rw)
+  DAVEOS_ENUM(MountMode, std::uint8_t, DAVEOS_MOUNT_MODES)
+#undef DAVEOS_MOUNT_MODES
+
   // One request at a time. Command handlers only copy arguments and schedule
   // the one-shot worker: FatFs calls can yield from that worker, never from a
   // command handler. Returning between entries/chunks lets logs and events
@@ -35,7 +39,15 @@ namespace daveos::storage {
     static constexpr auto commands() {
       return std::array{
           DAVEOS_COMMAND(Module, Mount, "mount",
-                         "Mount read-only media; run sd probe first"),
+                         "Mount media (default ro); run sd probe first",
+                         core::arg("mode")),
+          DAVEOS_COMMAND(
+              Module, Create, "create",
+              "Create a new text file, sync and close (rw mount required)",
+              core::arg("path"), core::arg("text")),
+          DAVEOS_COMMAND(Module, Remove, "rm",
+                         "Remove a file (rw mount required; no directories)",
+                         core::arg("path")),
           DAVEOS_COMMAND(Module, Unmount, "unmount",
                          "Unmount and release media"),
           DAVEOS_COMMAND(Module, List, "ls",
@@ -53,7 +65,29 @@ namespace daveos::storage {
                  : core::Status::ok;
     }
 
-    core::Status Mount() { return Submit(Operation::mount, {}); }
+    core::Status Mount(std::optional<MountMode> mode = std::nullopt) {
+      if (busy_) {
+        return core::Status::busy;
+      }
+      write_access_ = mode.value_or(MountMode::ro) == MountMode::rw;
+      return Submit(Operation::mount, {});
+    }
+
+    core::Status Create(std::string_view path, std::string_view text) {
+      if (busy_) {
+        return core::Status::busy;
+      }
+      if (text.size() > text_.size()) {
+        return core::Status::invalid_argument;
+      }
+      std::copy(text.begin(), text.end(), text_.begin());
+      text_size_ = text.size();
+      return Submit(Operation::create, path);
+    }
+
+    core::Status Remove(std::string_view path) {
+      return Submit(Operation::remove, path);
+    }
 
     core::Status Unmount() { return Submit(Operation::unmount, {}); }
 
@@ -76,7 +110,7 @@ namespace daveos::storage {
     }
 
    private:
-    enum class Operation { mount, unmount, list, read };
+    enum class Operation { mount, unmount, list, read, create, remove };
     enum class State {
       idle,
       mount,
@@ -85,6 +119,10 @@ namespace daveos::storage {
       list,
       open_file,
       read,
+      remove,
+      create,
+      write,
+      sync,
       close,
       done,
       failed,
@@ -112,6 +150,12 @@ namespace daveos::storage {
                 case Operation::list:
                   ns = State::open_directory;
                   break;
+                case Operation::remove:
+                  ns = State::remove;
+                  break;
+                case Operation::create:
+                  ns = State::create;
+                  break;
                 case Operation::read:
                   ns = State::open_file;
                   break;
@@ -119,7 +163,7 @@ namespace daveos::storage {
             }
             break;
           case State::mount:
-            m.result_ = m.volume_.mount();
+            m.result_ = m.volume_.mount(m.write_access_);
             ns = m.result_ == FR_OK ? State::done : State::failed;
             break;
           case State::unmount:
@@ -171,6 +215,28 @@ namespace daveos::storage {
             }
             break;
           }
+          case State::remove:
+            m.result_ = m.volume_.remove(m.path_.data());
+            ns = m.result_ == FR_OK ? State::done : State::failed;
+            break;
+          case State::create:
+            m.result_ = m.volume_.create(m.path_.data());
+            ns = m.result_ == FR_OK ? State::write : State::failed;
+            break;
+          case State::write: {
+            std::uint32_t count = 0;
+            m.result_ =
+                m.volume_.write(std::span{m.text_}.first(m.text_size_), count);
+            if (m.result_ == FR_OK && count != m.text_size_) {
+              m.result_ = FR_DENIED;
+            }
+            ns = m.result_ == FR_OK ? State::sync : State::failed;
+            break;
+          }
+          case State::sync:
+            m.result_ = m.volume_.sync();
+            ns = m.result_ == FR_OK ? State::close : State::failed;
+            break;
           case State::close:
             m.result_ = m.volume_.close();
             ns = m.result_ == FR_OK ? State::done : State::failed;
@@ -255,7 +321,7 @@ namespace daveos::storage {
       if (result_ != FR_OK) {
         E_("Filesystem: %s", result_name(result_));
       } else if (operation_ == Operation::mount) {
-        I_("Filesystem mounted read-only");
+        I_("Filesystem mounted %s", write_access_ ? "read-write" : "read-only");
       } else if (operation_ == Operation::unmount) {
         I_("Filesystem unmounted");
       } else {
@@ -263,6 +329,9 @@ namespace daveos::storage {
       }
     }
 
+    std::array<std::uint8_t, 128> text_{};
+    std::size_t text_size_ = 0;
+    bool write_access_ = false;
     Volume volume_;
     Machine machine_;
     std::array<char, Volume::kPathCapacity + 1> path_{};

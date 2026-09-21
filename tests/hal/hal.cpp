@@ -526,3 +526,41 @@ TEST_CASE(
   REQUIRE_FALSE(invalid);
   REQUIRE(clock.pending() == 0);
 }
+
+TEST_CASE("SPI response checks gate following writes without releasing CS") {
+  for (const auto response :
+       {std::uint8_t{0}, std::uint8_t{4}, std::uint8_t{0xff}}) {
+    Fixture f;
+    std::array<std::uint8_t, 3> input{}, reply{0xff, response, 0xff};
+    const std::array<std::uint8_t, 1> data{42};
+    const std::array actions{spi::read(input), spi::check_response(input, 0),
+                             spi::write(data)};
+    const std::array script{fake::SpiBus::Step{spi::read(input), reply},
+                            fake::SpiBus::Step{spi::write(data)}};
+    f.backend.script(script);
+    spi::Completion completion;
+    REQUIRE(completion.start(f.bus.device<0>(), actions) == hal::Status::ok);
+    f.pump();
+    REQUIRE(completion.ready());
+    CHECK(completion.result()->status ==
+          (response == 0 ? hal::Status::ok : hal::Status::response_mismatch));
+    CHECK(completion.result()->completed_actions == (response == 0 ? 3 : 1));
+    CHECK_FALSE(f.backend.selected);
+  }
+}
+
+TEST_CASE(
+    "SPI rejects unbounded or malformed response checks before admission") {
+  Fixture f;
+  std::array<std::uint8_t, 33> bytes{};
+  for (const auto check :
+       {spi::check_response({}, 0), spi::check_response(bytes, 0),
+        spi::check_response(std::span{bytes}.first(1), 0, 0),
+        spi::check_response(std::span{bytes}.first(1), 0x80, 0x1f)}) {
+    spi::Completion completion;
+    const std::array actions{check};
+    CHECK(completion.start(f.bus.device<0>(), actions) ==
+          hal::Status::invalid_argument);
+  }
+  CHECK(f.backend.begins == 0);
+}

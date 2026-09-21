@@ -1,12 +1,12 @@
 #pragma once
 
-// Read-only, no heap. LFN work buffers use the calling stack, permitting
-// nested operations on different volumes. Only the Volume API serializes
-// access; never call FatFs directly alongside it.
-// The mirror adds configurable alignment to the sector window.
+// No heap; Volume mounts read-only unless explicitly requested. LFN work
+// buffers use the calling stack, permitting nested operations on different
+// volumes. Only the Volume API serializes access; never call FatFs directly
+// alongside it. The mirror adds configurable alignment to the sector window.
 #define FS_FATFS_WINDOW_ALIGNMENT 4
 #define FFCONF_DEF 80386
-#define FF_FS_READONLY 1
+#define FF_FS_READONLY 0
 #define FF_FS_MINIMIZE 0
 #define FF_USE_FIND 0
 #define FF_USE_MKFS 0

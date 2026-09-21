@@ -11,6 +11,8 @@ namespace {
   // is explicit and released by the owning Volume. Access is single-threaded.
   std::array<const daveos::storage::BlockDevice*, FF_VOLUMES> drives{};
 
+  std::array<bool, FF_VOLUMES> writable{};
+
   const daveos::storage::BlockDevice* Device(BYTE index) {
     return index < drives.size() ? drives[index] : nullptr;
   }
@@ -18,7 +20,9 @@ namespace {
 
 extern "C" DSTATUS disk_status(BYTE index) {
   const auto* device = Device(index);
-  return device && device->ready(device->context) ? 0 : STA_NOINIT;
+  return device && device->ready(device->context)
+             ? (writable[index] ? 0 : STA_PROTECT)
+             : STA_NOINIT;
 }
 
 extern "C" DSTATUS disk_initialize(BYTE index) { return disk_status(index); }
@@ -42,13 +46,37 @@ extern "C" DRESULT disk_read(BYTE index, BYTE* destination, LBA_t sector,
              : RES_ERROR;
 }
 
+extern "C" DRESULT disk_write(BYTE index, const BYTE* source, LBA_t sector,
+                              UINT count) {
+  const auto* device = Device(index);
+  if (!device || !device->ready(device->context)) {
+    return RES_NOTRDY;
+  }
+  if (!writable[index] || !device->write || !device->sync) {
+    return RES_WRPRT;
+  }
+  if (!source || !count ||
+      std::uint64_t{sector} + count > device->sectors(device->context) ||
+      std::uint64_t{count} * daveos::storage::kSectorBytes >
+          std::numeric_limits<std::size_t>::max()) {
+    return RES_PARERR;
+  }
+  return device->write(
+             device->context, sector,
+             {source, std::size_t{count} * daveos::storage::kSectorBytes})
+             ? RES_OK
+             : RES_ERROR;
+}
+
 extern "C" DRESULT disk_ioctl(BYTE index, BYTE command, void* output) {
   const auto* device = Device(index);
   if (!device || !device->ready(device->context)) {
     return RES_NOTRDY;
   }
   if (command == CTRL_SYNC) {
-    return RES_OK;
+    return !writable[index] || (device->sync && device->sync(device->context))
+               ? RES_OK
+               : RES_ERROR;
   }
   if (!output) {
     return RES_PARERR;
@@ -96,7 +124,7 @@ namespace daveos::storage {
     return FR_TOO_MANY_OPEN_FILES;
   }
 
-  FRESULT Volume::mount() {
+  FRESULT Volume::mount(bool write_access) {
     Guard guard(*this);
     if (!guard || file_open_ || directory_open_) {
       return FR_LOCKED;
@@ -105,16 +133,23 @@ namespace daveos::storage {
       return FR_NOT_READY;
     }
     if (mounted_) {
-      return FR_OK;
+      return write_access == writable_ ? FR_OK : FR_LOCKED;
+    }
+    if (write_access && (!device_.write || !device_.sync)) {
+      return FR_WRITE_PROTECTED;
     }
     if (!device_.acquire(device_.context)) {
       return FR_LOCKED;
     }
+    auto& access = writable[static_cast<std::size_t>(drive_[0] - '0')];
+    access = write_access;
     auto result = f_mount(&fs_, drive_.data(), 1);
     if (result == FR_OK) {
       mounted_ = true;
+      writable_ = write_access;
     } else {
       (void)f_mount(nullptr, drive_.data(), 0);
+      access = false;
       device_.release(device_.context);
     }
     return result;
@@ -128,7 +163,8 @@ namespace daveos::storage {
     auto result = Close();
     if (mounted_) {
       (void)f_mount(nullptr, drive_.data(), 0);
-      mounted_ = false;
+      mounted_ = writable_ = false;
+      writable[static_cast<std::size_t>(drive_[0] - '0')] = false;
       device_.release(device_.context);
     }
     return result;
@@ -175,6 +211,87 @@ namespace daveos::storage {
       (void)Close();
     }
     return result;
+  }
+
+  FRESULT Volume::create(std::string_view path) {
+    Guard guard(*this);
+    if (!guard || file_open_ || directory_open_) {
+      return FR_LOCKED;
+    }
+    if (!mounted_) {
+      return FR_NOT_READY;
+    }
+    if (!writable_) {
+      return FR_WRITE_PROTECTED;
+    }
+    std::array<char, kPathCapacity + 4> name{};
+    auto result = Path(path, name);
+    if (result != FR_OK) {
+      return result;
+    }
+    result = f_open(&file_, name.data(), FA_WRITE | FA_CREATE_NEW);
+    file_open_ = result == FR_OK;
+    return result;
+  }
+
+  FRESULT Volume::write(std::span<const std::uint8_t> bytes,
+                        std::uint32_t& count) {
+    Guard guard(*this);
+    count = 0;
+    if (!guard) {
+      return FR_LOCKED;
+    }
+    if (!mounted_ || !writable_) {
+      return FR_WRITE_PROTECTED;
+    }
+    if (!file_open_) {
+      return FR_INVALID_OBJECT;
+    }
+    if (bytes.size() > std::numeric_limits<UINT>::max()) {
+      return FR_INVALID_PARAMETER;
+    }
+    UINT written = 0;
+    const auto result = f_write(&file_, bytes.data(),
+                                static_cast<UINT>(bytes.size()), &written);
+    count = written;
+    return result;
+  }
+
+  FRESULT Volume::sync() {
+    Guard guard(*this);
+    if (!guard) {
+      return FR_LOCKED;
+    }
+    return file_open_ ? f_sync(&file_) : FR_INVALID_OBJECT;
+  }
+
+  FRESULT Volume::remove(std::string_view path) {
+    Guard guard(*this);
+    if (!guard || file_open_ || directory_open_) {
+      return FR_LOCKED;
+    }
+    if (!mounted_) {
+      return FR_NOT_READY;
+    }
+    if (!writable_) {
+      return FR_WRITE_PROTECTED;
+    }
+    std::array<char, kPathCapacity + 4> name{};
+    auto result = Path(path, name);
+    if (result != FR_OK) {
+      return result;
+    }
+    FILINFO entry{};
+    result = f_stat(name.data(), &entry);
+    if (result != FR_OK) {
+      return result;
+    }
+    if (entry.fattrib & AM_DIR) {
+      return FR_DENIED;
+    }
+    // f_unlink includes sync_fs/CTRL_SYNC. Keep the guard across both calls:
+    // yielded tasks must not change this volume between lookup and deletion.
+    return f_unlink(name.data());
   }
 
   FRESULT Volume::read(std::span<std::uint8_t> bytes, std::uint32_t& count) {
