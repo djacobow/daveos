@@ -3,9 +3,11 @@
 // Include the selected device CMSIS header before this internal header.
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <optional>
 
 #include "hal/detail/actions.hpp"
+#include "hal/i2c/bus_clear.h"
 
 namespace daveos::platform::stm32::detail {
 
@@ -302,6 +304,71 @@ namespace daveos::platform::stm32::detail {
     bool prepared_ = false, selected_ = false, active_ = false;
   };
 
+  // GPIO recovery adapter; configure pin clocks/pulls in BusHardware::prepare.
+  // Both pins must belong exclusively to this single-controller I2C bus.
+  class I2cRecoveryPins {
+   public:
+    constexpr I2cRecoveryPins(Pin scl, Pin sda) : scl_(scl), sda_(sda) {}
+
+    hal::i2c::BusClearPins operations() {
+      if (!scl_.valid() || !sda_.valid() || scl_.same_pin(sda_)) {
+        return {};
+      }
+      return {this,
+              [](void* p) { static_cast<I2cRecoveryPins*>(p)->Enter(); },
+              [](void* p) { static_cast<I2cRecoveryPins*>(p)->Leave(); },
+              [](void* p, bool release) {
+                Drive(static_cast<I2cRecoveryPins*>(p)->scl_, release);
+              },
+              [](void* p, bool release) {
+                Drive(static_cast<I2cRecoveryPins*>(p)->sda_, release);
+              },
+              [](void* p) {
+                const auto& pin = static_cast<I2cRecoveryPins*>(p)->scl_;
+                return (pin.port->IDR & pin.mask) != 0;
+              },
+              [](void* p) {
+                const auto& pin = static_cast<I2cRecoveryPins*>(p)->sda_;
+                return (pin.port->IDR & pin.mask) != 0;
+              }};
+    }
+
+   private:
+    static std::uint32_t Shift(const Pin& pin) {
+      return 2 * std::countr_zero(static_cast<std::uint32_t>(pin.mask));
+    }
+
+    static void Drive(const Pin& pin, bool release) {
+      pin.port->BSRR = release ? pin.mask : std::uint32_t{pin.mask} << 16;
+    }
+
+    static void Mode(const Pin& pin, std::uint32_t mode) {
+      const auto shift = Shift(pin);
+      pin.port->MODER = (pin.port->MODER & ~(3u << shift)) | (mode << shift);
+    }
+
+    void Enter() {
+      // Preload released levels and open-drain before changing pin mode.
+      Drive(scl_, true);
+      Drive(sda_, true);
+      scl_.port->OTYPER = scl_.port->OTYPER | scl_.mask;
+      sda_.port->OTYPER = sda_.port->OTYPER | sda_.mask;
+      Mode(scl_, 1);
+      Mode(sda_, 1);
+      __DSB();
+    }
+
+    void Leave() {
+      Drive(scl_, true);
+      Drive(sda_, true);
+      Mode(scl_, 2);
+      Mode(sda_, 2);
+      __DSB();
+    }
+
+    Pin scl_, sda_;
+  };
+
   struct I2cConfig {
     // Unshifted 0x08..0x77 address, never a HAL-shifted address or R/W byte.
     hal::i2c::Address address;
@@ -316,13 +383,15 @@ namespace daveos::platform::stm32::detail {
 
     constexpr I2cBus(I2C_TypeDef* registers, IRQn_Type event_irq,
                      IRQn_Type error_irq, std::uint32_t timing_register,
-                     std::uint32_t effective_hz, const BusHardware& hardware)
+                     std::uint32_t effective_hz, const BusHardware& hardware,
+                     const hal::i2c::BusClearPins& recovery = {})
         : registers_(registers),
           event_irq_(event_irq),
           error_irq_(error_irq),
           timing_register_(timing_register),
           effective_hz_(effective_hz),
-          hardware_(hardware) {}
+          hardware_(hardware),
+          recovery_(recovery) {}
 
     const void* identity() const { return registers_; }
 
@@ -367,7 +436,7 @@ namespace daveos::platform::stm32::detail {
         return status;
       }
       const auto reset_status = reset();
-      if (reset_status != hal::Status::ok) {
+      if (reset_status != hal::Status::ok && !recovery_.available()) {
         return reset_status;
       }
       for (const auto irq : {event_irq_, error_irq_}) {
@@ -397,6 +466,37 @@ namespace daveos::platform::stm32::detail {
       address_ = std::uint32_t{devices_[device].address.value} << 1;
       return hardware_.idle(hardware_.context) ? hal::Status::ok
                                                : hal::Status::hardware_error;
+    }
+
+    hal::Status begin_probe(hal::i2c::Address address) {
+      address_ = std::uint32_t{address.value} << 1;
+      return hardware_.idle(hardware_.context) ? hal::Status::ok
+                                               : hal::Status::hardware_error;
+    }
+
+    bool needs_reset() const { return !hardware_.idle(hardware_.context); }
+
+    void start_reset() {
+      (void)reset();
+      registers_->CR1 = 0;
+      recovery_.start();
+    }
+
+    std::optional<hal::Status> poll_reset(std::uint64_t now) {
+      if (!recovery_.available()) {
+        return reset();
+      }
+      const auto result = recovery_.poll(now);
+      if (!result) {
+        return std::nullopt;
+      }
+      const auto peripheral = reset();
+      return *result == hal::Status::ok ? peripheral : *result;
+    }
+
+    void abort_reset() {
+      recovery_.abort();
+      (void)reset();
     }
 
     hal::Status start(const Action& action, bool, bool last) {
@@ -482,6 +582,7 @@ namespace daveos::platform::stm32::detail {
     IRQn_Type event_irq_, error_irq_;
     std::uint32_t timing_register_, effective_hz_;
     BusHardware hardware_;
+    hal::i2c::BusClear recovery_;
     mutable std::optional<std::size_t> invalid_device_;
     std::span<const Config> devices_;
     Action action_{};

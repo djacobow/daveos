@@ -19,7 +19,7 @@ if get_option('i2c_adc_probe')
   if board != 'h563'
     error('i2c_adc_probe requires the H563 PB8/PB9 fixture')
   endif
-  component_deps += hal_dep
+  component_deps += drivers_dep
   component_includes += '#include "adc_probe.hpp"'
   component_includes += '#include "i2c_probe.hpp"'
   component_members += '    I2cBus i2c1{platform};'

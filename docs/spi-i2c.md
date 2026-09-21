@@ -62,7 +62,13 @@ including repeated START between consecutive writes or consecutive reads. Only
 the last action ends with STOP. Register addresses, if needed, are ordinary
 bytes in the caller's write buffer.
 
-A standalone `i2c::probe()` sends an address in the write direction, then STOP,
+`controller.probe(i2c::Address{0x68}, callback, optional_timeout)` probes any
+valid seven-bit address without registering it or changing configured devices.
+It uses the same controller exclusion, deadline, IRQ callback and cleanup rules
+as other transactions. The address is copied; completion references a static
+one-action descriptor. Probe counters belong to the controller, not a registered
+device. A standalone `i2c::probe()` action can also target a registered device
+through its ordinary handle. It sends an address in the write direction, then STOP,
 without a data byte. Completion reports `ok` for ACK or `nack` for an absent
 responder. Other errors remain errors, not evidence of absence. Probes count
 as transactions but not read/write actions; ordinary empty reads/writes are
@@ -154,9 +160,36 @@ refer to explicit application-owned controller instances; there is no global
 active-bus singleton.
 
 Cleanup uses a peripheral reset rather than the vendor's polling SPI abort.
-This stops IRQ-driven access to borrowed buffers without waiting. An I2C device
-holding a line low leaves the controller faulted; the current backend does not
-pulse SCL to release a stuck slave. An explicit reset rechecks the lines.
+This stops IRQ-driven access to borrowed buffers without waiting. A low I2C line leaves the controller faulted after cleanup. There is no
+implicit transaction retry. Explicit asynchronous `reset()` can recover the bus
+when the board supplies `I2cRecoveryPins::operations()` as the optional final
+`I2cBus` constructor argument. These pins must be the bus's actual, exclusively
+owned SCL/SDA pins, with clocks/pulls/alternate functions prepared by board code.
+
+Recovery disables the peripheral, temporarily selects open-drain GPIO, sends
+up to nine recovery clocks if SDA is held low, then attempts STOP and checks
+both lines. All outputs either pull low or release; they never drive high.
+Low/high/setup/bus-free phases last at least 5 us; the controller advances the
+machine with timer notifications at least 10 us apart, so other tasks and
+interrupts continue. A stretched/held-low SCL waits for release within the
+original reset deadline (default 100 ms). Nine clocks without SDA release
+returns `faulted`; a deadline or timer-arm failure returns `timeout` or
+`timer_error`. Every exit releases GPIO and restores the alternate function.
+A healthy bus needs no recovery pulses. See [NXP UM10204, bus clear](https://www.nxp.com/docs/en/user-guide/UM10204.pdf).
+
+The backend's bounded `reset()`/`finish()` and the board RCC-reset hook remain
+nonblocking register operations. Optional `start_reset()`, `poll_reset(now)` and
+`abort_reset()` hooks supply the longer recovery sequence to `Controller`.
+The separate reset deadline remains armed throughout; failed recovery leaves
+the controller faulted. Without supplied GPIO hooks, reset only reinitializes
+the peripheral and checks idle, as before.
+
+With recovery hooks, a low line at `init()` leaves an initialized but faulted
+controller, so recovery can run after scheduler timers become available.
+`needs_reset()` exposes this backend condition. The I2C command module reserves
+the buses during initialization and queues startup recovery for its first task;
+no transfer or GPIO pulse runs during constructors or module initialization.
+Other users of the HAL must explicitly submit reset when `faulted()` is true.
 DMA is not implemented. SPI DMA remains a separate follow-up.
 
 ## H563 SD fixture and validation
@@ -235,10 +268,13 @@ Commands:
   Each configured bus has its own named map. Bus errors abort that bus’s scan
   explicitly; scanning continues with the remaining buses. Only one scan or
   sample runs at a time.
+- `i2c reset`: asynchronously recover every configured bus and report a named
+  outcome for each; active client leases cause `busy`.
 - `adc sample`: start one 16-bit, gain-1 conversion and log signed raw code and
   integer microvolts. No scheduler task blocks while waiting.
 - `i2c stats`: named read/write/transaction/error counters for every configured
-  bus (low 32 bits).
+  bus. Values above `UINT32_MAX` display as `4294967295+`; counters retain
+  their full 64-bit values.
   Scan NACKs count as failed transactions, so they are expected in this output.
 
 `hal/adapters/i2c_module.hpp` provides `hal::I2cModule<Event, Buses...>` over
@@ -247,10 +283,11 @@ another adapter includes it in both scan and stats without changing the command
 handlers. The module initializes the buses and reserves them for a scan,
 rolling back partial reservations on `busy`. ADC sampling holds a task-time
 lease through the conversion and all HAL completions, so scanning cannot change
-its address between transactions. `adc` is a separate module with only `sample`;
+the client sequence between transactions. `adc` is a separate module with only `sample`;
 it does not own interrupt routing or bus initialization.
 
-`hal/devices/mcp3425.h` provides the board-independent `hal::Mcp3425` reader,
+`drivers/mcp3425.h` provides the board-independent `drivers::Mcp3425` reader
+through the `daveos-drivers` Meson dependency (which depends on `daveos-hal`),
 using an injected `i2c::Device`. Its constructor is passive. One task calls
 `request()`, then `tick(monotonic_microseconds)`, and inspects `result()`.
 The reader owns its transaction buffers, starts a one-shot with `0x88`, checks
@@ -270,11 +307,13 @@ responses, configuration mismatch, write/read NACKs, transfer and conversion
 timeouts, and buffer lifetime. `tests/hil/h563/test_i2c.py` factory-provisions
 main flash, scans three times and takes 30 conversions, then checks watchdog,
 retained faults, stack and heap diagnostics. It neither writes the SD card nor
-programs OTP. This fixture does not qualify clock stretching, forced stuck-bus
-recovery, repeated START on hardware, higher bus rates, or ADC accuracy against
-a calibrated source.
+programs OTP. The host recovery suite covers SDA release after 0/1/3/9 clocks, failure after
+nine clocks, delayed/held-low SCL, timer failure, abort at each waveform phase,
+reset reuse, probe/device address isolation, and per-controller counters.
+Repeated START, physical clock stretching, higher bus rates and ADC accuracy
+against a calibrated source still require separate hardware qualification.
 
-H563 hardware validation passed three scans (only `0x68` acknowledged) and 30
+Initial ADC hardware validation, before the GPIO-recovery follow-up, passed three scans (only `0x68` acknowledged) and 30
 conversions around 1.630 V, with zero transaction timeouts, healthy watchdog,
 no retained fault and no heap requests. Stack painting observed 2,968 bytes after separating the modules;
 this is not a worst-case bound. The 333 failed transactions were expected NACKs
@@ -303,3 +342,15 @@ module changed. The test now finds `health.Heartbeat` by module/task name.
 The corrected watchdog case and the SD case both passed on that firmware.
 This is a corrected targeted rerun, not a claim of a second complete HIL run.
 H755's corresponding test uses the same lookup but was not rerun on hardware.
+
+Recovery follow-up validation: host 32/32, ASan/UBSan 33/33, TSan 32/32,
+fake 26/26 and logging-disabled 34/34 passed, plus formatting and cppcheck. Both H563/H755
+A/B builds pass. A new H563 HIL case deliberately interrupts an MCP3425 read,
+checks the ADC is holding SDA low while MCU outputs are released, and exercises
+explicit and startup recovery. Both H563 HIL cases passed: three scans and 30
+conversions with zero transaction timeouts, followed by successful explicit
+and startup recovery of the interrupted read. Subsequent samples and scans
+worked, with a running watchdog and no retained failure. Stack painting in
+the scan/conversion case observed 2,808 bytes and zero heap attempts; this is
+not a worst-case stack bound. No SD or OTP writes were performed. H755 was
+not flashed; physical clock stretching and repeated START remain unqualified.

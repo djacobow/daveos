@@ -162,7 +162,15 @@ section supersedes older H755 hardware deferrals; remaining gaps are explicit.
   passed with only its newly created temporary file removed.
 - [ ] Qualify write power-loss/media-removal behavior; add
   multiblock writes and further file operations separately.
-- [ ] Qualify I2C clock stretching, physical stuck-bus recovery and repeated START; H755 I2C hardware remains unqualified.
+- [x] Add timer-driven I2C GPIO bus clear, explicit `i2c reset`, deferred
+  startup recovery, immutable controller-level address probing, and visible
+  counter overflow. Move MCP3425 into `daveos-drivers`.
+- [x] H563 I2C HIL passed 2/2: three scans and 30 conversions, plus a real
+  interrupted MCP3425 read recovered through both `i2c reset` and MCU startup.
+  The injection verified SDA held low with MCU outputs released. No transaction
+  timeouts, retained fault or heap attempts; observed stack use was 2,808 bytes.
+- [ ] Qualify physical I2C clock stretching and repeated START with suitable
+  fixtures; H755 I2C hardware remains unqualified.
 - [ ] Implement a display driver module for ssd1306 devices using DI of the I2C via the layer above
 
 - [x] Add task-only nested `yield()`, one eligible callback per call, bounded depth, context diagnostics and elapsed/self/nested accounting.

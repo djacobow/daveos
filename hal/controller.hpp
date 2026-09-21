@@ -17,6 +17,9 @@ namespace daveos::hal {
   // reset(), disable(), pend(). poll returns an optional completed-action
   // status. finish/reset are bounded register operations: never wait for
   // hardware. They must stop all buffer access even when returning an error.
+  // Optional start_reset()/poll_reset(now)/abort_reset() enable asynchronous
+  // recovery, polled at least 5 us apart under the original reset deadline.
+  // abort_reset must immediately release recovery pins on every failure path.
   // Backend callbacks cannot invoke application code; IRQ wrappers call
   // interrupt() after vendor handling returns. pend() schedules that wrapper,
   // never calls it inline.
@@ -79,6 +82,9 @@ namespace daveos::hal {
         backend_.disable();
         return status;
       }
+      if constexpr (requires { backend_.needs_reset(); }) {
+        faulted_.store(backend_.needs_reset(), std::memory_order_release);
+      }
       initialized_ = true;
       return Status::ok;
     }
@@ -101,6 +107,20 @@ namespace daveos::hal {
     template <std::size_t Index>
     constexpr Device<Action> device() {
       return bind<Index>(*this);
+    }
+
+    // Address-only I2C transaction. Address is copied at acceptance; configured
+    // devices are untouched. Probes affect controller counters only. Completion
+    // returns a static one-action descriptor and follows ordinary IRQ
+    // semantics.
+    Status probe(i2c::Address address, TransferCallback callback,
+                 std::optional<Duration> timeout = std::nullopt)
+      requires std::same_as<Action, i2c::Action>
+    {
+      if (!address.valid()) {
+        return Reject(N, Status::invalid_argument);
+      }
+      return Start(N, kProbeActions, callback, timeout, address);
     }
 
     Status reset(Callback<ResetResult> callback,
@@ -131,6 +151,7 @@ namespace daveos::hal {
       }
       deadline_ = deadline;
       reset_callback_ = callback;
+      reset_started_ = false;
       resetting_ = true;
       active_ = true;
       counters_.increment(Counter::resets, critical_);
@@ -184,6 +205,7 @@ namespace daveos::hal {
     bool faulted() const { return faulted_.load(std::memory_order_acquire); }
 
    private:
+    static constexpr std::uint64_t kResetPollUs = 10;
     enum class State { idle, transfer, pause, finish, reset, faulted, count };
 
     struct Machine
@@ -317,22 +339,48 @@ namespace daveos::hal {
             break;
           }
           case State::reset: {
-            const auto reset = c.backend_.reset();
-            auto result = reset;
-            if (c.timing_.now() >= c.deadline_) {
-              result = Status::timeout;
+            std::optional<Status> result;
+            if constexpr (requires {
+                            c.backend_.poll_reset(c.timing_.now());
+                          }) {
+              if (!c.reset_started_) {
+                c.backend_.start_reset();
+                c.reset_started_ = true;
+              }
+              if (c.timing_.now() >= c.deadline_) {
+                c.backend_.abort_reset();
+                result = Status::timeout;
+              } else {
+                result = c.backend_.poll_reset(c.timing_.now());
+                if (!result) {
+                  auto next = c.timing_.now();
+                  if (!detail::Add(next, kResetPollUs) ||
+                      c.timing_.arm(next, c.PauseAlarm()) != Status::ok) {
+                    c.backend_.abort_reset();
+                    result = Status::timer_error;
+                  } else {
+                    break;
+                  }
+                }
+              }
+            } else {
+              result = c.backend_.reset();
+              if (c.timing_.now() >= c.deadline_) {
+                result = Status::timeout;
+              }
             }
             c.timing_.cancel(c.Alarm());
-            c.faulted_.store(result != Status::ok, std::memory_order_release);
-            if (result != Status::ok) {
+            c.timing_.cancel(c.PauseAlarm());
+            c.faulted_.store(*result != Status::ok, std::memory_order_release);
+            if (*result != Status::ok) {
               c.counters_.increment(Counter::reset_failures, c.critical_);
             }
             c.reset_notification_ = c.reset_callback_;
-            c.reset_result_ = {result};
+            c.reset_result_ = {*result};
             c.reset_callback_ = {};
             c.resetting_ = false;
             c.active_ = false;
-            ns = result == Status::ok ? State::idle : State::faulted;
+            ns = *result == Status::ok ? State::idle : State::faulted;
             break;
           }
           case State::count:
@@ -371,7 +419,9 @@ namespace daveos::hal {
 
     void Record(typename Counter::Index counter) {
       counters_.increment(counter, critical_);
-      device_counters_[device_].increment(counter, critical_);
+      if (device_ < N) {
+        device_counters_[device_].increment(counter, critical_);
+      }
     }
 
     void RecordAttempts(const Action& action) {
@@ -397,12 +447,15 @@ namespace daveos::hal {
 
     Status Reject(std::size_t index, Status status) {
       counters_.increment(Counter::rejected, critical_);
-      device_counters_[index].increment(Counter::rejected, critical_);
+      if (index < N) {
+        device_counters_[index].increment(Counter::rejected, critical_);
+      }
       return status;
     }
 
     Status Start(std::size_t index, std::span<const Action> actions,
-                 TransferCallback callback, std::optional<Duration> timeout) {
+                 TransferCallback callback, std::optional<Duration> timeout,
+                 std::optional<i2c::Address> probe_address = std::nullopt) {
       if (!initialized_) {
         return Reject(index, Status::not_initialized);
       }
@@ -418,9 +471,11 @@ namespace daveos::hal {
         return Reject(index, Status::faulted);
       }
       std::uint64_t delay = 0;
-      auto status = callback ? detail::Timeout(actions, backend_.rate(index),
-                                               timeout, delay)
-                             : Status::invalid_argument;
+      auto status =
+          callback
+              ? detail::Timeout(actions, backend_.rate(index < N ? index : 0),
+                                timeout, delay)
+              : Status::invalid_argument;
       if (status == Status::ok) {
         for (const auto& action : actions) {
           status =
@@ -458,7 +513,12 @@ namespace daveos::hal {
       Record(Counter::accepted);
       // Configure/assert CS only after validation and a protected acceptance.
       // Backend begin is bounded and must not call application code.
-      status_ = backend_.begin(index, actions);
+      if constexpr (std::same_as<Action, i2c::Action>) {
+        status_ = probe_address ? backend_.begin_probe(*probe_address)
+                                : backend_.begin(index, actions);
+      } else {
+        status_ = backend_.begin(index, actions);
+      }
       if (status_ != Status::ok) {
         // Preserve asynchronous completion semantics for setup failures.
         setup_failed_ = true;
@@ -483,6 +543,7 @@ namespace daveos::hal {
           c.device_counters_[index].snapshot(c.critical_, true);
         }};
 
+    inline static constexpr std::array kProbeActions{i2c::probe()};
     Backend& backend_;
     Timing& timing_;
     Critical& critical_;
@@ -493,7 +554,7 @@ namespace daveos::hal {
     std::atomic<bool> initialized_{false}, faulted_{false};
     Machine machine_;
     bool active_ = false, resetting_ = false, started_ = false, again_ = false;
-    bool setup_failed_ = false;
+    bool setup_failed_ = false, reset_started_ = false;
     std::size_t device_ = 0, completed_ = 0;
     std::uint64_t deadline_ = 0, pause_due_ = 0;
     Action backend_action_{};

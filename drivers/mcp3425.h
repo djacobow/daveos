@@ -7,8 +7,10 @@
 #include "core/state_machine/state_machine.hpp"
 #include "hal/i2c/action.hpp"
 
-namespace daveos::hal {
+namespace daveos::drivers {
 
+  namespace i2c = hal::i2c;
+  using hal::Status;
 
   // Asynchronous MCP3425 one-shot reader: 16 bits, gain 1, no register address.
   // Call request()/tick()/result() from one task context. tick takes monotonic
@@ -132,4 +134,4 @@ namespace daveos::hal {
   };
 
 
-}  // namespace daveos::hal
+}  // namespace daveos::drivers

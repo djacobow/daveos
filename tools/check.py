@@ -20,7 +20,7 @@ def main():
     parser.add_argument("check", choices=("format", "format-check", "lint"))
     args = parser.parse_args()
     sources = sorted(
-        str(path) for directory in ("core", "hal", "storage", "util", "boot", "update", "otp", "watchdog", "console", "net", "platform", "examples", "starters", "tests")
+        str(path) for directory in ("core", "hal", "drivers", "storage", "util", "boot", "update", "otp", "watchdog", "console", "net", "platform", "examples", "starters", "tests")
         for path in (ROOT / directory).rglob("*") if path.suffix in (".h", ".hpp", ".c", ".cpp")
         and not any(path.is_relative_to(ROOT / folder) for folder in GENERATED)
     )
@@ -45,12 +45,14 @@ def main():
             f"--cppcheck-build-dir={cache}", "-I.",
         ]
         subprocess.run(command + [name for name in
-            ("core", "hal", "storage", "util", "boot", "update", "otp", "watchdog", "console", "net", "platform", "examples", "starters")
+            ("core", "hal", "drivers", "storage", "util", "boot", "update", "otp", "watchdog", "console", "net", "platform", "examples", "starters")
             if (ROOT / name).is_dir()], cwd=ROOT, check=True)
         # Directory traversal omits unreferenced header-only components. Check
         # HAL headers explicitly, including C++ code using the .h convention.
         hal_headers = sorted(str(path) for path in (ROOT / "hal").rglob("*")
                              if path.suffix in (".h", ".hpp"))
+        hal_headers += [str(path) for path in (ROOT / "drivers").rglob("*")
+                        if path.suffix in (".h", ".hpp")]
         hal_headers += [str(ROOT / name) for name in (
             "platform/fake/bus.hpp", "platform/stm32/bus/driver.h",
             "storage/module.hpp", "storage/sd/transport.h")]

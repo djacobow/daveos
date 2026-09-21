@@ -18,23 +18,7 @@ namespace app {
     using Clock =
         daveos::hal::DaveOsClock<core::SchedulerInterface<Event>, Platform>;
 
-    // The fixture alone owns this bus. Address changes are permitted only
-    // between completed transactions; no general HAL reconfiguration API.
-    class Backend : public daveos::platform::stm32h5::I2cBus {
-     public:
-      using I2cBus::I2cBus;
-
-      Status init(std::span<const Config> configs) {
-        configs_[0] = configs[0];
-        return I2cBus::init(configs_);
-      }
-
-      void address(std::uint8_t value) { configs_[0].address.value = value; }
-
-     private:
-      std::array<Config, 1> configs_{};
-    };
-
+    using Backend = daveos::platform::stm32h5::I2cBus;
     using Critical = daveos::platform::stm32h5::BusCritical;
     using Bus = daveos::hal::Controller<Backend, Clock, Critical, 1>;
     static constexpr std::uint32_t kPins = GPIO_PIN_8 | GPIO_PIN_9;
@@ -47,7 +31,8 @@ namespace app {
     explicit I2cBus(Platform& platform)
         : clock_(platform),
           backend_(I2C1, I2C1_EV_IRQn, I2C1_ER_IRQn, kTiming, 80000,
-                   {nullptr, Prepare, Reset, Idle}),
+                   {nullptr, Prepare, Reset, Idle},
+                   recovery_pins_.operations()),
           bus_(backend_, clock_, critical_, {{{{0x68}}}}) {}
 
     static constexpr const char* name() { return "I2C1"; }
@@ -58,7 +43,7 @@ namespace app {
     }
 
     // Task context only. The caller retains its lease until all transfers
-    // complete; no scanner may change the fixture address in that interval.
+    // complete; scans and resets cannot interrupt the client sequence.
     bool acquire() {
       if (leased_) {
         return false;
@@ -67,10 +52,7 @@ namespace app {
       return true;
     }
 
-    void release() {
-      backend_.address(0x68);
-      leased_ = false;
-    }
+    void release() { leased_ = false; }
 
     Status init(core::SchedulerInterface<Event>& scheduler) {
       clock_.bind(scheduler);
@@ -83,10 +65,18 @@ namespace app {
 
     auto statistics() { return bus_.statistics(); }
 
-    auto probe_device(std::uint8_t address) {
-      backend_.address(address);
-      return bus_.device<0>();
+    Status probe(daveos::hal::i2c::Address address,
+                 daveos::hal::i2c::Callback callback,
+                 std::optional<daveos::hal::Duration> timeout) {
+      return bus_.probe(address, callback, timeout);
     }
+
+    Status reset(daveos::hal::Callback<daveos::hal::ResetResult> callback,
+                 std::optional<daveos::hal::Duration> timeout) {
+      return bus_.reset(callback, timeout);
+    }
+
+    bool needs_reset() const { return bus_.faulted(); }
 
    private:
     static Status Prepare(void*) {
@@ -113,6 +103,8 @@ namespace app {
     static bool Idle(void*) { return (GPIOB->IDR & kPins) == kPins; }
 
     Clock clock_;
+    daveos::platform::stm32h5::I2cRecoveryPins recovery_pins_{
+        {GPIOB, GPIO_PIN_8}, {GPIOB, GPIO_PIN_9}};
     Backend backend_;
     Critical critical_;
     Bus bus_;

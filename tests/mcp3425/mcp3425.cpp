@@ -1,4 +1,4 @@
-#include "hal/devices/mcp3425.h"
+#include "drivers/mcp3425.h"
 
 #include "hal/adapters/i2c_module.hpp"
 #include "hal/controller.hpp"
@@ -16,7 +16,7 @@ namespace {
     fake::I2cBus backend;
     hal::Controller<fake::I2cBus, fake::BusClock<>, fake::BusCritical, 1> bus{
         backend, clock, critical, {{{{0x68}, 100000}}}};
-    hal::Mcp3425 adc{bus.device<0>()};
+    daveos::drivers::Mcp3425 adc{bus.device<0>()};
     std::array<std::uint8_t, 1> config{0x88};
     std::array<std::uint8_t, 3> receive{};
     std::uint64_t driver_offset = 0;
@@ -129,7 +129,9 @@ TEST_CASE("MCP3425 times out a converter that never becomes ready") {
 namespace {
   struct NamedBus {
     const char* label;
-    bool leased = false;
+    bool leased = false, stuck = false;
+    std::size_t resets = 0;
+    hal::Statistics counters{};
     std::size_t probes = 0, snapshots = 0, releases = 0;
     std::uint8_t responding = 0x68;
     std::optional<std::uint8_t> fail_at{};
@@ -158,30 +160,31 @@ namespace {
 
     hal::Statistics statistics() {
       ++snapshots;
-      return {};
+      return counters;
     }
 
-    struct Probe {
-      NamedBus& bus;
-      std::uint8_t address;
+    bool needs_reset() const { return stuck; }
 
-      hal::Status start(std::span<const i2c::Action> actions,
-                        i2c::Callback callback,
-                        std::optional<hal::Duration>) const {
-        REQUIRE(bus.leased);
-        REQUIRE(actions.size() == 1);
-        REQUIRE(actions[0].operation == i2c::Operation::probe);
-        ++bus.probes;
-        bus.addresses.push_back(address);
-        const auto status = bus.fail_at == address      ? hal::Status::timeout
-                            : address == bus.responding ? hal::Status::ok
+    hal::Status reset(hal::Callback<hal::ResetResult> callback,
+                      std::optional<hal::Duration>) {
+      REQUIRE(leased);
+      ++resets;
+      stuck = false;
+      callback({hal::Status::ok});
+      return hal::Status::ok;
+    }
+
+    hal::Status probe(i2c::Address address, i2c::Callback callback,
+                      std::optional<hal::Duration>) {
+      REQUIRE(leased);
+      ++probes;
+      addresses.push_back(address.value);
+      const auto status = fail_at == address.value      ? hal::Status::timeout
+                          : address.value == responding ? hal::Status::ok
                                                         : hal::Status::nack;
-        callback({status, status == hal::Status::ok ? 1u : 0u, actions});
-        return hal::Status::ok;
-      }
-    };
-
-    auto probe_device(std::uint8_t address) { return Probe{*this, address}; }
+      callback({status, status == hal::Status::ok ? 1u : 0u, {}});
+      return hal::Status::ok;
+    }
   };
 }  // namespace
 
@@ -253,4 +256,35 @@ TEST_CASE("I2C diagnostic errors do not hide later configured buses") {
   REQUIRE_FALSE(first.leased);
   REQUIRE_FALSE(second.leased);
   REQUIRE(module.Scan() == core::Status::ok);
+}
+
+TEST_CASE("I2C module defers startup recovery and marks counter overflow") {
+  namespace core = testing::core;
+  testing::Fake platform;
+  testing::Sink sink;
+  NamedBus bus{"I2C1"};
+  bus.stuck = true;
+  bus.counters.read_attempts = std::uint64_t{UINT32_MAX} + 1;
+  hal::I2cModule<testing::Event, NamedBus> module{bus};
+  auto logger =
+      core::make_logger(platform, core::SubscriberList{sink.subscriber()});
+  auto scheduler = core::make_scheduler<testing::Event>(
+      platform, core::ModuleList{&module}, logger);
+  REQUIRE(scheduler.init() == core::Status::ok);
+  REQUIRE(bus.resets == 0);
+  REQUIRE(bus.leased);
+  REQUIRE(module.Scan() == core::Status::busy);
+  module.Tick();
+  module.Tick();
+  REQUIRE(bus.resets == 1);
+  REQUIRE_FALSE(bus.leased);
+  REQUIRE(module.Stats() == core::Status::ok);
+  while (logger.dispatch()) {
+  }
+#if DAVEOS_LOGGING
+  REQUIRE(std::any_of(
+      sink.records.begin(), sink.records.end(), [](const auto& record) {
+        return record.message.find("reads=4294967295+") != std::string::npos;
+      }));
+#endif
 }

@@ -1,4 +1,4 @@
-hal_test = executable('test-hal', 'hal.cpp', dependencies: [test_support_dep, hal_dep])
+hal_test = executable('test-hal', ['hal.cpp', 'recovery.cpp'], dependencies: [test_support_dep, hal_dep])
 test('hal', hal_test, suite: 'unit')
 cpp = meson.get_compiler('cpp')
 lookup_check = '''

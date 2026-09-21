@@ -1,6 +1,8 @@
 #pragma once
 
+#include <atomic>
 #include <cinttypes>
+#include <limits>
 #include <tuple>
 
 #include "core/schedule/module.hpp"
@@ -12,10 +14,10 @@ namespace daveos::hal {
 
   // Optional DaveOS command adapter over application-owned named buses.
   // Each bus supplies name(), init(scheduler), deinit(), acquire()/release(),
-  // probe_device(address), and statistics(). A task-time lease must exclude
-  // other clients through their entire transaction sequences. probe_device()
-  // may change the address only under that lease, after previous completion;
-  // release() restores the client address. No constructor touches a bus.
+  // probe(address, callback, timeout), reset(callback, timeout), needs_reset(),
+  // and statistics(). A task-time lease excludes other clients throughout
+  // their transaction sequences. Probes never mutate configured addresses.
+  // Startup recovery is deferred until task dispatch. Constructors are passive.
   template <typename Event, typename... Buses>
   class I2cModule : public core::Module<I2cModule<Event, Buses...>, Event> {
     static_assert(sizeof...(Buses) > 0);
@@ -36,6 +38,8 @@ namespace daveos::hal {
       return std::array{
           DAVEOS_COMMAND(I2cModule, Scan, "scan",
                          "Map ACK addresses on all configured I2C buses"),
+          DAVEOS_COMMAND(I2cModule, Reset, "reset",
+                         "Recover all configured I2C buses"),
           DAVEOS_COMMAND(I2cModule, Stats, "stats",
                          "Show counters for all configured I2C buses")};
     }
@@ -55,10 +59,26 @@ namespace daveos::hal {
           return core::Status::initialization_failed;
         }
       }
+      bool recover = false;
+      std::apply(
+          [&](auto*... buses) { ((recover |= buses->needs_reset()), ...); },
+          buses_);
+      return recover ? Reset() : core::Status::ok;
+    }
+
+    core::Status Scan() { return Request(false); }
+
+    core::Status Reset() { return Request(true); }
+
+    void Tick() { scanner_.tick(*this); }
+
+    core::Status Stats() {
+      std::apply([&](auto*... buses) { (PrintStats(*buses), ...); }, buses_);
       return core::Status::ok;
     }
 
-    core::Status Scan() {
+   private:
+    core::Status Request(bool reset) {
       if (requested_) {
         return core::Status::busy;
       }
@@ -73,21 +93,14 @@ namespace daveos::hal {
           return core::Status::busy;
         }
       }
+      reset_requested_ = reset;
       requested_ = true;
       return core::Status::ok;
     }
 
-    void Tick() { scanner_.tick(*this); }
+    enum class State : std::uint8_t { idle, probing, resetting };
 
-    core::Status Stats() {
-      std::apply([&](auto*... buses) { (PrintStats(*buses), ...); }, buses_);
-      return core::Status::ok;
-    }
-
-   private:
-    enum class State : std::uint8_t { idle, probing };
-
-    class Scanner : public core::StateMachine<Scanner, State, State::idle, 2> {
+    class Scanner : public core::StateMachine<Scanner, State, State::idle, 3> {
      public:
       void Step(State cs, State& ns, I2cModule& self) {
         switch (cs) {
@@ -95,16 +108,16 @@ namespace daveos::hal {
             if (self.requested_) {
               self.bus_index_ = 0;
               self.BeginBus();
-              ns = State::probing;
+              ns = self.reset_requested_ ? State::resetting : State::probing;
             }
             break;
           case State::probing:
-            if (const auto result = self.completion_.result()) {
-              const bool error = result->status != Status::ok &&
-                                 result->status != Status::nack;
+            if (self.ready_.load(std::memory_order_acquire)) {
+              const auto status = self.completion_status_;
+              const bool error = status != Status::ok && status != Status::nack;
               if (error) {
-                self.ScanError(result->status);
-              } else if (result->status == Status::ok) {
+                self.ScanError(status);
+              } else if (status == Status::ok) {
                 self.map_[self.address_] = '*';
               }
               if (error || ++self.address_ == 0x78) {
@@ -119,6 +132,18 @@ namespace daveos::hal {
                 }
               } else {
                 self.StartProbe();
+              }
+            }
+            break;
+          case State::resetting:
+            if (self.ready_.load(std::memory_order_acquire)) {
+              self.Visit(self.bus_index_,
+                         [&](auto& bus) { self.ReportReset(bus.name()); });
+              if (++self.bus_index_ == kBusCount) {
+                self.Finish();
+                ns = State::idle;
+              } else {
+                self.BeginBus();
               }
             }
             break;
@@ -139,32 +164,76 @@ namespace daveos::hal {
     template <typename Bus>
     void PrintStats(Bus& bus) {
       [[maybe_unused]] const auto s = bus.statistics();
-      // nano printf does not support 64-bit integers: display low 32 bits.
-      I_("%s: reads=%" PRIu32 " writes=%" PRIu32 " completed=%" PRIu32
-         " failed=%" PRIu32 " timeouts=%" PRIu32,
-         bus.name(), static_cast<std::uint32_t>(s.read_attempts),
-         static_cast<std::uint32_t>(s.write_attempts),
-         static_cast<std::uint32_t>(s.completed),
-         static_cast<std::uint32_t>(s.failed),
-         static_cast<std::uint32_t>(s.timed_out));
+      // Saturate displayed values and mark overflow; never wrap silently.
+      I_("%s: reads=%" PRIu32 "%s writes=%" PRIu32 "%s completed=%" PRIu32
+         "%s failed=%" PRIu32 "%s timeouts=%" PRIu32 "%s",
+         bus.name(), Display(s.read_attempts), Overflow(s.read_attempts),
+         Display(s.write_attempts), Overflow(s.write_attempts),
+         Display(s.completed), Overflow(s.completed), Display(s.failed),
+         Overflow(s.failed), Display(s.timed_out), Overflow(s.timed_out));
     }
+
+    static std::uint32_t Display(std::uint64_t value) {
+      return static_cast<std::uint32_t>(
+          std::min(value, std::uint64_t{UINT32_MAX}));
+    }
+
+    static const char* Overflow(std::uint64_t value) {
+      return value > UINT32_MAX ? "+" : "";
+    }
+
+    void Publish(Status status) {
+      completion_status_ = status;
+      ready_.store(true, std::memory_order_release);
+    }
+
+    void ProbeDone(const i2c::Result& result) { Publish(result.status); }
+
+    void ResetDone(const ResetResult& result) { Publish(result.status); }
 
     void BeginBus() {
       map_.fill(' ');
       address_ = 8;
-      StartProbe();
+      if (!reset_requested_) {
+        StartProbe();
+        return;
+      }
+      ready_.store(false, std::memory_order_relaxed);
+      Visit(bus_index_, [&](auto& bus) {
+        const auto status = bus.reset(
+            Callback<ResetResult>::template bind<&I2cModule::ResetDone>(*this),
+            std::chrono::milliseconds{100});
+        if (status != Status::ok) {
+          Publish(status);
+        }
+      });
     }
 
     void StartProbe() {
+      ready_.store(false, std::memory_order_relaxed);
       Visit(bus_index_, [&](auto& bus) {
-        (void)completion_.start(bus.probe_device(address_), actions_, kTimeout);
+        const auto status = bus.probe(
+            i2c::Address{address_},
+            i2c::Callback::template bind<&I2cModule::ProbeDone>(*this),
+            kTimeout);
+        if (status != Status::ok) {
+          Publish(status);
+        }
       });
+    }
+
+    void ReportReset([[maybe_unused]] const char* name) {
+      if (completion_status_ == Status::ok) {
+        I_("%s reset: ok", name);
+      } else {
+        E_("%s reset: %s", name, enum_name(completion_status_));
+      }
     }
 
     void Finish() {
       std::apply([](auto*... buses) { (buses->release(), ...); }, buses_);
       requested_ = false;
-      I_("I2C scan complete");
+      I_("I2C %s complete", reset_requested_ ? "reset" : "scan");
     }
 
     void ScanError([[maybe_unused]] Status status) {
@@ -192,11 +261,11 @@ namespace daveos::hal {
     std::tuple<Buses*...> buses_;
     Scanner scanner_;
     std::array<char, 128> map_{};
-    std::array<i2c::Action, 1> actions_{i2c::probe()};
-    i2c::Completion completion_;
+    std::atomic<bool> ready_{false};
+    Status completion_status_ = Status::ok;
     std::size_t bus_index_ = 0;
     std::uint8_t address_ = 8;
-    bool requested_ = false;
+    bool requested_ = false, reset_requested_ = false;
   };
 
 

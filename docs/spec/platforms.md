@@ -671,9 +671,21 @@ operations remain the application/device driver's responsibility.
 Controller reset preserves statistics. Only `clear_statistics()` clears them.
 
 `Controller::reset(Callback<ResetResult>, optional<Duration>)` schedules reset
-work in the bus interrupt. STM32 reset performs bounded register operations;
-I2C additionally checks external SCL/SDA levels and remains faulted if either
-is held low. Automatic SCL bus-release pulses are not implemented.
+work in the bus interrupt. The STM32 I2C backend optionally accepts injected
+open-drain GPIO recovery pins. Its asynchronous reset path clocks SCL up to
+nine times while SDA is held low, then attempts STOP and checks both lines.
+Each phase has at least 5 us dwell and is driven by timer ticks, not a busy
+wait. SCL must actually rise before a high phase begins. The original reset
+deadline bounds a held-low clock; failure leaves the controller faulted.
+Timeouts and timer failures release GPIO and restore alternate functions.
+Bounded peripheral cleanup/RCC reset hooks themselves never perform the pulse
+sequence or retry a transaction. Backends without recovery pins retain the
+peripheral-only reset plus idle check.
+
+A recovering-capable backend can initialize with a low bus line, exposing
+`needs_reset()` so the controller begins faulted. The command adapter defers
+startup reset until scheduler dispatch starts; other HAL users explicitly reset
+a faulted controller. No recovery timer is started during initialization.
 
 ### Borrowed transaction storage
 
@@ -794,7 +806,7 @@ card or display. Full device-protocol models are not required for this phase.
   H755 bus adapters remain build-tested only. See [SD inspection](../spi-i2c.md#h563-sd-fixture-and-validation).
 - The optional [FatFs worker](../storage.md) uses the initialized card
   through an injected SD reader. SPI DMA, efficient staged/multiblock capture,
-  automatic I2C bus-release pulses, and wider
+  and wider
   bus/device hardware qualification remain separate work.
 
 ## Injected flash and host file backend
@@ -870,8 +882,15 @@ readback, and preserves transfer-buffer ownership on timeout. The fixture also
 provides separate `i2c` and `adc` modules: `i2c scan` prints a serialized
 16-column by 8-row address map for each configured bus, `i2c stats` reports
 named counters for all configured buses, and `adc sample` requests a conversion. The ADC holds an I2C lease across the
-conversion so scans cannot change its device address between transactions.
+conversion so diagnostics cannot interrupt its transaction sequence.
+`Controller::probe(address, callback, timeout)` copies the target address
+without mutating any registered device, and records only controller counters.
 A standalone I2C `probe` action sends the write address followed by STOP, with no payload; only ACK and
 NACK classify presence. Reserved addresses are excluded. Probe transactions
 contribute to transaction/error statistics, not read/write action counters.
 See [SPI/I2C](../spi-i2c.md) for commands, wiring, timing and validation limits.
+
+The I2C module also provides `i2c reset` with per-bus outcomes. Statistics remain
+64-bit; text output saturates each overflowing field to `4294967295+` instead
+of silently truncating. Peripheral drivers live in the separate `drivers/`
+component and `daveos-drivers` dependency; MCP3425 is the first driver.

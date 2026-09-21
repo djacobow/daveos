@@ -134,6 +134,7 @@ namespace daveos::platform::fake {
       std::size_t device;
       decltype(Action::operation) operation;
       bool first, last, selected;
+      std::uint8_t address = 0;
     };
 
     const void* identity() const { return this; }
@@ -206,6 +207,9 @@ namespace daveos::platform::fake {
 
     hal::Status begin(std::size_t index, std::span<const Action> actions) {
       device_ = index;
+      if constexpr (std::same_as<Action, hal::i2c::Action>) {
+        address_ = configs_[index].address.value;
+      }
       ++begins;
       selected = true;
       if constexpr (std::same_as<Action, hal::spi::Action>) {
@@ -215,11 +219,22 @@ namespace daveos::platform::fake {
       return begin_result;
     }
 
+    hal::Status begin_probe(hal::i2c::Address address)
+      requires std::same_as<Action, hal::i2c::Action>
+    {
+      address_ = address.value;
+      device_ = Devices;
+      ++begins;
+      selected = true;
+      return begin_result;
+    }
+
     hal::Status start(const Action& action, bool first, bool last) {
       if (trace_count == trace.size()) {
         return hal::Status::hardware_error;
       }
-      trace[trace_count++] = {device_, action.operation, first, last, selected};
+      trace[trace_count++] = {device_, action.operation, first,
+                              last,    selected,         address_};
       if (position_ == steps_.size()) {
         return hal::Status::hardware_error;
       }
@@ -292,6 +307,7 @@ namespace daveos::platform::fake {
     std::array<Config, Devices> configs_{};
     std::span<const Step> steps_{};
     std::size_t position_ = 0, device_ = 0;
+    std::uint8_t address_ = 0;
     std::optional<Active> active_;
     std::atomic<bool> pending_{false};
   };

@@ -14,6 +14,7 @@ namespace daveos::platform::stm32h5 {
   using BusHardware = stm32::detail::BusHardware;
   using SpiConfig = stm32::detail::SpiConfig;
   using SpiBus = stm32::detail::SpiBus;
+  using I2cRecoveryPins = stm32::detail::I2cRecoveryPins;
   using I2cConfig = stm32::detail::I2cConfig;
   using I2cBus = stm32::detail::I2cBus;
 

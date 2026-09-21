@@ -39,6 +39,7 @@ endif
 subdir('tools')
 subdir('core')
 subdir('hal')
+subdir('drivers')
 if get_option('fatfs')
   subdir('storage')
 endif

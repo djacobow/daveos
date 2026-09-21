@@ -1193,3 +1193,8 @@ Task durations retain elapsed-time semantics. `total_self_duration` excludes
 nested task callback durations; `total_nested_duration` records that excluded
 time. Self time still includes ISR time and waiting. The statistics table
 includes both totals and the `invalid_yields`/`yield_depth_errors` counters.
+
+The optional `daveos-drivers` dependency adds peripheral drivers over the HAL.
+`drivers/mcp3425.h` provides `daveos::drivers::Mcp3425`. H563's optional
+`i2c_adc_probe` fixture supplies `i2c scan`, `i2c stats`, `i2c reset` and
+`adc sample`; see [SPI/I2C](spi-i2c.md) for wiring and recovery semantics.

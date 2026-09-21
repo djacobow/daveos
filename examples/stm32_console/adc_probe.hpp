@@ -3,7 +3,7 @@
 #include <cinttypes>
 
 #include "application.h"
-#include "hal/devices/mcp3425.h"
+#include "drivers/mcp3425.h"
 #include "i2c_probe.hpp"
 
 namespace app {
@@ -59,7 +59,7 @@ namespace app {
    private:
     Platform& platform_;
     I2cBus& i2c_;
-    daveos::hal::Mcp3425 adc_;
+    daveos::drivers::Mcp3425 adc_;
     bool pending_ = false;
   };
 
