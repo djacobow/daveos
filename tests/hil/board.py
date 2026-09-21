@@ -68,7 +68,7 @@ class Board:
         return stream.watch_for(pattern, timeout=timeout)
 
     def ready(self, slot='A', trial=False):
-        if self.config.get('board', 'h563') == 'h755':
+        if self.config.get('board', 'h563') == 'h755' and not self.config.get('bootloader', False):
             self.uart.watch_for('DaveOS STM32H755 M7; type help', timeout=35)
             self.ip = self.uart.watch_for(r'ready, link .*IP ((?!0\.0\.0\.0)\d+\.\d+\.\d+\.\d+)', timeout=15)[1]
             # Survive a complete watchdog interval before declaring ready.
@@ -98,6 +98,9 @@ class Board:
         if family == 'h563':
             image = tcl_word(str(self.firmware / 'factory.hex'))
             self.control(f'reset halt; stm32h5x mass_erase 0; flash write_image {image}; verify_image {image}')
+        elif self.config.get('bootloader', False):
+            image = tcl_word(str(self.firmware / 'factory.hex'))
+            self.control(f'targets stm32h7x.cpu0; reset halt; flash erase_address 0x08000000 0x200000; flash write_image {image}; verify_image {image}')
         else:
             # H755 standalone factory state includes both the sleeping M4 and M7.
             m4 = tcl_word(str(Path(self.config['build']).resolve() / 'platform/stm32/nucleo/h755/CM4/stm32h755-sleep-m4.elf'))

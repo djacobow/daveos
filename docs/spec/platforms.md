@@ -135,7 +135,7 @@ used with a fake platform and introduce no timer thread themselves.
 Boot policy and the OTA engine receive an injected `boot::Flash` interface.
 Host/fake simulations can use `platform::host::FileFlash`, a raw persistent file
 with caller-supplied geometry and an optional injected clock. It models bounds,
-sector erase, aligned 16-byte programming, and one-to-zero NOR bits, with fsync
+sector erase, aligned 16- or 32-byte programming (16 by default), and one-to-zero NOR bits, with fsync
 before successful completion. Reopening preserves images and metadata across
 simulated boots. It does not model STM32 ECC or torn in-flight mutations; the
 memory-backed fault-injection tests cover those failure boundaries separately.

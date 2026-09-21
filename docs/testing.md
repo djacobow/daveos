@@ -134,8 +134,7 @@ connected. Link-loss injection powers down the Ethernet PHY through its manageme
 register; it does not unplug the cable. Physical power interruption remains
 deferred; reset tests do not substitute for power-cut qualification. Cable-unplug
 tests, LED appearance and button presses are not automated by this suite. H755
-uses the separate reliability suite below; its A/B bootloader/OTA integration
-is not yet implemented.
+uses the separate suite below for reliability and, with a bootloader build, A/B OTA.
 
 ## Version identity checks
 
@@ -174,16 +173,23 @@ of virgin contents and never sends serial setters or lock requests. HIL rejects
 is separate, deliberate work; after that validation succeeds, all subsequent
 automated real-OTP checks remain read-only. Use emulators for mutation tests.
 
-### H755 reliability HIL
+### H755 reliability and A/B HIL
 
-The H755 suite covers the standalone M7 console and sleeping M4, with networking,
-UART and USB enabled. It does not run H563 bootloader, OTA, or OTP tests. Set up
+The H755 suite covers the M7 console and sleeping M4, with networking, UART and
+USB enabled. It has its own A/B tests and does not run H563 OTP tests. For a
+standalone build, set up
 `build/net-h755` with `board=h755`, `bootloader=false`, `networking=true`,
 `uart_console=true`, `usb_console=true`, and `tcp_console=true`. Set
 `probe_serial` to the H755 ST-LINK serial, and copy
 [`h755.toml.example`](../tests/hil/h755.toml.example) to `build/hil-h755.toml`.
 Fill in that board's stable serial paths and toolchain path. The fixture verifies
 that the Meson board/options and probe selection match its configuration.
+
+For A/B coverage, configure `build/boot-h755` with the same options except
+`bootloader=true`; set `build = "build/boot-h755"` and `bootloader = true` in the
+local HIL TOML. The suite then provisions `factory.hex`, including the fixed M4,
+and records the bootloader, both M7 ELFs, package, and factory image in its
+artifact manifest. A/B cases skip for a standalone configuration.
 
 Run a separate, explicitly selected OpenOCD server (replace the serial):
 
@@ -212,3 +218,16 @@ frames, configurable exceptions, retained health failures, startup failure/hang,
 and interrupt-masked watchdog reset. H755 IWDG1 has no early-warning interrupt:
 an arbitrary hang resets without a captured frame; a cooperative health failure
 can still be recorded before feeding stops.
+
+The A/B cases exercise confirmed A/B startup, bidirectional OTA with concurrent
+timers, trial-watchdog rollback, corrupt-confirmed fallback, both-images-invalid
+reset/factory recovery, and a bootloader hang. They seed a full metadata sector
+in each direction to force runtime checkpoint/reclamation, and compare both
+fixed-image sectors before and after OTA. `ota-timing.log` and
+`journal-timing.log` under each test's artifact directory record host-observed
+command round-trip times; these include network/host overhead and are not direct
+scheduler latency measurements. The watchdog still enforces task progress.
+
+Physical power cuts, actual flash ECC injection, and cache-enabled flash-operation
+qualification remain separate work; simulated torn-write tests do not replace
+those hardware checks.

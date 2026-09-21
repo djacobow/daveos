@@ -1,10 +1,9 @@
 #pragma once
 
 #include "application.h"
+#include "board_config.h"
 #include "layout.h"
 #include "net/update.h"
-#include "platform/stm32h5/reliability.h"
-#include "stm32h563xx.h"
 #include "update/module.hpp"
 
 namespace app {
@@ -17,7 +16,7 @@ namespace app {
    private:
     static constexpr core::Time kRebootDelay = 250000;
     Platform& platform_;
-    daveos::platform::stm32h5::Flash flash_;
+    board::reliability::Flash flash_;
     daveos::update::Engine engine_;
     daveos::net::UpdateServer server_;
     bool reboot_requested_ = false;

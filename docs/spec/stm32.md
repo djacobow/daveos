@@ -37,8 +37,8 @@ The support matrix identifies which services have drivers for each family.
 | Scheduler platform, TIM2, critical sections, sleep, reset | Implemented; hardware tested | M7 implemented; current console and reset paths hardware tested. M4 only performs boot synchronization and sleeps. |
 | UART DMA/FIFO, USB CDC, board commands, shared console | Implemented; current HIL and earlier physical checks | Implemented; current UART/USB/TCP command and UART burst HIL. |
 | lwIP Ethernet and TCP console | Implemented; hardware tested | Implemented; DHCP, large-packet ping, TCP reconnect and reset HIL. |
-| A/B bootloader, flash journal, OTA integration | Implemented; hardware HIL plus host fault models | Not integrated; deferred. |
-| IWDG, startup/trial health policy, retained fault handlers | Implemented; hardware HIL | IWDG1, startup health, and retained fault capture implemented and hardware tested; no IWDG early-warning IRQ. Trial confirmation waits for A/B integration. |
+| A/B bootloader, flash journal, OTA integration | Implemented; hardware HIL plus host fault models | Implemented; 23-case HIL covers A/B OTA, journal rollover, watchdog/fault recovery and invalid-image fallback. |
+| IWDG, startup/trial health policy, retained fault handlers | Implemented; hardware HIL | IWDG1, startup health, and retained fault capture implemented and hardware tested; no IWDG early-warning IRQ. Bootloader starts IWDG; the application confirms healthy trial boots. |
 | Real OTP and bank-B emulator | Implemented; emulator HIL, one authorized real write/lock, then read-only hardware checks | Not implemented; do not assume H563 OTP geometry or register semantics. |
 
 Host/file models validate portable behavior; they do not qualify physical flash,
@@ -502,7 +502,138 @@ startup ran. Full-word publication is covered by fault/reset HIL.
 CRC-32/ISO-HDLC results on both board selections. H7 enables CRC through AHB4;
 interrupt callers of the CRC service continue to use its software fallback.
 
-Bootloader/OTA and OTP remain H563 integrations. H755 A/B layout is the next
-separate design step: 128 KiB erase sectors and the existing sleeping-M4 image
-at bank B's start must be accounted for before allocating journal/application
-regions. No H755 OTP provisioning is part of reliability bring-up.
+Bootloader/OTA is integrated on both boards using the layouts below. OTP remains
+an H563 integration; no H755 OTP provisioning is part of this work.
+
+### Agreed H755 A/B layout
+
+Keep the sleeping M4 image at its existing boot address and preserve equal M7
+application slots. Each bank has eight 128 KiB erase sectors:
+
+| Bank | Sector 0 (128 KiB) | Sector 1 (128 KiB) | Sectors 2–7 (768 KiB) |
+| --- | --- | --- | --- |
+| 1 | M7 bootloader at 0x08000000 | Metadata A at 0x08020000 | Application A at 0x08040000 |
+| 2 | Sleeping M4 at 0x08100000 | Metadata B at 0x08120000 | Application B at 0x08140000 |
+
+The bootloader keeps a 32 KiB code-size limit initially; the rest of its erase
+sector stays reserved. The M4 image is fixed during OTA and can be replaced only
+through factory programming. It is excluded from M7 OTA packages. OTA must never
+erase either bank's sector 0. No bank swapping or boot-address option-byte
+changes are planned.
+
+The H755 integration covers the M4 boot handshake, 32-byte flash program
+units, commit-marker isolation, M7 cache maintenance, and bounded metadata work
+while the application keeps running.
+Existing H563 layouts and persisted formats must remain compatible. The layout
+and fixed-M4 policy are implemented; qualification limits are tracked in TODO.md.
+
+### H755 journal responsiveness
+
+Preserve the existing 100 ms task-progress allowance during runtime OTA and
+metadata operations. Do not relax health checks or feed the watchdog blindly to
+hide flash stalls. Journal reclamation must respect the executing application's
+bank: no runtime erase of that bank's metadata sector. Schedule inactive-bank
+erases cooperatively, avoid reads from a busy bank, and preserve a verified,
+committed snapshot elsewhere before erasing the latest copy.
+
+Without an executing-bank constraint, the journal retains the H563 policy:
+append to the newest sector and switch when full. H755 supplies that constraint:
+append in the inactive bank; before reclaiming it, copy and verify the latest
+record into a free checkpoint entry in the executing bank. During boot, prepare
+checkpoint space for the selected application by preserving the latest record
+in the other bank, then erasing the selected application bank's metadata sector
+only when it is not blank. Bound scans and programming work too;
+asynchronous erase alone does not establish responsiveness. Verify the timing
+budget in both application slots, including journal rollover, with console and
+health tasks running. Preserve crash consistency at every new checkpoint and
+erase boundary in host fault-injection tests.
+
+If no safe runtime journal operation is possible within these constraints,
+return an explicit update error and leave reboot under application control.
+Do not silently erase the executing bank or reboot to make space. Preserve the
+last committed metadata and follow the existing failed-update eligibility rules;
+an error must not make a partial image bootable.
+
+### H755 boot handoff analysis
+
+The current M7 application waits for M4 to enter STOP, configures clocks, then
+releases M4 through HSEM. The bootloader must not perform that handshake and
+then let the application repeat it. Leave M4 in its initial wait until
+the selected application initializes it. Before handoff, disable both USART3 and
+its APB clock: the boot UART clock otherwise keeps D2 awake and makes the
+application's normal M4 STOP check fail. Preserve the standalone application's startup
+path and avoid persistent handoff flags when hardware state suffices.
+
+Start IWDG1 early in the H755 bootloader, before peripheral initialization and
+image selection/verification, so cold-boot hangs also reset. Carry the running
+watchdog through handoff; the application must adopt it without assuming reset
+state or an interval with watchdog protection disabled. Bootloader feeding must
+reflect bounded forward progress, and application feeding must retain the
+agreed health checks. This is not a separate trial-only watchdog. Waits for
+flash completion or UART output must have deadlines rather than feed forever.
+Preserve reset-cause evidence and the retained fault record through handoff so
+the application can report the preceding failure. Verify debugger freeze and
+watchdog expiry in the bootloader as well as during application initialization.
+
+### H755 A/B implementation sequence
+
+1. Extend host/file-backed flash and journal tests for the H755 geometry and
+   executing-bank constraint before adding hardware writes. Support 32-byte
+   programming, with the commit marker in a separately programmed final unit.
+   Keep H563's existing 16-byte programming and persisted journal format
+   compatible; version any distinct H755 record format explicitly in both
+   firmware and factory tools. Test interrupted checkpoint/erase/commit,
+   exhaustion, reboot recovery, and both executing banks.
+2. Add the injected H755 flash backend, cache maintenance and flash-error/ECC
+   handling. Enforce region ownership, reject runtime erases in the executing
+   bank, and keep bootloader/M4 sectors outside application write permissions.
+   Preserve the current CRC, watchdog and retained-fault integrations.
+3. Generate both slot linkers, layout descriptors and package metadata from the
+   agreed layout. Build the M7 bootloader with the 32 KiB size check and create
+   a factory image containing bootloader, fixed M4, initial journal records and
+   confirmed application A. Preserve the standalone build. Use existing H563
+   boot eligibility, installation ordering, trial/confirmation and CRC rules.
+4. Validate factory boot, watchdog-protected handoff, M4 startup and execution
+   from both M7 slots before enabling network OTA. Check vector relocation,
+   UART/USB/TCP, timers, health and retained faults in both slots.
+5. Wire the existing cooperative TCP OTA protocol and uploader to the H755
+   layout/backend. Validate paired-image reconstruction, writes/readback CRC,
+   confirmation, failed-trial/corrupt-image fallback, and repeated A/B installs
+   while console and health tasks keep running. Exercise journal reclamation
+   and safe exhaustion explicitly; measure stalls against the 100 ms budget.
+6. Extend board-selected HIL to factory-provision H755 A/B images and retain
+   standalone coverage. Run host/sanitizer/fake tests, H563 and H755 builds,
+   formatting/lint, programming plans and H755 hardware qualification. Keep
+   physical power-cut testing separately deferred and do not program real OTP.
+
+The implementation follows these stages. See TODO.md for completed validation
+and remaining qualification; this sequence is not a claim of full qualification.
+
+### H755 journal format and flash timing
+
+Both journal formats occupy 256 bytes. H563 keeps format v1 unchanged, with CRC
+at byte 236 and a 16-byte commit trailer at byte 240. H755 uses format v2, with
+CRC at byte 220 and the final 32-byte commit unit at byte 224. The commit unit
+contains the marker, duplicated sequence, complementary marker and 16 zero
+padding bytes; validate all of it so a partially programmed trailer cannot
+masquerade as a complete duplicate. The decoder accepts both versions; new
+records use the platform's write granularity. Factory tooling agrees byte for
+byte with these encodings.
+
+Scan identifying headers newest-first and fully validate only records that can
+replace or conflict with the newest validated snapshot. This bounds normal
+foreground scan work even when a sector is full. Free-entry searches inspect
+the whole candidate before reuse; ECC/read errors make an entry unavailable.
+The flash backend protects both sector-zero reservations, rejects active-bank
+erases and active-image programming, and serializes instances until the owner
+polls completion. Explicit validation reads guard data BusFaults to inspect ECC
+status; unrelated faults retain the normal fault/reset path. Cache invalidation
+after mutation precedes readback. Programming uses the controller/memory barriers
+required before writing each 32-byte flash word.
+
+The layout supplies a flash-operation timeout: one second on H563, five seconds
+on H755. This bounds cooperative flash waits and does not change the 100 ms
+scheduler-progress allowance. Host console round-trip timing and watchdog task-progress checks assess runtime
+responsiveness; they do not constitute direct CPU-stall measurements. Host models
+cover interrupted checkpoint/commit/erase and exhaustion; hardware verifies
+normal reclamation while commands and watchdog health checks continue.

@@ -24,7 +24,9 @@ namespace daveos::platform::host {
       return Status::already_initialized;
     }
     if (!path || !geometry.size || !geometry.sector_size ||
-        geometry.sector_size % 16 || geometry.size % geometry.sector_size ||
+        (geometry.write_size != 16 && geometry.write_size != 32) ||
+        geometry.sector_size % geometry.write_size ||
+        geometry.size % geometry.sector_size ||
         geometry.base % geometry.sector_size ||
         std::uint64_t(geometry.base) + geometry.size > UINT64_C(0x100000000)) {
       return Status::invalid_argument;
@@ -157,10 +159,12 @@ namespace daveos::platform::host {
     if (requested_ || machine_.state() != State::idle) {
       return Status::busy;
     }
-    if (bytes.size() != 16 || address % 16 || !Range(address, bytes.size())) {
+    if (bytes.size() != geometry_.write_size ||
+        address % geometry_.write_size || !Range(address, bytes.size())) {
       return Status::invalid_argument;
     }
-    std::array<std::byte, 16> old;
+    std::array<std::byte, 32> storage;
+    auto old = std::span(storage).first(geometry_.write_size);
     auto status = Read(address, old);
     if (status != Status::ok) {
       return status;
@@ -199,7 +203,8 @@ namespace daveos::platform::host {
         } else {
           bool written = true;
           if (operation_ == Operation::program) {
-            written = Write(address_ - geometry_.base, word_);
+            written = Write(address_ - geometry_.base,
+                            std::span(word_).first(geometry_.write_size));
           } else {
             std::array<std::byte, 4096> erased;
             erased.fill(std::byte{0xff});

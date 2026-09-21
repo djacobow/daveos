@@ -15,6 +15,7 @@ namespace daveos::platform::host {
       std::uint32_t base;
       std::uint32_t size;
       std::uint32_t sector_size;
+      std::uint32_t write_size = 16;
     };
 
     enum class OpenMode { existing, create };
@@ -73,7 +74,7 @@ namespace daveos::platform::host {
     Operation operation_ = Operation::erase;
     bool requested_ = false, closed_ = false;
     std::uint32_t address_ = 0;
-    std::array<std::byte, 16> word_{};
+    std::array<std::byte, 32> word_{};
   };
 
 

@@ -54,9 +54,8 @@ def command(backend, executable, family, images, serial, erase_all=False):
              "-c", "reset_config srst_only srst_nogate connect_assert_srst",
              "-c", "init; reset halt"]
     if erase_all:
-        if family != "stm32h5":
-            raise ValueError("Factory mass erase is currently supported only for H563")
-        args += ["-c", "stm32h5x mass_erase 0"]
+        erase = "stm32h5x mass_erase 0" if family == "stm32h5" else "flash erase_address 0x08000000 0x200000"
+        args += ["-c", erase]
     for image in images:
         args += ["-c", "flash write_image erase " + tcl_word(str(image)),
                  "-c", "verify_image " + tcl_word(str(image))]

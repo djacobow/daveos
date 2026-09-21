@@ -61,9 +61,11 @@ namespace daveos::update {
             ns = State::erase_wait;
           } else {
             word_.fill(std::byte{0xff});
-            auto count = std::min(word_.size(), data_.size() - written_);
+            auto count = std::min<std::size_t>(layout_.write_size,
+                                               data_.size() - written_);
             std::copy_n(data_.begin() + written_, count, word_.begin());
-            result = flash_.program(flash_.context, base_ + position, word_);
+            result = flash_.program(flash_.context, base_ + position,
+                                    std::span(word_).first(layout_.write_size));
             ns = State::program_wait;
           }
           operation_started_ = flash_.now(flash_.context);
@@ -78,7 +80,8 @@ namespace daveos::update {
       case State::program_wait: {
         auto result = flash_.poll(flash_.context);
         if (result == Status::busy &&
-            flash_.now(flash_.context) - operation_started_ >= 1000000) {
+            flash_.now(flash_.context) - operation_started_ >=
+                layout_.operation_timeout) {
           result = Status::timeout;
         }
         if (result != Status::busy) {
@@ -90,7 +93,8 @@ namespace daveos::update {
             ns = State::done;
           } else {
             if (cs == State::program_wait) {
-              written_ += std::min(word_.size(), data_.size() - written_);
+              written_ += std::min<std::size_t>(layout_.write_size,
+                                                data_.size() - written_);
             }
             ns = State::prepare;
           }

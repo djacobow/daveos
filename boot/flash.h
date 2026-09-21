@@ -20,6 +20,7 @@ namespace daveos::boot {
     std::uint32_t write_size = 16;
     std::uint32_t product = 0;
     std::uint32_t revision = 1;
+    core::Time operation_timeout = 1000000;
 
     bool valid() const;
   };
@@ -36,6 +37,10 @@ namespace daveos::boot {
                       std::span<const std::byte>) = nullptr;
     Status (*poll)(void*) = nullptr;
     core::Time (*now)(void*) = nullptr;
+
+    // Optional runtime bank constraint: 0/1 identifies the executing bank;
+    // 2 permits boot-time maintenance. Callbacks remain borrowed.
+    std::uint32_t (*executing_bank)(void*) = nullptr;
 
     bool valid() const { return read && erase && program && poll && now; }
   };

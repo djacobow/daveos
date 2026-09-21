@@ -19,7 +19,11 @@ namespace reliability {
     std::vector<std::byte> bytes =
         std::vector<std::byte>(4096, std::byte{0xff});
     std::vector<bool> written = std::vector<bool>(256);
+    std::vector<bool> unreadable = std::vector<bool>(256);
     std::uint32_t sector_size = 512;
+    std::uint32_t write_size = 16;
+    std::uint32_t executing = 2;
+    std::vector<std::uint32_t> erases;
     std::uint64_t clock = 0;
     int operations = 0;
     int fail_operation = -1;
@@ -27,7 +31,7 @@ namespace reliability {
 
     struct Pending {
       std::uint32_t address;
-      std::array<std::byte, 16> data;
+      std::array<std::byte, 32> data;
       bool erase;
     };
 
@@ -42,6 +46,14 @@ namespace reliability {
                 output.size() > self.bytes.size() - address) {
               return Status::invalid_argument;
             }
+            for (std::size_t i = address / self.write_size;
+                 !output.empty() &&
+                 i <= (address + output.size() - 1) / self.write_size;
+                 ++i) {
+              if (self.unreadable[i]) {
+                return Status::io_error;
+              }
+            }
             std::copy_n(self.bytes.begin() + address, output.size(),
                         output.begin());
             return Status::ok;
@@ -55,6 +67,7 @@ namespace reliability {
                 std::uint64_t(address) + self.sector_size > self.bytes.size()) {
               return Status::invalid_argument;
             }
+            self.erases.push_back(address);
             self.pending = Pending{address, {}, true};
             return Status::ok;
           },
@@ -63,9 +76,9 @@ namespace reliability {
             if (self.pending) {
               return Status::busy;
             }
-            if (address % 16 || input.size() != 16 ||
-                std::uint64_t(address) + 16 > self.bytes.size() ||
-                self.written[address / 16]) {
+            if (address % self.write_size || input.size() != self.write_size ||
+                std::uint64_t(address) + self.write_size > self.bytes.size() ||
+                self.written[address / self.write_size]) {
               return Status::invalid_argument;
             }
             Pending op{address, {}, false};
@@ -74,7 +87,8 @@ namespace reliability {
             return Status::ok;
           },
           [](void* p) { return static_cast<MemoryFlash*>(p)->Poll(); },
-          [](void* p) { return static_cast<MemoryFlash*>(p)->clock += 100; }};
+          [](void* p) { return static_cast<MemoryFlash*>(p)->clock += 100; },
+          [](void* p) { return static_cast<MemoryFlash*>(p)->executing; }};
     }
 
     Status Poll() {
@@ -84,7 +98,7 @@ namespace reliability {
       auto operation = *pending;
       pending.reset();
       const bool fail = operations++ == fail_operation;
-      auto size = operation.erase ? sector_size : 16u;
+      auto size = operation.erase ? sector_size : write_size;
       auto count = fail ? std::min<std::size_t>(partial, size) : size;
       for (std::size_t i = 0; i < count; ++i) {
         auto& value = bytes[operation.address + i];
@@ -95,11 +109,13 @@ namespace reliability {
         }
       }
       if (operation.erase) {
-        for (std::size_t i = 0; i < count / 16; ++i) {
-          written[operation.address / 16 + i] = false;
+        for (std::size_t i = 0; i < count / write_size; ++i) {
+          written[operation.address / write_size + i] = false;
+          unreadable[operation.address / write_size + i] = false;
         }
       } else {
-        written[operation.address / 16] = true;
+        written[operation.address / write_size] = true;
+        unreadable[operation.address / write_size] = fail && count < write_size;
       }
       return fail ? Status::io_error : Status::ok;
     }

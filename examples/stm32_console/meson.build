@@ -133,12 +133,18 @@ if get_option('bootloader')
     command: [python, files('../../tools/package.py'), '--a', '@INPUT0@', '--b', '@INPUT1@',
       '--layout', '@INPUT2@', '--version', '@INPUT3@', '--output', '@OUTPUT@'],
     build_by_default: true)
+  factory_inputs = [boot_binary, application_binary, boot_layout[4], version_header[1]]
+  factory_args = []
+  if board == 'h755'
+    factory_inputs += m4_binary
+    factory_args = ['--m4', '@INPUT4@']
+  endif
   factory_image = custom_target('factory-image',
-    input: [boot_binary, application_binary, boot_layout[4], version_header[1]],
+    input: factory_inputs,
     output: 'factory.hex',
     command: [python, files('../../tools/factory.py'), '--bootloader', '@INPUT0@',
       '--application', '@INPUT1@', '--layout', '@INPUT2@', '--version', '@INPUT3@',
-      '--output', '@OUTPUT@'], build_by_default: true,
+      '--output', '@OUTPUT@'] + factory_args, build_by_default: true,
     depends: boot_size_check)
   firmware_images += [factory_image]
 else

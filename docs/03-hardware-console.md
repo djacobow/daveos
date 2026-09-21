@@ -44,7 +44,7 @@ See the [board/programming reference](reference.md) for cable connections,
 submodule setup, build options, and flashing. See [TODO.md](../TODO.md) for the
 precise hardware validation coverage; a successful cross-build is not a hardware test.
 
-## H563 factory boot image
+## Factory boot images
 
 The H563 example can boot through the small CRC-verifying bootloader. With the
 ARM toolchain on `PATH`, build a factory image with:
@@ -68,7 +68,7 @@ At 1 Mb/s on the ST-LINK UART, expect `Boot slot A (confirmed), CRC verified`
 followed by the normal application messages. `board reset` returns through the
 bootloader and repeats CRC verification. Bootloader-enabled builds also provide
 `boot status` (executing slot and eligibility) and `boot confirm` (explicit,
-durable, idempotent confirmation by the running application). The H563 health
+durable, idempotent confirmation by the running application). The shared health
 module confirms automatically after five healthy seconds.
 OTA must still be explicitly enabled as described below.
 
@@ -83,6 +83,39 @@ The [pytest HIL suite](testing.md) provisions a factory image before every
 selected test, then checks UART/USB/TCP commands, reset recovery and networking.
 Use its local board configuration instead of passing transport paths to separate
 smoke scripts.
+
+## H755 factory boot image
+
+Use the same options with `-Dboard=h755` and a separate build directory:
+
+```sh
+meson setup build/boot-h755 --cross-file meson/stm32.ini -Dboard=h755 -Dexamples=true -Dnetworking=true -Dbootloader=true
+meson compile -C build/boot-h755
+meson compile -C build/boot-h755 flash-plan
+```
+
+Its `factory.hex` includes the bootloader, both metadata copies, confirmed M7
+application A, and the sleeping M4. Factory programming erases both banks. With
+multiple boards attached, set `-Dprobe_serial=<H755-ST-LINK-serial>` before
+programming; the H563 and H755 images are not interchangeable.
+
+| Region | Bank 1 | Bank 2 | Size per bank |
+| --- | --- | --- | --- |
+| Fixed image | Bootloader at `0x08000000` | M4 at `0x08100000` | 128 KiB |
+| Metadata | `0x08020000` | `0x08120000` | 128 KiB |
+| M7 application | A at `0x08040000` | B at `0x08140000` | 768 KiB |
+
+The bootloader still has a 32 KiB code-size limit; the larger reservation follows
+the hardware erase size. OTA changes only the M7 application and metadata; M4 is
+factory-updated only. Both boards expose the same boot/OTA commands and package
+workflow. IWDG starts in the bootloader and continues through application startup.
+
+H755 runtime journal writes use the inactive bank. Before reclaiming its full
+metadata sector, the updater commits and verifies a checkpoint in the executing
+bank. If safe checkpoint space is exhausted, the update fails with `full`; the
+application decides when to reboot. Boot-time maintenance restores checkpoint
+space. Neither runtime updates nor that error reset the application automatically.
+See the [STM32 specification](spec/stm32.md) for the persistence rules.
 
 ## TCP firmware updates
 
@@ -115,7 +148,7 @@ concurrent TCP timers, reboot and automatic health-based confirmation. It starts
 from a fresh factory image; see [Testing](testing.md).
 
 Without `-Dbootloader=true`, the example retains its standalone linker layout
-and normal programming behavior. H755 bootloader integration remains deferred.
+and normal programming behavior.
 
 Next: [custom components](04-custom-components.md).
 
@@ -141,6 +174,6 @@ frames, status registers and recovery. They build and program matching firmware
 before using GDB; see [Testing](testing.md).
 
 Both board selections provide `health status`, `health fault`, `health clear`,
-and `health crc "123456789"` (expected CRC `cbf43926`). The standalone H755
-supports IWDG1 health monitoring and retained M7 fault reports. It does not yet
-provide the H563 A/B boot/OTA commands; its IWDG has no early-warning frame capture.
+and `health crc "123456789"` (expected CRC `cbf43926`). H755 supports IWDG1 health monitoring and retained M7 fault reports, with the
+boot/OTA commands enabled by `bootloader=true`. Its IWDG has no early-warning
+frame capture. H755 OTP support remains unimplemented.

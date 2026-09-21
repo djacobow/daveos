@@ -69,9 +69,8 @@ queue is required.
 
 ## Bootloader, OTA, and reliability services
 
-Bootloader/OTA integration currently targets H563 and host/fake tests. H755
-watchdog/fault support is separate; its bootloader integration awaits an agreed
-A/B layout. Components are optional,
+Bootloader/OTA integration supports H563 and H755 M7, with host/fake tests.
+H755 keeps the factory-installed M4 image fixed during M7 OTA. Components are optional,
 allocation-free, and use injected platform services. Standalone applications
 remain supported; boot control reports `not_supported` without a bootloader,
 and OTA is unavailable. See the [STM32 flash layout](stm32.md#flash-layout-and-executable-images)

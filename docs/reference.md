@@ -1058,7 +1058,10 @@ over UART, USB, and TCP, including timers, Ethernet ping, reconnect, and softwar
 reset recovery. The standalone H563 starter also passed periodic-worker and UART
 command/reset checks. Both H563 and H755 starters build independently and their
 programming plans select the correct images, including H755's sleeping M4.
-The current H755 firmware remains unvalidated on hardware.
+The current H755 console and reliability paths have also been hardware-tested;
+its standalone starter still has build/programming-plan coverage only. The
+[factory-image guide](03-hardware-console.md#h755-factory-boot-image) describes
+H755 A/B builds, which include the fixed M4 in one factory HEX file.
 
 
 For the full H563 console matching the H755 configuration:
@@ -1071,8 +1074,9 @@ meson compile -C build/net-h563 flash-openocd
 
 Keep ST-LINK connected, connect CN13 USB-C for the independent USB console,
 and CN14 to a DHCP LAN. `net status` reports the address for `nc <address> 1000`.
-When switching boards, stop any OpenOCD process still configured for the H755;
-use `target/stm32h5x.cfg` for H563. If GDB attachment cannot halt the old firmware,
+Use `target/stm32h5x.cfg` for H563. Both boards may remain connected: select each
+ST-LINK serial explicitly and give their OpenOCD servers separate ports, as
+shown in [Testing](testing.md#h755-reliability-and-ab-hil). If GDB attachment cannot halt the old firmware,
 issue `reset halt` through OpenOCD before attaching.
 
 ## Payload events

@@ -36,12 +36,14 @@ namespace daveos::boot {
   inline constexpr std::size_t kRecordSize = 256;
   using Record = std::array<std::byte, kRecordSize>;
 
-  // Fixed little-endian v1 journal format, also used by factory tooling.
-  Record encode(const Snapshot& snapshot);
+  // Little-endian journal: v1 uses 16-byte writes; v2 isolates its commit
+  // trailer in the final 32-byte unit. Factory tooling uses the same formats.
+  Record encode(const Snapshot& snapshot, std::uint32_t write_size = 16);
   bool decode(const Record& record, Snapshot& snapshot);
 
   // Two independently erasable regions; the last valid committed record is
-  // never erased until a newer snapshot is committed and read back. No heap.
+  // never erased until an equivalent or newer snapshot has been committed and
+  // verified in the other region. No heap.
   class Journal {
    public:
     Journal(Flash flash, const Layout& layout)
@@ -50,12 +52,15 @@ namespace daveos::boot {
     Status load(Snapshot& snapshot);
     Status begin(const Snapshot& snapshot, bool initialize = false);
     void tick();
+    // Boot-only maintenance: preserve the newest record in the other bank,
+    // then erase this bank's checkpoint area before handing off to its app.
+    Status prepare_runtime(std::uint32_t bank, core::Time timeout = 5000000);
 
     Status status() const { return status_; }
 
     // Bounded foreground convenience for confirmation/boot selection. OTA can
     // instead call begin/tick cooperatively. timeout includes erase/program.
-    Status commit(const Snapshot& snapshot, core::Time timeout = 1000000,
+    Status commit(const Snapshot& snapshot, core::Time timeout = 0,
                   bool initialize = false);
 
    private:
@@ -85,11 +90,16 @@ namespace daveos::boot {
     Flash flash_;
     Layout layout_;
     Record record_{};
+    Record pending_record_{};
+    std::uint32_t pending_target_ = 0;
+    bool checkpoint_ = false;
+    bool erase_only_ = false;
     Machine machine_;
     Status status_ = Status::ok;
     std::uint32_t target_ = 0;
     std::uint32_t latest_ = 0;
     std::size_t offset_ = 0;
+    core::Time operation_started_ = 0;
     bool requested_ = false;
     bool erase_needed_ = false;
     bool timed_out_ = false;

@@ -21,10 +21,15 @@ firmware = executable('stm32h755-sleep-m4',
   link_depends: linker_script,
 )
 foreach output_format : [['hex', 'ihex'], ['bin', 'binary']]
-  custom_target('stm32h755-sleep-m4-' + output_format[0],
+  converted_m4 = custom_target('stm32h755-sleep-m4-' + output_format[0],
     input: firmware, output: 'stm32h755-sleep-m4.' + output_format[0],
     command: [objcopy, '-O', output_format[1], '@INPUT@', '@OUTPUT@'],
     build_by_default: true)
+  if output_format[0] == 'bin'
+    m4_binary = converted_m4
+  endif
 endforeach
 
-firmware_images += [firmware]
+if not get_option('bootloader')
+  firmware_images += [firmware]
+endif

@@ -1,5 +1,7 @@
 board = "h755"
 build = "build/net-h755"
+bootloader = false
+# For the A/B suite, use build/boot-h755 and bootloader = true; Meson must match.
 probe_serial = "<H755-ST-LINK-serial>"
 uart = "/dev/serial/by-id/<H755-ST-LINK-UART>"
 usb = "/dev/serial/by-id/<DaveOS-H755-USB-CDC>"

@@ -4,6 +4,7 @@
 
 #include "main.h"
 #include "platform/stm32h7/crc32.h"
+#include "platform/stm32h7/flash.h"
 #include "platform/stm32h7/platform.h"
 #include "platform/stm32h7/reliability.h"
 

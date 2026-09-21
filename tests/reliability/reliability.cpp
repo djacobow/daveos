@@ -668,3 +668,113 @@ TEST_CASE(
   REQUIRE(engine.begin(std::span(package).first(128)) == core::Status::ok);
   REQUIRE(engine.next_offset() == 0);
 }
+
+TEST_CASE(
+    "H755 journal commits 32-byte trailers and checkpoints before runtime "
+    "erase") {
+  for (auto executing : {0u, 1u}) {
+    reliability::MemoryFlash flash;
+    flash.write_size = 32;
+    auto layout = flash.layout();
+    layout.write_size = 32;
+    REQUIRE(layout.valid());
+    boot::Snapshot initial;
+    initial.counter = 1;
+    boot::Journal factory(flash.driver(), layout);
+    REQUIRE(factory.commit(initial, 1000000, true) == core::Status::ok);
+    flash.executing = executing;
+    boot::Journal journal(flash.driver(), layout);
+    boot::Snapshot snapshot;
+    REQUIRE(journal.load(snapshot) == core::Status::ok);
+    // One sector has only two records, forcing checkpoint/reclamation quickly.
+    for (std::uint32_t i = 0; i < 2 - executing; ++i) {
+      ++snapshot.counter;
+      REQUIRE(journal.commit(snapshot) == core::Status::ok);
+    }
+    auto before = flash;
+    before.erases.clear();
+    ++snapshot.counter;
+    auto complete = before;
+    boot::Journal successful(complete.driver(), layout);
+    REQUIRE(successful.commit(snapshot) == core::Status::ok);
+    REQUIRE(complete.erases ==
+            std::vector<std::uint32_t>{layout.metadata[1 - executing]});
+    const auto operations = complete.operations - before.operations;
+    // Cut each operation, including checkpoint body/trailer, erase, and new
+    // body/trailer. Recovery must see the old or fully committed new state.
+    for (int cut = 0; cut < operations; ++cut) {
+      for (auto partial : {0u, 1u, 15u, 16u, 31u, 32u, 255u, 511u}) {
+        auto torn = before;
+        torn.fail_operation = torn.operations + cut;
+        torn.partial = partial;
+        boot::Journal interrupted(torn.driver(), layout);
+        REQUIRE(interrupted.commit(snapshot) != core::Status::ok);
+        torn.fail_operation = -1;
+        boot::Journal reopened(torn.driver(), layout);
+        boot::Snapshot recovered;
+        REQUIRE(reopened.load(recovered) == core::Status::ok);
+        REQUIRE((recovered.counter == snapshot.counter - 1 ||
+                 recovered.counter == snapshot.counter));
+        for (auto erased : torn.erases) {
+          REQUIRE(erased != layout.metadata[executing]);
+        }
+      }
+    }
+    boot::Snapshot loaded;
+    REQUIRE(successful.load(loaded) == core::Status::ok);
+    REQUIRE(loaded.counter == snapshot.counter);
+    REQUIRE(daveos::util::wire::read32(boot::encode(loaded, 32), 4) == 2);
+    // Eventually the executing-bank checkpoint area is exhausted: fail
+    // without changing flash instead of erasing it or rebooting implicitly.
+    auto result = core::Status::ok;
+    for (int i = 0; i < 10 && result == core::Status::ok; ++i) {
+      ++snapshot.counter;
+      result = successful.commit(snapshot);
+    }
+    REQUIRE(result == core::Status::full);
+    for (auto erased : complete.erases) {
+      REQUIRE(erased != layout.metadata[executing]);
+    }
+  }
+}
+
+TEST_CASE(
+    "Boot maintenance restores runtime checkpoint space without losing "
+    "metadata") {
+  for (auto bank : {0u, 1u}) {
+    reliability::MemoryFlash initial;
+    initial.write_size = 32;
+    auto layout = initial.layout();
+    layout.write_size = 32;
+    boot::Snapshot snapshot;
+    snapshot.counter = 19;
+    boot::Journal factory(initial.driver(), layout);
+    REQUIRE(factory.commit(snapshot, 1000000, true) == core::Status::ok);
+    auto successful = initial;
+    boot::Journal maintenance(successful.driver(), layout);
+    REQUIRE(maintenance.prepare_runtime(bank) == core::Status::ok);
+    REQUIRE(std::all_of(
+        successful.bytes.begin() + layout.metadata[bank],
+        successful.bytes.begin() + layout.metadata[bank] + layout.sector_size,
+        [](auto b) { return b == std::byte{0xff}; }));
+    for (int cut = initial.operations; cut < successful.operations; ++cut) {
+      for (auto partial : {0u, 16u, 31u, 32u, 511u}) {
+        auto flash = initial;
+        flash.fail_operation = cut;
+        flash.partial = partial;
+        boot::Journal interrupted(flash.driver(), layout);
+        REQUIRE(interrupted.prepare_runtime(bank) != core::Status::ok);
+        flash.fail_operation = -1;
+        boot::Snapshot loaded;
+        boot::Journal reopened(flash.driver(), layout);
+        REQUIRE(reopened.load(loaded) == core::Status::ok);
+        REQUIRE(loaded.counter == 19);
+        REQUIRE(reopened.prepare_runtime(bank) == core::Status::ok);
+        flash.executing = bank;
+        REQUIRE(reopened.prepare_runtime(bank) == core::Status::unsupported);
+        ++loaded.counter;
+        REQUIRE(reopened.commit(loaded) == core::Status::ok);
+      }
+    }
+  }
+}

@@ -49,6 +49,28 @@ class FactoryTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             factory.regions(self.boot, self.app, dict(self.layout, boot_reservation=24576), self.version)
 
+    def test_h755_includes_fixed_m4_and_separate_commit_word(self):
+        layout = dict(self.layout, product=0x755, sector_size=131072, write_size=32,
+                      metadata=[0x08020000, 0x08120000], slots=[0x08040000, 0x08140000],
+                      slot_size=768 * 1024)
+        boot = struct.pack('<II', 0x20020000, 0x08000009) + bytes(24)
+        app = struct.pack('<II', 0x20020000, 0x08040009) + bytes(24)
+        m4 = struct.pack('<II', 0x10048000, 0x08100009) + bytes(24)
+        with self.assertRaises(ValueError):
+            factory.regions(boot, app, layout, self.version)
+        parts = dict(factory.regions(boot, app, layout, self.version, m4))
+        self.assertEqual(set(parts), {0x08000000, 0x08020000, 0x08040000, 0x08100000, 0x08120000})
+        self.assertEqual(parts[0x08100000], m4)
+        record = parts[0x08020000]
+        self.assertEqual(record, parts[0x08120000])
+        self.assertEqual(struct.unpack_from('<I', record, 4)[0], 2)
+        self.assertEqual(struct.unpack_from('<I', record, 220)[0], factory.binascii.crc32(record[:220]))
+        self.assertEqual(struct.unpack_from('<I', record, 224)[0], 0x454e4f44)
+        self.assertEqual(record[240:], bytes(16))
+        for bad in [m4[:4], m4 + bytes(131072), struct.pack('<II', 0x10048000, 0x08140009) + bytes(24)]:
+            with self.assertRaises(ValueError):
+                factory.regions(boot, app, layout, self.version, bad)
+
     def test_factory_programming_erases_before_writing(self):
         cube = flash.command('cubeprogrammer', 'programmer', 'stm32h5', [Path('factory.hex')], '', True)
         self.assertLess(cube.index('-e'), cube.index('-d'))
@@ -56,6 +78,10 @@ class FactoryTests(unittest.TestCase):
         ocd = flash.command('openocd', 'openocd', 'stm32h5', [Path('factory.hex')], '', True)
         self.assertLess(ocd.index('stm32h5x mass_erase 0'),
                         ocd.index('flash write_image erase "factory.hex"'))
+        h7 = flash.command('openocd', 'openocd', 'stm32h7', [Path('factory.hex')], 'h755-probe', True)
+        self.assertLess(h7.index('flash erase_address 0x08000000 0x200000'),
+                        h7.index('flash write_image erase "factory.hex"'))
+        self.assertIn('adapter serial "h755-probe"', h7)
         self.assertNotIn('-e', flash.command('cubeprogrammer', 'programmer', 'stm32h5', [], ''))
 
     def test_paired_package_uses_generated_layout_and_version(self):

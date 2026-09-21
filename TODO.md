@@ -1,5 +1,8 @@
 # Follow-up work
 
+Completed validation entries describe their respective phases. The H755 parity
+section supersedes older H755 hardware deferrals; remaining gaps are explicit.
+
 ## Bootloader and reliability
 
 ### Completed
@@ -33,7 +36,12 @@
 - [x] Exercise UART/USB/TCP commands and hardware/software/incremental CRC, DHCP/large-packet ping/TCP reconnect, software reset and USB recovery, all four CPU faults, latched task-progress failure, interrupt-masked/startup hangs, and explicit initialization failure on H755.
 - [x] H755 reliability HIL: 15 cases passed across the main run and focused reruns, including a debugger pause longer than the IWDG timeout. The first UART stress run exposed bounded TX overflow; increase H755 ping-pong buffers to 8 KiB each (H563 stays at 4 KiB). Two repeated runs then delivered all 1,160 burst replies with zero dropped frames or DMA errors. No new visual LED/button, physical cable/power-cut, or standalone-starter hardware validation.
 - [x] Parity regression: host 27/27, ASan/UBSan 27/27, fake 21/21, logging-disabled 28/28, TSan 26/26, GCC 13 28/28; portable Python 18 passed with 5 opt-in skips, H563/H755 standalone starter builds, formatting/lint, H563 OTP/boot firmware, H755 full/none/UART/USB configurations, and both programming plans passed. H563 was not reflashed; a read-only network query verified its existing OTP serial remained `dave_nucleoh563_sn001`.
-- [ ] Plan H755 A/B layout next: 128 KiB erase sectors and the sleeping M4 image at the start of bank B require a separate layout decision. H755 bootloader/OTA and OTP are not implemented.
+- [x] Implement the H755 A/B layout: one 128 KiB sector each for the bootloader (32 KiB code limit) and fixed factory-programmed M4, one metadata sector per bank, and equal 768 KiB M7 slots. Factory HEX contains both cores; OTA preserves both fixed-image sectors. IWDG starts in the bootloader and continues through application handoff.
+- [x] Add injected H7 flash operations with 32-byte programming, version-2 journal encoding, file-backed geometry tests and torn-write/checkpoint/erase simulations. Runtime reclamation checkpoints in the executing bank and erases only the inactive bank; checkpoint exhaustion returns `full` without resetting. Boot maintenance restores checkpoint space. Preserve H563's version-1 encoding and the 100 ms task-progress allowance.
+- [x] Full H755 A/B HIL: 23/23 passed in one run. Covers UART/USB/TCP, CRC, network/reset recovery, retained CPU faults, startup/runtime/bootloader watchdog hangs, failed-trial rollback, corrupt-confirmed fallback, both-images-invalid reset/factory recovery, confirmed B startup, bidirectional OTA and runtime journal reclamation in both slots. Both fixed-image sectors retain their hashes through OTA. UART stress delivered 1,160/1,160 replies without drops or DMA errors. OTA had 207 concurrent timers with maximum 26 ms host round-trip; journal rollover had 265 timers with maxima 7 ms (A) and 5 ms (B). These are host-observed times, not direct scheduler latency measurements; task-health checks remained active with the unchanged 100 ms allowance. The final rebuilt firmware/package/factory bytes match those tested. Bootloader is 20,896 of its 32,768-byte code limit. Left H755 running confirmed A.
+- [x] H755 A/B software regression: host 27/27, ASan/UBSan 27/27, fake 21/21, logging-disabled 28/28, TSan 26/26, GCC 13 28/28; portable Python 19 passed (5 opt-in skips), all three standalone starter builds, format/lint, H563 OTP/boot build, H755 standalone transport combinations, and both programming plans passed. A fresh H755 A/B build verified application/bootloader/package CI build-number propagation. H563 was not reflashed and real OTP was untouched.
+- [ ] Qualify H755 physical power cuts, actual flash ECC injection, and cache-enabled flash operations. Runtime checkpoint exhaustion/recovery has host-model coverage; hardware currently exercises reclamation in both directions.
+- [ ] Plan H755 OTP separately; its existing H563 backend/emulator must not be selected on H755.
 
 ### Remaining qualification and follow-ups
 
@@ -114,7 +122,7 @@
 - [x] Fix the original H563 startup stack overflow by reserving 64 KiB; later move application objects to static storage.
 - [ ] Measure H563 whole-program stack high-water usage under console/network/interrupt load, then right-size the retained 64 KiB reservation in both linker and CubeMX settings.
 - [x] Hardware-test the current H755 firmware over UART, USB, and TCP, including static storage, FIFO/16-line input, Meson board/component selection, bound timers, and reusable command binding. Current reliability bring-up supersedes the earlier hardware deferral; standalone starter hardware testing remains outstanding.
-- [ ] Revisit H755 stack reservation after the application-owned console refactor; its Cortex-M7 has no MSPLIM guard.
+- [ ] Revisit H755 stack reservation and RAM placement; its Cortex-M7 has no MSPLIM guard. The full A/B console currently reserves 128,792 of 129,024 DTCM bytes, including a 16 KiB stack and 512-byte heap. Measure stack high-water and move suitable buffers into available AXI SRAM before adding more DTCM globals.
 
 - [x] Fix H563 UART burst overruns with hardware FIFO reception and a 16-line queue; validated 580 unpaced commands at 1 Mb/s, including 4,112-byte bursts and overlength recovery.
 

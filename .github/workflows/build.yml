@@ -101,9 +101,12 @@ jobs:
           done
       - name: Build A/B bootloader and verify CI version propagation
         run: |
-          meson setup build/boot --cross-file meson/stm32.ini -Dexamples=true -Dbootloader=true -Dnetworking=true -Dversion_build="$GITHUB_RUN_NUMBER"
-          meson compile -C build/boot -j 2
-          python tools/verify_version.py --build build/boot --number "$GITHUB_RUN_NUMBER"
+          for board in h563 h755; do
+            meson setup build/boot-$board --cross-file meson/stm32.ini -Dboard="$board" -Dexamples=true -Dbootloader=true -Dnetworking=true -Dversion_build="$GITHUB_RUN_NUMBER"
+            meson compile -C build/boot-$board -j 2
+            meson compile -C build/boot-$board flash-plan
+            python tools/verify_version.py --build build/boot-$board --number "$GITHUB_RUN_NUMBER"
+          done
       - name: Build standalone device starters
         run: |
           python -B -m pytest tests/starter/test_starter.py --starter-board h563 --starter-work "$PWD/build/device-starters"

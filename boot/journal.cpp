@@ -18,16 +18,28 @@ namespace daveos::boot {
     constexpr std::size_t kCrcOffset = 236;
     constexpr std::size_t kCommitOffset = 240;
 
-    bool Erased(const Record& record) {
-      return std::all_of(record.begin(), record.end(), [](std::byte value) {
-        return value == std::byte{0xff};
-      });
+    bool Erased(const Flash& flash, std::uint32_t address) {
+      Record record;
+      const auto blank = [](auto bytes) {
+        return std::all_of(bytes.begin(), bytes.end(), [](std::byte value) {
+          return value == std::byte{0xff};
+        });
+      };
+      auto header = std::span(record).first(16);
+      if (flash.read(flash.context, address, header) != Status::ok ||
+          !blank(header)) {
+        return false;
+      }
+      auto rest = std::span(record).subspan(16);
+      return flash.read(flash.context, address + 16, rest) == Status::ok &&
+             blank(rest);
     }
   }  // namespace
 
   bool Layout::valid() const {
-    if (!slot_size || !sector_size || sector_size % kRecordSize ||
-        write_size != 16 || slot_size % sector_size || !product || !revision) {
+    if (!slot_size || !sector_size || !operation_timeout ||
+        sector_size % kRecordSize || (write_size != 16 && write_size != 32) ||
+        slot_size % sector_size || !product || !revision) {
       return false;
     }
     std::array<std::pair<std::uint64_t, std::uint64_t>, 4> regions{};
@@ -52,10 +64,12 @@ namespace daveos::boot {
     return true;
   }
 
-  Record encode(const Snapshot& snapshot) {
+  Record encode(const Snapshot& snapshot, std::uint32_t write_size) {
+    const auto crc_offset = write_size == 32 ? 220u : kCrcOffset;
+    const auto commit_offset = write_size == 32 ? 224u : kCommitOffset;
     Record bytes{};
     wire::write32(bytes, 0, kMagic);
-    wire::write32(bytes, 4, 1);
+    wire::write32(bytes, 4, write_size == 32 ? 2 : 1);
     wire::write64(bytes, 8, snapshot.sequence);
     wire::write64(bytes, 16, snapshot.counter);
     for (std::size_t i = 0; i < 2; ++i) {
@@ -73,21 +87,29 @@ namespace daveos::boot {
       std::memcpy(bytes.data() + at + 40, image.version.commit, 41);
       bytes[at + 81] = std::byte(image.version.dirty);
     }
-    wire::write32(bytes, kCrcOffset,
-                  util::crc32::calculate(std::span(bytes).first(kCrcOffset)));
-    wire::write32(bytes, kCommitOffset, kCommit);
-    wire::write64(bytes, kCommitOffset + 4, snapshot.sequence);
-    wire::write32(bytes, kCommitOffset + 12, ~kCommit);
+    wire::write32(bytes, crc_offset,
+                  util::crc32::calculate(std::span(bytes).first(crc_offset)));
+    wire::write32(bytes, commit_offset, kCommit);
+    wire::write64(bytes, commit_offset + 4, snapshot.sequence);
+    wire::write32(bytes, commit_offset + 12, ~kCommit);
     return bytes;
   }
 
   bool decode(const Record& bytes, Snapshot& snapshot) {
-    if (wire::read32(bytes, 0) != kMagic || wire::read32(bytes, 4) != 1 ||
-        wire::read32(bytes, kCommitOffset) != kCommit ||
-        wire::read32(bytes, kCommitOffset + 12) != ~kCommit ||
-        wire::read64(bytes, kCommitOffset + 4) != wire::read64(bytes, 8) ||
-        wire::read32(bytes, kCrcOffset) !=
-            util::crc32::calculate(std::span(bytes).first(kCrcOffset))) {
+    const auto version = wire::read32(bytes, 4);
+    const auto crc_offset = version == 2 ? 220u : kCrcOffset;
+    const auto commit_offset = version == 2 ? 224u : kCommitOffset;
+    if (wire::read32(bytes, 0) != kMagic || (version != 1 && version != 2) ||
+        wire::read32(bytes, commit_offset) != kCommit ||
+        wire::read32(bytes, commit_offset + 12) != ~kCommit ||
+        wire::read64(bytes, commit_offset + 4) != wire::read64(bytes, 8) ||
+        wire::read32(bytes, crc_offset) !=
+            util::crc32::calculate(std::span(bytes).first(crc_offset))) {
+      return false;
+    }
+    if (version == 2 &&
+        !std::all_of(bytes.begin() + 240, bytes.end(),
+                     [](std::byte b) { return b == std::byte{0}; })) {
       return false;
     }
     Snapshot result{};
@@ -125,15 +147,35 @@ namespace daveos::boot {
     if (!flash_.valid() || !layout_.valid()) {
       return Status::invalid_argument;
     }
+    if (flash_.poll(flash_.context) == Status::busy) {
+      return Status::busy;
+    }
     Snapshot best{};
     Record best_record{};
     bool found = false;
     bool read_failed = false;
     for (auto sector : layout_.metadata) {
-      for (std::uint32_t offset = 0; offset < layout_.sector_size;
-           offset += kRecordSize) {
+      for (std::uint32_t remaining = layout_.sector_size; remaining;
+           remaining -= kRecordSize) {
+        const auto offset = remaining - kRecordSize;
         Record bytes;
-        if (flash_.read(flash_.context, sector + offset, bytes) != Status::ok) {
+        // Most entries are erased or invalid. Read their identifying header
+        // before copying/decoding a whole record; large H7 sectors must not
+        // turn a foreground metadata query into a long scheduler stall.
+        if (flash_.read(flash_.context, sector + offset,
+                        std::span(bytes).first(16)) != Status::ok) {
+          read_failed = true;
+          continue;
+        }
+        if (wire::read32(bytes, 0) != kMagic ||
+            (wire::read32(bytes, 4) != 1 && wire::read32(bytes, 4) != 2)) {
+          continue;
+        }
+        if (found && wire::read64(bytes, 8) < best.sequence) {
+          continue;
+        }
+        if (flash_.read(flash_.context, sector + offset + 16,
+                        std::span(bytes).subspan(16)) != Status::ok) {
           read_failed = true;
           continue;
         }
@@ -178,7 +220,9 @@ namespace daveos::boot {
     }
     auto next = snapshot;
     next.sequence = current.sequence + 1;
-    record_ = encode(next);
+    record_ = encode(next, layout_.write_size);
+    checkpoint_ = false;
+    erase_only_ = false;
     Snapshot check;
     if (!decode(record_, check)) {
       return Status::invalid_argument;
@@ -194,9 +238,7 @@ namespace daveos::boot {
       for (auto at = latest_ + kRecordSize;
            at < std::uint64_t(layout_.metadata[bank]) + layout_.sector_size;
            at += kRecordSize) {
-        Record bytes;
-        if (flash_.read(flash_.context, at, bytes) == Status::ok &&
-            Erased(bytes)) {
+        if (Erased(flash_, at)) {
           target_ = at;
           erase_needed_ = false;
           break;
@@ -206,6 +248,46 @@ namespace daveos::boot {
         target_ = layout_.metadata[1 - bank];
       }
     }
+    const auto executing =
+        flash_.executing_bank ? flash_.executing_bank(flash_.context) : 2u;
+    if (executing < 2) {
+      // Runtime appends/erases belong to the inactive bank. Checkpoint the
+      // previous snapshot in the executing bank before reclaiming its only
+      // durable copy; never erase the executing bank to obtain space.
+      const auto inactive = 1 - executing;
+      auto free_record = [&](std::uint32_t bank) {
+        for (auto at = layout_.metadata[bank];
+             at < std::uint64_t(layout_.metadata[bank]) + layout_.sector_size;
+             at += kRecordSize) {
+          if (Erased(flash_, at)) {
+            return at;
+          }
+        }
+        return UINT32_MAX;
+      };
+      target_ = free_record(inactive);
+      erase_needed_ = target_ == UINT32_MAX;
+      if (erase_needed_) {
+        target_ = layout_.metadata[inactive];
+        if (loaded == Status::ok && latest_ >= layout_.metadata[inactive] &&
+            latest_ < std::uint64_t(layout_.metadata[inactive]) +
+                          layout_.sector_size) {
+          const auto checkpoint = free_record(executing);
+          if (checkpoint == UINT32_MAX) {
+            return Status::full;
+          }
+          pending_record_ = record_;
+          pending_target_ = target_;
+          // Preserve the exact encoding for duplicate-sequence validation.
+          if (flash_.read(flash_.context, latest_, record_) != Status::ok) {
+            return Status::io_error;
+          }
+          target_ = checkpoint;
+          checkpoint_ = true;
+          erase_needed_ = false;
+        }
+      }
+    }
     offset_ = 0;
     timed_out_ = false;
     requested_ = true;
@@ -213,7 +295,16 @@ namespace daveos::boot {
     return Status::ok;
   }
 
-  void Journal::tick() { (void)machine_.tick(*this); }
+  void Journal::tick() {
+    if (requested_) {
+      operation_started_ = flash_.now(flash_.context);
+    } else if (status_ == Status::busy &&
+               flash_.now(flash_.context) - operation_started_ >=
+                   layout_.operation_timeout) {
+      timed_out_ = true;
+    }
+    (void)machine_.tick(*this);
+  }
 
   void Journal::Step(State cs, State& ns) {
     switch (cs) {
@@ -251,7 +342,12 @@ namespace daveos::boot {
           status_ = timed_out_ ? Status::timeout : result;
           ns = State::failed;
         } else if (cs == State::erase_wait) {
-          ns = State::write;
+          if (erase_only_) {
+            status_ = Status::ok;
+            ns = State::done;
+          } else {
+            ns = State::write;
+          }
         } else {
           offset_ += layout_.write_size;
           ns = offset_ == record_.size() ? State::verify : State::write;
@@ -281,14 +377,90 @@ namespace daveos::boot {
         if (status_ == Status::ok && readback != record_) {
           status_ = Status::checksum_error;
         }
-        ns = status_ == Status::ok ? State::done : State::failed;
+        if (status_ == Status::ok && checkpoint_) {
+          record_ = pending_record_;
+          target_ = pending_target_;
+          offset_ = 0;
+          checkpoint_ = false;
+          status_ = Status::busy;
+          ns = State::erase;
+        } else {
+          ns = status_ == Status::ok ? State::done : State::failed;
+        }
         break;
       }
     }
   }
 
+  Status Journal::prepare_runtime(std::uint32_t bank, core::Time timeout) {
+    if (bank >= 2 ||
+        (flash_.executing_bank && flash_.executing_bank(flash_.context) < 2)) {
+      return Status::unsupported;
+    }
+    if (status_ == Status::busy) {
+      return Status::busy;
+    }
+    Snapshot snapshot;
+    auto result = load(snapshot);
+    if (result != Status::ok) {
+      return result;
+    }
+    const auto run = [&] {
+      offset_ = 0;
+      timed_out_ = false;
+      checkpoint_ = false;
+      requested_ = true;
+      status_ = Status::busy;
+      const auto start = flash_.now(flash_.context);
+      while (status_ == Status::busy) {
+        timed_out_ = flash_.now(flash_.context) - start >= timeout;
+        tick();
+      }
+      return status_;
+    };
+    if (latest_ >= layout_.metadata[bank] &&
+        latest_ < std::uint64_t(layout_.metadata[bank]) + layout_.sector_size) {
+      if (flash_.read(flash_.context, latest_, record_) != Status::ok) {
+        return Status::io_error;
+      }
+      target_ = layout_.metadata[1 - bank];
+      erase_needed_ = true;
+      for (auto at = target_;
+           at < std::uint64_t(layout_.metadata[1 - bank]) + layout_.sector_size;
+           at += kRecordSize) {
+        if (Erased(flash_, at)) {
+          target_ = at;
+          erase_needed_ = false;
+          break;
+        }
+      }
+      erase_only_ = false;
+      result = run();
+      if (result != Status::ok) {
+        return result;
+      }
+    }
+    bool blank = true;
+    for (auto at = layout_.metadata[bank];
+         blank &&
+         at < std::uint64_t(layout_.metadata[bank]) + layout_.sector_size;
+         at += kRecordSize) {
+      blank = Erased(flash_, at);
+    }
+    if (blank) {
+      return Status::ok;
+    }
+    target_ = layout_.metadata[bank];
+    erase_needed_ = true;
+    erase_only_ = true;
+    return run();
+  }
+
   Status Journal::commit(const Snapshot& snapshot, core::Time timeout,
                          bool initialize) {
+    if (!timeout) {
+      timeout = layout_.operation_timeout;
+    }
     auto result = begin(snapshot, initialize);
     if (result != Status::ok) {
       return result;

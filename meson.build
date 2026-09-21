@@ -45,10 +45,10 @@ endif
 firmware_images = []
 subdir('platform')
 if get_option('bootloader')
-  if platform != 'stm32h5' or not get_option('examples')
-    error('The initial bootloader target requires H563 and examples=true')
+  if platform not in ['stm32h5', 'stm32h7'] or not get_option('examples')
+    error('Bootloader requires STM32 and examples=true')
   endif
-  subdir('boot/h563')
+  subdir('boot' / board)
 endif
 # Stable dependency names for applications using DaveOS as a Meson subproject.
 meson.override_dependency('daveos-core', core_dep)

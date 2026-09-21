@@ -1,11 +1,10 @@
 #pragma once
 
 #include "application.h"
+#include "board_config.h"
 #include "boot/control.h"
 #include "core/schedule/module.hpp"
 #include "layout.h"
-#include "platform/stm32h5/reliability.h"
-#include "stm32h563xx.h"
 #include "util/version_stamp.h"
 
 namespace app {
@@ -35,7 +34,7 @@ namespace app {
       if (slot >= 2) {
         return core::Status::incompatible;
       }
-      daveos::platform::stm32h5::set_fault_identity(
+      board::reliability::set_fault_identity(
           daveos::build::kApplicationVersion,
           snapshot.images[slot].installation);
       return core::Status::ok;
@@ -83,7 +82,7 @@ namespace app {
       return 2;
     }
 
-    daveos::platform::stm32h5::Flash flash_;
+    board::reliability::Flash flash_;
     daveos::boot::Control control_;
   };
 

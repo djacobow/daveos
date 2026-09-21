@@ -10,7 +10,8 @@ namespace daveos::update {
 
   // One image block at a time; buffer borrowed until status is terminal.
   // Erases on demand, one sector at a time; program granularity is separate
-  // from both package and transport granularity. v1 supports 16-byte writes.
+  // from both package and transport granularity. Supports 16- or 32-byte
+  // writes.
   class Writer {
    public:
     Writer(boot::Flash flash, const boot::Layout& layout)
@@ -44,7 +45,7 @@ namespace daveos::update {
     Machine machine_;
     Status status_ = Status::ok;
     std::span<const std::byte> data_{};
-    alignas(16) std::array<std::byte, 16> word_{};
+    alignas(32) std::array<std::byte, 32> word_{};
     std::uint32_t base_ = 0, offset_ = 0, erased_until_ = 0;
     std::size_t written_ = 0;
     core::Time operation_started_ = 0;

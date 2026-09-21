@@ -265,7 +265,8 @@ void SystemInit (void)
 #if defined(CORE_CM4)
   /* Configure the Vector Table location add offset address for cortex-M4 ------------------*/
 #if defined(USER_VECT_TAB_ADDRESS)
-  SCB->VTOR = VECT_TAB_BASE_ADDRESS | VECT_TAB_OFFSET; /* Vector Table Relocation in Internal D2 AXI-RAM or in Internal FLASH */
+  extern uint32_t g_pfnVectors[];
+  SCB->VTOR = (uint32_t)g_pfnVectors; /* Vector Table Relocation in Internal D2 AXI-RAM or in Internal FLASH */
 #endif /* USER_VECT_TAB_ADDRESS */
 
 #elif defined(CORE_CM7)
@@ -287,7 +288,8 @@ void SystemInit (void)
 
   /* Configure the Vector Table location -------------------------------------*/
 #if defined(USER_VECT_TAB_ADDRESS)
-  SCB->VTOR = VECT_TAB_BASE_ADDRESS | VECT_TAB_OFFSET; /* Vector Table Relocation in Internal D1 AXI-RAM or in Internal FLASH */
+  extern uint32_t g_pfnVectors[];
+  SCB->VTOR = (uint32_t)g_pfnVectors; /* Vector Table Relocation in Internal D1 AXI-RAM or in Internal FLASH */
 #endif /* USER_VECT_TAB_ADDRESS */
 
 #else

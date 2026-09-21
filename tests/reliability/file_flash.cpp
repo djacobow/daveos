@@ -179,3 +179,50 @@ TEST_CASE(
     REQUIRE_FALSE(selected.trial);
   }
 }
+
+TEST_CASE("FileFlash persists H755-sized flash words and v2 metadata") {
+  Files files;
+  const FileFlash::Geometry geometry{0x08000000, 2 * 1024 * 1024, 128 * 1024,
+                                     32};
+  const boot::Layout layout{{0x08040000, 0x08140000},
+                            {0x08020000, 0x08120000},
+                            768 * 1024,
+                            128 * 1024,
+                            32,
+                            0x755,
+                            1};
+  FileFlash flash;
+  REQUIRE(flash.open(files.path.c_str(), geometry,
+                     FileFlash::OpenMode::create) == core::Status::ok);
+  boot::Snapshot initial;
+  initial.counter = 7;
+  boot::Journal journal(flash.driver(), layout);
+  REQUIRE(journal.commit(initial, 5000000, true) == core::Status::ok);
+  flash.close();
+  REQUIRE(flash.open(files.path.c_str(), geometry) == core::Status::ok);
+  boot::Journal reopened(flash.driver(), layout);
+  boot::Snapshot restored;
+  REQUIRE(reopened.load(restored) == core::Status::ok);
+  REQUIRE(restored.counter == 7);
+  REQUIRE(restored.sequence == 1);
+  auto driver = flash.driver();
+  std::array<std::byte, 16> half{};
+  REQUIRE(driver.program(driver.context, layout.slots[0], half) ==
+          core::Status::invalid_argument);
+  update::Writer writer(driver, layout);
+  std::array<std::byte, 47> payload;
+  payload.fill(std::byte{0x5a});
+  REQUIRE(writer.begin(1, 0, payload) == core::Status::ok);
+  for (int i = 0; i < 50 && writer.status() == core::Status::busy; ++i) {
+    writer.tick();
+  }
+  REQUIRE(writer.status() == core::Status::ok);
+  flash.close();
+  REQUIRE(flash.open(files.path.c_str(), geometry) == core::Status::ok);
+  std::array<std::byte, 64> saved;
+  REQUIRE(driver.read(driver.context, layout.slots[1], saved) ==
+          core::Status::ok);
+  REQUIRE(std::equal(payload.begin(), payload.end(), saved.begin()));
+  REQUIRE(std::all_of(saved.begin() + payload.size(), saved.end(),
+                      [](auto b) { return b == std::byte{0xff}; }));
+}

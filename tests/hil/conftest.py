@@ -31,7 +31,7 @@ def hil_config(request):
     board_name = config.get('board', 'h563')
     if board_name not in ('h563', 'h755'):
         pytest.fail('HIL supports h563 or h755')
-    for key, value in dict(board=board_name, bootloader=board_name == 'h563', networking=True, usb_console=True, tcp_console=True).items():
+    for key, value in dict(board=board_name, bootloader=config.get('bootloader', board_name == 'h563'), networking=True, usb_console=True, tcp_console=True).items():
         if options.get(key) != value:
             pytest.fail(f'HIL build requires {key}={value}')
     if options.get('otp_programming', False):
@@ -48,9 +48,11 @@ def hil_config(request):
             pytest.fail('Another HIL session owns this board')
         with (output / 'build.log').open('w') as log:
             subprocess.run(['meson', 'compile', '-C', str(build)], check=True, stdout=log, stderr=subprocess.STDOUT)
-        names = ('factory.hex', 'stm32-console.elf', 'stm32-console-b.elf', 'application.ota') if board_name == 'h563' else ('stm32-console.elf',)
+        names = ('factory.hex', 'stm32-console.elf', 'stm32-console-b.elf', 'application.ota') if config.get('bootloader', board_name == 'h563') else ('stm32-console.elf',)
         firmware = build / 'examples/stm32_console'
         images = {name: firmware / name for name in names}
+        if config.get('bootloader', board_name == 'h563'):
+            images['bootloader.elf'] = build / 'boot' / board_name / 'bootloader.elf'
         if board_name == 'h755':
             images['stm32h755-sleep-m4.elf'] = build / 'platform/stm32/nucleo/h755/CM4/stm32h755-sleep-m4.elf'
         for image in images.values():
