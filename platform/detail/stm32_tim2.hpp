@@ -56,7 +56,7 @@ namespace daveos::platform::detail {
     // ISR attribution is always core/interrupt; thread context is saved
     // separately.
     core::Context context() const;
-    void context(core::Context value);
+    void context(const core::Context& value);
     // Retained work generation, synchronized by the same critical section
     // guard.
     std::uint64_t sequence();

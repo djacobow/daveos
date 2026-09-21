@@ -138,12 +138,31 @@ section supersedes older H755 hardware deferrals; remaining gaps are explicit.
 - [x] Validate the reusable console on H563 over UART/USB/TCP, including Ethernet ping and reset recovery; validate the standalone device starter's periodic worker, commands, and reset over UART. H755 has build/programming-plan coverage only for these changes.
 - [x] Add daveos::util for CRC, version identity, and retained-fault records.
 - [x] Add software CRC32 with injected hardware support and H563 hardware CRC implementation.
-- [ ] create a hal layer that allows us to abstract away SPI and I2C devices independent of vendor HAL, using DI to be part of "platform". hal layer should support interrupt based api and a polling based api, but not a blocking api
+- [x] Add injected SPI/I2C HALs with callback completion, polling helper, aliased registries, per-controller ownership, statistics, fake backends, and H563/H755 IRQ adapters. [API guide](docs/spi-i2c.md). H563 read-only SD startup/OCR passed five times at 250 kHz; H755 bus adapters are build-tested only.
+- [x] Remove task-index assumptions from watchdog HIL fault injection. H563 now locates `health.Heartbeat` by name and passes with the optional SD module; H755 uses the same helper but has not been hardware-rerun for this test change.
+- [ ] Qualify I2C with a physical device, H755 SPI/I2C with fixtures, and additional SPI modes/speeds. Optimize the reusable SD reader beyond its fixed response capture window.
+- [ ] Add SPI DMA after the fake and interrupt-driven H563/H755 HAL backends, particularly for SPI SD-card throughput. Preserve the portable transaction API; no I2C DMA work is currently planned.
 
 ## For STM32
 
 - [x] Implement H563 A/B flash layout; see bootloader and reliability above.
 - [x] Implement H563 bootloader selection by installation order and CRC-valid eligibility.
 - [x] Implement cooperative inactive-slot OTA with chunk/final CRC, injected flash driver, and explicit flash layout.
-- [ ] Implement a FAT filesystem reader/writer module using FATFS (as a git submodule), again with DI of the SPI bus via the hal layer mentioned above
+- [x] Expand H563 `sd probe` with CSD/CID, CRC16-checked CMD17 reads, repeated 250 kHz/1 MHz comparisons, and read-only MBR/FAT BPB inspection. Five HIL probes passed (60 sector reads); connected 32 GB card reports FAT32, 32 KiB clusters. No card writes or filesystem mount.
+- [x] Add read-only FatFs as a pinned submodule, injected block-device/volume APIs, file-backed host tests and an optional serialized filesystem module.
+- [ ] Plan and implement filesystem writes, including media removal and power-loss behavior; current FatFs configuration is strictly read-only.
 - [ ] Implememnt a display driver module for ssd1306 devices using DI of the I2C via the layer above
+
+- [x] Add task-only nested `yield()`, one eligible callback per call, bounded depth, context diagnostics and elapsed/self/nested accounting.
+- [x] Integrate FatFs through a serialized filesystem worker and asynchronous SD reader that yields while waiting. Same-volume nested calls and competing requests fail immediately. See [storage](docs/storage.md).
+
+- [x] Validate H563 read-only FatFs mount/list, missing-file errors, media reservation,
+  unmount/remount and watchdog health. Both SPI HIL cases passed; stack watermark
+  2,936 bytes and zero heap requests after filesystem work on the initially
+  empty card. No card writes.
+- [x] Validate populated-card reads on H563: 69 read requests across six files,
+  subdirectories, long filename, 512-byte sector and 32 KiB cluster boundaries,
+  4 KiB previews, EOF and past-EOF handling; repeated/overlapping reads agree.
+  Watchdog/fault checks passed. Host tests retain fragmented-file coverage.
+- [ ] Validate card-removal recovery, fragmented files on hardware, independent
+  source-file comparisons and larger directory workloads.

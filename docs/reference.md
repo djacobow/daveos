@@ -11,6 +11,9 @@ and optional lwIP Ethernet networking.
 Run these commands from the DaveOS repository root. For a guided introduction,
 start with [the learning path](../README.md).
 
+Optional FAT12/16/32 storage is enabled with `-Dfatfs=true`; see
+[read-only storage](storage.md) for the injected block-device API and SD commands.
+
 ## Build and run
 
 Install Meson (1.3 or newer), Ninja, clang++, Python 3, clang-format 15, and
@@ -1134,7 +1137,9 @@ auto app = core::make_application<Event, core::Capacities{.events = 64}>(
 ```
 
 The fields are `events`, `timers`, `line`, and `arguments`, defaulting to
-32, 16, 256, and 8. Command capacities apply only with command sources.
+32, 16, 256, and 8. `yield_depth` defaults to 4 active task callbacks
+(including the outer task); values 0 or 1 disable nested task dispatch.
+Command capacities apply only with command sources.
 For event-free applications omit the event argument:
 `make_application<core::Capacities{.events = 64}>(platform, modules)`.
 Both capacity-first (optionally followed by Event) and Event-first forms are
@@ -1166,3 +1171,25 @@ limited to six parameters even with a larger token buffer.
 Bounds on 64-bit integer or `double` parameters are compile errors. Use a 32-bit
 integer or `float`, or parse the wide value without bounds metadata and check its
 range inside the handler.
+
+## SPI/I2C HAL
+
+`daveos-hal` exposes callback-based controller/master transactions, borrowed
+aliased device handles, and a polling completion helper. SPI uses eight-bit
+words and GPIO chip selects; I2C uses unshifted seven-bit addresses.
+See [SPI/I2C API and wiring](spi-i2c.md) and the
+[platform contract](spec/platforms.md#spi-and-i2c-hal).
+
+### Cooperative task yielding
+
+`scheduler().yield()` dispatches at most one other due task and returns; it
+never sleeps, advances fake time, dispatches events, or drains logs. Calls
+outside this scheduler's task call chain return and count `invalid_context`.
+Active task callbacks cannot reenter, even if rescheduled. Nesting is bounded
+by `Capacities::yield_depth` (default 4). Full contract and examples:
+[Task yielding](yield.md).
+
+Task durations retain elapsed-time semantics. `total_self_duration` excludes
+nested task callback durations; `total_nested_duration` records that excluded
+time. Self time still includes ISR time and waiting. The statistics table
+includes both totals and the `invalid_yields`/`yield_depth_errors` counters.

@@ -20,6 +20,11 @@ else
   file_otp_lib = static_library('daveos-file-otp', 'host/otp.cpp', dependencies: otp_dep)
   file_otp_dep = declare_dependency(link_with: file_otp_lib, dependencies: otp_dep)
   meson.override_dependency('daveos-file-otp', file_otp_dep)
+  if get_option('fatfs')
+    file_block_lib = static_library('daveos-file-block', 'host/block_device.cpp', dependencies: core_dep)
+    file_block_dep = declare_dependency(link_with: file_block_lib, dependencies: core_dep)
+    meson.override_dependency('daveos-file-block', file_block_dep)
+  endif
   subdir('fake')
   if platform == 'host'
     subdir('host')

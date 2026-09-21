@@ -21,6 +21,7 @@ The support matrix identifies which services have drivers for each family.
 
 - [Support and validation matrix](#support-and-validation-matrix)
 - [Remaining platform validation](#remaining-platform-validation)
+- [SPI/I2C validation fixtures](#spii2c-validation-fixtures)
 - [Networking and application composition](#networking-and-application-composition)
 - [Console library and device starter](#console-library-and-device-starter)
 - [Flash layout and executable images](#flash-layout-and-executable-images)
@@ -30,10 +31,51 @@ The support matrix identifies which services have drivers for each family.
 - [Test organization and board-specific HIL](#test-organization-and-board-specific-hil)
 - [OTP integration](#otp-integration)
 
+## SPI/I2C validation fixtures
+
+The user has connected an SD card to the NUCLEO-H563ZI connector marked
+"SPI A", with this wiring:
+
+| Signal | MCU pin |
+| --- | --- |
+| SCK | PA5 |
+| MISO | PG9 |
+| MOSI | PB5 |
+| CS | PD14 |
+
+The CubeMX H563 device database confirms SPI1 with AF5 on these bus pins.
+The optional `spi_sd_probe` module uses HSI/CKPER, starting at 250 kHz and
+checking sector reads at 1 MHz. Five complete read-only inspections passed,
+including CSD/CID, OCR, and 60 CRC-checked sector reads across both rates.
+The connected 32 GB card has a primary FAT32 partition at LBA 8192, with
+32 KiB clusters. No card sectors were written and the filesystem was not
+mounted. Other SPI modes, higher speeds and filesystem contents remain
+unqualified by that inspection. Optional `fatfs=true` adds
+[read-only filesystem commands](../storage.md) after `sd probe`.
+The subsequent filesystem HIL run mounted and listed the empty root,
+checked errors and remounting, and retained healthy watchdog/fault status.
+It made zero heap requests and used 2,936 bytes of the painted stack.
+A later populated-card check passed 69 reads across six files, including
+subdirectories, a long filename, sector/cluster boundaries and EOF behavior;
+watchdog/fault checks stayed healthy. No card sectors were written. See the
+[storage validation notes](../storage.md#validation) for scope and limits.
+See [SPI/I2C](../spi-i2c.md).
+For the STM32H5 SPI backend, manage each attached device's CS as a GPIO output,
+not through the SPI peripheral's hardware NSS output. The backend owns GPIO
+assertion/deassertion according to the portable transaction and error-cleanup
+contract. For this SD-card fixture, that GPIO is PD14.
+
+An SSD1306 display is not yet available for I2C hardware validation; begin
+with the fake backend and retain that hardware validation gap explicitly.
+
+The portable API contract is in the
+[SPI/I2C HAL section](platforms.md#spi-and-i2c-hal).
+
 ## Support and validation matrix
 
 | Component | H563 | H755 M7 / M4 |
 | --- | --- | --- |
+| SPI/I2C HAL | IRQ adapters implemented; SPI SD identification and CRC-checked sector inspection tested at 250 kHz/1 MHz; I2C awaits a fixture | IRQ adapters compile-tested; bus hardware qualification pending |
 | Scheduler platform, TIM2, critical sections, sleep, reset | Implemented; hardware tested | M7 implemented; current console and reset paths hardware tested. M4 only performs boot synchronization and sleeps. |
 | UART DMA/FIFO, USB CDC, board commands, shared console | Implemented; current HIL and earlier physical checks | Implemented; current UART/USB/TCP command and UART burst HIL. |
 | lwIP Ethernet and TCP console | Implemented; hardware tested | Implemented; DHCP, large-packet ping, TCP reconnect and reset HIL. |

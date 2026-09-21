@@ -41,7 +41,9 @@ namespace daveos::core {
   X(incompatible)               \
   X(not_confirmed)              \
   X(rejected)                   \
-  X(counter_exhausted)
+  X(counter_exhausted)          \
+  X(invalid_context)            \
+  X(depth_limit)
   DAVEOS_ENUM(Status, std::int32_t, DAVEOS_STATUS_VALUES)
 #undef DAVEOS_STATUS_VALUES
   // All modules finish stage1 before any module begins stage2.
@@ -51,10 +53,22 @@ namespace daveos::core {
 
   // Application timer callbacks run in interrupt context (see TimerCallback).
 
+  enum class CallbackKind {
+    outside,
+    initialization,
+    task,
+    event,
+    command,
+    logging,
+    idle
+  };
+
   // Borrowed names used for log attribution; strings must outlive their use.
   struct Context {
     const char* module = "core";
     const char* task = "init";
+    CallbackKind kind = CallbackKind::outside;
+    const void* scheduler = nullptr;
   };
 
   // CRTP defaults and the contract shared by concrete platform adapters.
@@ -117,12 +131,15 @@ namespace daveos::core {
   template <typename P>
   class ContextGuard {
    public:
-    ContextGuard(P& platform, Context context)
+    ContextGuard(P& platform, const Context& context)
         : platform_(platform), previous_(platform.context()) {
       platform.context(context);
     }
 
     ~ContextGuard() { platform_.context(previous_); }
+
+    ContextGuard(const ContextGuard&) = delete;
+    ContextGuard& operator=(const ContextGuard&) = delete;
 
    private:
     P& platform_;

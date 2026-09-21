@@ -14,6 +14,23 @@ component_modules = []
 component_stop = []
 component_early = []
 component_failure = []
+component_irqs = []
+if get_option('spi_sd_probe')
+  if board != 'h563'
+    error('spi_sd_probe requires the H563 SPI A fixture')
+  endif
+  component_deps += hal_dep
+  component_includes += '#include "sd_probe.hpp"'
+  component_members += '    SdProbe sd{platform};'
+  component_modules += ', sd'
+  if get_option('fatfs')
+    component_deps += storage_dep
+    component_includes += '#include "storage/module.hpp"'
+    component_members += '    daveos::storage::Module<Event> filesystem{sd.block_device()};'
+    component_modules += ', filesystem'
+  endif
+  component_irqs += 'extern "C" void SPI1_IRQHandler() { app::components.sd.interrupt(); }'
+endif
 if board in ['h563', 'h755']
   component_deps += util_dep
   if board == 'h563'
@@ -87,9 +104,11 @@ composition.set('MODULES', ''.join(component_modules))
 composition.set('STOP', '\n'.join(component_stop))
 composition.set('EARLY', '\n'.join(component_early))
 composition.set('FAILURE', '\n'.join(component_failure))
+composition.set('IRQS', '\n'.join(component_irqs))
+irq_source = configure_file(input: 'irqs.cpp.in', output: 'irqs.cpp', configuration: composition)
 configure_file(input: 'composition.hpp.in', output: 'composition.hpp', configuration: composition)
 
-firmware = executable('stm32-console', 'appmain.cpp',
+firmware = executable('stm32-console', ['appmain.cpp', irq_source],
   dependencies: component_deps, name_suffix: 'elf',
   # libstdc++ assertion reporting pulls in allocating stdio on this toolchain.
   override_options: ['b_ndebug=true'],

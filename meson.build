@@ -38,6 +38,10 @@ endif
 
 subdir('tools')
 subdir('core')
+subdir('hal')
+if get_option('fatfs')
+  subdir('storage')
+endif
 subdir('util')
 subdir('boot')
 subdir('update')

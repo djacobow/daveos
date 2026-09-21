@@ -33,8 +33,8 @@ jobs:
           cmake --install build/ci-tools/cppcheck-build
           build/ci-tools/cppcheck/bin/cppcheck --version
           echo "$PWD/build/ci-tools/cppcheck/bin" >> "$GITHUB_PATH"
-      - run: git submodule update --init net/lwip
-      - run: meson setup build/host --native-file meson/clang.ini -Db_sanitize=${{ matrix.sanitizer }} -Db_lundef=false -Dnetworking=true -Dversion_build="$GITHUB_RUN_NUMBER"
+      - run: git submodule update --init net/lwip storage/fatfs
+      - run: meson setup build/host --native-file meson/clang.ini -Db_sanitize=${{ matrix.sanitizer }} -Db_lundef=false -Dnetworking=true -Dfatfs=true -Dversion_build="$GITHUB_RUN_NUMBER"
       - run: meson compile -C build/host -j 2
       - run: meson test -C build/host --print-errorlogs
       - if: matrix.sanitizer == 'none'
@@ -44,7 +44,7 @@ jobs:
           meson setup build/fake --native-file meson/clang.ini -Dplatform=fake
           meson compile -C build/fake -j 2
           meson test -C build/fake --print-errorlogs
-          meson setup build/no-logging --native-file meson/clang.ini -Dlogging=false
+          meson setup build/no-logging --native-file meson/clang.ini -Dlogging=false -Dfatfs=true
           meson test -C build/no-logging --print-errorlogs
       - uses: actions/upload-artifact@v4
         if: failure()
@@ -62,10 +62,15 @@ jobs:
       - run: uv pip install --system -r requirements-test.txt
       - run: sudo apt-get update && sudo apt-get install -y gcc-arm-none-eabi libstdc++-arm-none-eabi-dev libstdc++-arm-none-eabi-newlib
       - run: |
-          git submodule update --init platform/stm32h5/STM32CubeH5 platform/stm32/STM32_USB_Device_Library
+          git submodule update --init platform/stm32h5/STM32CubeH5 platform/stm32/STM32_USB_Device_Library storage/fatfs
           git -C platform/stm32h5/STM32CubeH5 submodule update --init --recursive Drivers/CMSIS/Device/ST/STM32H5xx Drivers/STM32H5xx_HAL_Driver
       - run: meson setup build/arm --cross-file meson/stm32.ini -Dexamples=true -Dversion_build="$GITHUB_RUN_NUMBER"
       - run: meson compile -C build/arm
+      - name: Build optional read-only H563 SD fixture
+        run: |
+          meson configure build/arm -Dspi_sd_probe=true -Dfatfs=true
+          meson compile -C build/arm
+          meson configure build/arm -Dspi_sd_probe=false -Dfatfs=false
       - run: |
           git submodule update --init platform/stm32h7/STM32CubeH7
           git -C platform/stm32h7/STM32CubeH7 submodule update --init --recursive Drivers/CMSIS/Device/ST/STM32H7xx Drivers/STM32H7xx_HAL_Driver

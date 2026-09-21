@@ -9,10 +9,10 @@ pytestmark = pytest.mark.hil
 
 def test_latched_task_failure(board):
     board.uart.drain()
-    data = board.fault_experiment('''hbreak app::Health::Heartbeat
+    data = board.fault_experiment(f'''hbreak app::Health::Heartbeat
 continue
 delete breakpoints
-set var app::application.scheduler_.tasks_._M_elems[0].completed = 0
+{board.task_progress_fault('health', 'Heartbeat')}
 continue''')
     assert struct.unpack_from('<I', data, 12)[0] == 4
     assert b'task_progress' in data and b'Heartbeat' in data

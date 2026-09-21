@@ -143,6 +143,34 @@ class Board:
                   for line in symbols.splitlines() if len(line.split()) == 3}
         return binary, labels
 
+    @staticmethod
+    def task_progress_fault(module, task):
+        """Locate the intended task without assuming module registration order.
+
+        Use GDB expressions only: the ARM GDB may lack Python, and calling a
+        target strcmp while halted would disturb the watchdog experiment.
+        """
+        def matches(pointer, text):
+            return ' && '.join(f'{pointer}[{i}] == {byte}'
+                               for i, byte in enumerate(text.encode('ascii') + b'\0'))
+        condition = matches('$progress_module', module) + ' && ' + matches('$progress_task', task)
+        return f'''set $progress_index = 0
+set $progress_matches = 0
+set $progress_match = -1
+while $progress_index < app::application.scheduler_.task_count_
+ set $progress_module = app::application.scheduler_.tasks_._M_elems[$progress_index].module_name
+ set $progress_task = app::application.scheduler_.tasks_._M_elems[$progress_index].name
+ if {condition}
+  set $progress_match = $progress_index
+  set $progress_matches = $progress_matches + 1
+ end
+ set $progress_index = $progress_index + 1
+end
+if $progress_matches != 1
+ quit 1
+end
+set var app::application.scheduler_.tasks_._M_elems[$progress_match].completed = 0'''
+
     def prepare_execution(self, script, slot='A'):
         """Arrange an injected fault/hang, then detach and leave it running."""
         commands = self.output / 'prepare.gdb'

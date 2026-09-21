@@ -9,6 +9,7 @@ EXCLUDE = (
     r"/(?:build|\.git)/"
     r"|/tools/external/"
     r"|/net/lwip/"
+    r"|/storage/fatfs/"
     r"|/platform/stm32/lan8742/"
     r"|/platform/stm32h[57]/STM32CubeH[57]/"
     r"|/platform/stm32/STM32_USB_Device_Library/"

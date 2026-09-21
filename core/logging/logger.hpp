@@ -99,7 +99,8 @@ namespace daveos::core {
                      record.context.module,
                      record.context.task,
                      {record.text.data(), record.length}};
-      ContextGuard context(platform_, {"core", "logging"});
+      ContextGuard context(platform_,
+                           {"core", "logging", CallbackKind::logging});
       for (const auto& subscriber : subscribers_.items) {
         if (subscriber.write) {
           subscriber.write(subscriber.context, view);

@@ -58,11 +58,14 @@ network listeners beyond the current single-client TCP console.
 | Namespace | Contents |
 | --- | --- |
 | `daveos::core` | Scheduler, module interface, task descriptors, events, timers, queues, optional logging, command descriptors and dispatch, name matching, status enums, and the platform contract. |
+| `daveos::hal` | Portable SPI/I2C HAL shared status and helpers; see the [HAL specification](docs/spec/platforms.md#spi-and-i2c-hal). |
+| `daveos::hal::spi` / `daveos::hal::i2c` | Portable bus interfaces, transaction actions, and configuration contracts. |
 | `daveos::platform::host` | Real-time host platform and simulated interrupts. |
 | `daveos::platform::stm32h5` | STM32H5 platform implementation. |
 | `daveos::platform::stm32h7` | STM32H7 platform implementation (H755 M7). |
 | `daveos::platform::fake` | Fake clock, timer, and sleep implementation. |
 | `daveos::console` | Shared line collection, display, buffered output, and CRTP console module. |
+| `daveos::storage` / `daveos::storage::sd` | Optional read-only FatFs volume, filesystem module, and injected SD reader; see [storage](docs/storage.md). |
 | `daveos::net` | Optional standalone lwIP service, TCP server, and thin module adapter. |
 | `daveos::net::stm32` | Shared H5/H7 Ethernet driver and board network configuration. |
 
@@ -84,10 +87,11 @@ commands, both, or neither.
 ### Execution model
 
 Module callbacks run to completion; the scheduler does not preempt them.
-Long-running tasks must implement their own state machines, splitting work across
-callback invocations so that other tasks can run.
-
-A limited yield mechanism may be considered later, but is outside the initial scope.
+Long-running tasks should split work across callbacks using state machines.
+A task call chain may instead call `scheduler().yield()` to run at most one
+other due task on the same stack, then return. This is nested execution, not
+preemption or independently suspended tasks. See [task yielding](docs/yield.md)
+for context checks, nesting limits, return values and dependency restrictions.
 
 Interrupt handlers may post events and schedule tasks. These operations hand work
 off to the scheduler; they do not execute module callbacks in interrupt context.

@@ -3,6 +3,9 @@ subdir('catch2')
 test_support_dep = declare_dependency(include_directories: include_directories('.'),
   dependencies: [fake_dep, catch_dep])
 subdir('core')
+subdir('yield')
+subdir('hal')
+subdir('sd_inspect')
 subdir('state_machine')
 subdir('reliability')
 subdir('otp')
@@ -31,4 +34,8 @@ subdir('application')
 subdir('console_library')
 if platform == 'host' and get_option('b_sanitize') == 'none'
   subdir('starter')
+endif
+
+if get_option('fatfs')
+  subdir('storage')
 endif

@@ -43,9 +43,11 @@ namespace daveos::platform::detail {
     // Context is thread-local; a concurrent module retains its own attribution.
     bool in_interrupt() const { return interrupt_; }
 
+    // Return a snapshot: nested callbacks replace the active context.
+    // cppcheck-suppress returnByReference
     core::Context context() const { return context_; }
 
-    void context(core::Context value) { context_ = value; }
+    void context(const core::Context& value) { context_ = value; }
 
     // Retained generation, sampled before checking work and passed to idle().
     std::uint64_t sequence() const { return sequence_.load(); }

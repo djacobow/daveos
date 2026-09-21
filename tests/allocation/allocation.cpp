@@ -4,6 +4,8 @@
 
 #include "core/command/command.hpp"
 #include "core/schedule/application.hpp"
+#include "hal/controller.hpp"
+#include "platform/fake/bus.hpp"
 #include "support.hpp"
 
 namespace core = daveos::core;
@@ -281,5 +283,68 @@ TEST_CASE(
   CHECK(posted == core::Status::ok);
   CHECK(ran == core::Status::ok);
   CHECK(module.received == 42);
+  CHECK(allocations == 0);
+}
+
+TEST_CASE(
+    "Bus submission, interrupt completion and statistics allocate no heap "
+    "storage") {
+  namespace hal = daveos::hal;
+  namespace fake = daveos::platform::fake;
+  fake::BusClock<> clock;
+  fake::BusCritical critical;
+  fake::SpiBus backend;
+  hal::Controller<fake::SpiBus, decltype(clock), fake::BusCritical, 1> bus{
+      backend, clock, critical, {{{1, 100000}}}};
+  REQUIRE(bus.init() == hal::Status::ok);
+  const std::array actions{hal::spi::idle_clocks(80)};
+  const std::array script{fake::SpiBus::Step{actions[0]}};
+  backend.script(script);
+  hal::spi::Completion completion;
+  allocations = 0;
+  counting = true;
+  const auto status = completion.start(bus.device<0>(), actions);
+  while (backend.take_pending()) {
+    bus.interrupt();
+  }
+  const auto stats = bus.statistics();
+  const auto result = completion.result();
+  counting = false;
+  REQUIRE(allocations == 0);
+  REQUIRE(status == hal::Status::ok);
+  REQUIRE(result->status == hal::Status::ok);
+  REQUIRE(stats.completed == 1);
+}
+
+TEST_CASE("nested task yielding allocates no heap storage") {
+  struct Module : core::Module<Module> {
+    static constexpr const char* name() { return "yield"; }
+
+    static constexpr auto tasks() {
+      return std::array{DAVEOS_TASK(Module, Outer), DAVEOS_TASK(Module, Inner)};
+    }
+
+    core::Status yielded = core::Status::empty;
+    std::uint32_t calls = 0;
+
+    void Outer() {
+      yielded = scheduler().yield();
+      scheduler().stop();
+    }
+
+    void Inner() { ++calls; }
+  } module;
+
+  test::Fake platform;
+  auto scheduler = core::make_scheduler(platform, core::ModuleList{&module});
+  scheduler.schedule(module, &Module::Outer, 0);
+  scheduler.schedule(module, &Module::Inner, 0);
+  allocations = 0;
+  counting = true;
+  const auto status = scheduler.run();
+  counting = false;
+  CHECK(status == core::Status::ok);
+  CHECK(module.yielded == core::Status::ok);
+  CHECK(module.calls == 1);
   CHECK(allocations == 0);
 }

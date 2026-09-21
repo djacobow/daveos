@@ -27,6 +27,10 @@ namespace daveos::core {
     Time min_duration = 0;
     Time max_duration = 0;
     Time total_duration = 0;
+    // Elapsed duration includes nested tasks. Self time excludes them but still
+    // includes interrupt time and any busy waiting in this callback.
+    Time total_self_duration = 0;
+    Time total_nested_duration = 0;
 
     double average() const {
       return executions ? static_cast<double>(total_duration) /
@@ -41,6 +45,8 @@ namespace daveos::core {
     std::array<TaskStatistics, Tasks> tasks;
     std::uint64_t event_overflows = 0;
     std::uint64_t timer_overflows = 0;
+    std::uint64_t invalid_yields = 0;
+    std::uint64_t yield_depth_errors = 0;
   };
 
   // First initialization failure. module==nullptr denotes registration
@@ -147,6 +153,7 @@ namespace daveos::core {
       std::size_t index = 0;
       const char* name = "";
       bool active = false;
+      bool executing = false;
       Mode mode = Mode::once;
       Time interval = 0;
       Time due = 0;
@@ -176,8 +183,9 @@ namespace daveos::core {
 
     // Store references and static descriptors only; binding and callbacks wait
     // for init(), after all application objects have been constructed.
-    Scheduler(P& platform, ModuleList<Modules...> modules, Logging logging = {})
-        : platform_(platform), logging_(logging) {
+    Scheduler(P& platform, ModuleList<Modules...> modules, Logging logging = {},
+              std::size_t yield_depth = 4)
+        : platform_(platform), logging_(logging), yield_limit_(yield_depth) {
       this->bind(*this);
       std::apply([&](auto*... module) { (Register(module), ...); },
                  modules.items);
@@ -221,7 +229,9 @@ namespace daveos::core {
         }
         for (auto stage : {InitStage::stage1, InitStage::stage2}) {
           for (const auto& module : modules_) {
-            ContextGuard context(platform_, {module.name, "init"});
+            ContextGuard context(
+                platform_,
+                {module.name, "init", CallbackKind::initialization, this});
             status = module.init(module.object, stage);
             if (status != Status::ok) {
               Guard guard(platform_);
@@ -345,16 +355,7 @@ namespace daveos::core {
             has_event = true;
             task_index = kTasks;
           } else if (task_index < kTasks) {
-            auto& task = tasks_[task_index];
-            scheduled = task.due;
-            generation = task.generation;
-            // Advance before invocation: explicit callback/ISR changes always
-            // win.
-            if (task.mode == Mode::repeat) {
-              task.due = After(task.due, task.interval);
-            } else {
-              task.active = false;
-            }
+            TakeTask(task_index, scheduled, generation);
           }
         }
         if (has_event) {
@@ -362,38 +363,14 @@ namespace daveos::core {
             if (module.object == event.sender) {
               continue;
             }
-            ContextGuard context(platform_, {module.name, "on_event"});
+            ContextGuard context(platform_, {module.name, "on_event",
+                                             CallbackKind::event, this});
             module.event(module.object, event.value);
           }
           continue;
         }
         if (task_index < kTasks) {
-          auto& task = tasks_[task_index];
-          Time start = platform_.now();
-          {
-            ContextGuard context(platform_, {task.module_name, task.name});
-            task.invoke(task.object, task.index);
-          }
-          Time duration = platform_.now() - start;
-          Guard guard(platform_);
-          auto& stats = statistics_.tasks[task_index];
-          if (task.generation == generation) {
-            ++task.completed;
-          }
-          if (!stats.executions || duration < stats.min_duration) {
-            stats.min_duration = duration;
-          }
-          if (duration > stats.max_duration) {
-            stats.max_duration = duration;
-          }
-          ++stats.executions;
-          stats.total_duration += duration;
-          if (start > scheduled) {
-            ++stats.late_starts;
-            if (start - scheduled > stats.max_lateness) {
-              stats.max_lateness = start - scheduled;
-            }
-          }
+          RunTask(task_index, scheduled, generation);
           continue;
         }
         if constexpr (kHasLogging) {
@@ -403,7 +380,8 @@ namespace daveos::core {
         }
         bool sleep = platform_.can_sleep();
         for (const auto& module : modules_) {
-          ContextGuard context(platform_, {module.name, "can_sleep"});
+          ContextGuard context(
+              platform_, {module.name, "can_sleep", CallbackKind::idle, this});
           if (!module.sleep(module.object)) {
             sleep = false;
           }
@@ -454,6 +432,46 @@ namespace daveos::core {
         Guard guard(platform_);
         (void)lifecycle_.tick(Lifecycle::Request::stopped);
       }
+      return Status::ok;
+    }
+
+    // Nested dispatch on the same C++ stack. Context identity is per execution
+    // thread on host/fake; hardware also rejects every exception/ISR context.
+    Status yield() {
+      std::size_t selected = kTasks;
+      Time scheduled = 0;
+      std::uint64_t generation = 0;
+      {
+        Guard guard(platform_);
+        const auto context = platform_.context();
+        if (platform_.in_interrupt() || context.kind != CallbackKind::task ||
+            context.scheduler != this) {
+          ++statistics_.invalid_yields;
+          return Status::invalid_context;
+        }
+        if (stop_requested_ || lifecycle_.state() != State::running) {
+          return Status::not_running;
+        }
+        const auto now = platform_.now();
+        Time earliest = kForever;
+        for (std::size_t i = 0; i < kTasks; ++i) {
+          const auto& task = tasks_[i];
+          if (task.active && !task.executing && task.due <= now &&
+              task.due < earliest) {
+            earliest = task.due;
+            selected = i;
+          }
+        }
+        if (selected == kTasks) {
+          return Status::empty;
+        }
+        if (task_depth_ >= yield_limit_) {
+          ++statistics_.yield_depth_errors;
+          return Status::depth_limit;
+        }
+        TakeTask(selected, scheduled, generation);
+      }
+      RunTask(selected, scheduled, generation);
       return Status::ok;
     }
 
@@ -592,24 +610,91 @@ namespace daveos::core {
 #if DAVEOS_LOGGING
       auto stats = snapshot();
       this->log(Level::info,
-                "Module/task | calls late | lateness min max avg (us)");
+                "Module/task | calls late | lateness min max avg | self-total "
+                "nested-total (us)");
       for (const auto& task : stats.tasks) {
-        this->log(Level::info, "%s/%s | %s %s | %s %s %s %s", task.module,
-                  task.task, LogUnsigned(task.executions).c_str(),
+        this->log(Level::info, "%s/%s | %s %s | %s %s %s %s | %s %s",
+                  task.module, task.task, LogUnsigned(task.executions).c_str(),
                   LogUnsigned(task.late_starts).c_str(),
                   LogUnsigned(task.max_lateness).c_str(),
                   LogUnsigned(task.min_duration).c_str(),
                   LogUnsigned(task.max_duration).c_str(),
-                  LogAverage(task.total_duration, task.executions).c_str());
+                  LogAverage(task.total_duration, task.executions).c_str(),
+                  LogUnsigned(task.total_self_duration).c_str(),
+                  LogUnsigned(task.total_nested_duration).c_str());
       }
-      this->log(Level::info, "Overflow events=%s timers=%s",
+      this->log(Level::info,
+                "Overflow events=%s timers=%s; yield context=%s depth=%s",
                 LogUnsigned(stats.event_overflows).c_str(),
-                LogUnsigned(stats.timer_overflows).c_str());
+                LogUnsigned(stats.timer_overflows).c_str(),
+                LogUnsigned(stats.invalid_yields).c_str(),
+                LogUnsigned(stats.yield_depth_errors).c_str());
 #endif
     }
 
    private:
     friend class SchedulerInterface<Event>;
+
+    struct Frame {
+      Time nested = 0;
+    };
+
+    // Caller holds the platform guard. Rescheduling/cancellation during the
+    // callback wins through the existing generation mechanism.
+    void TakeTask(std::size_t index, Time& scheduled,
+                  std::uint64_t& generation) {
+      auto& task = tasks_[index];
+      scheduled = task.due;
+      generation = task.generation;
+      task.executing = true;
+      if (task.mode == Mode::repeat) {
+        task.due = After(task.due, task.interval);
+      } else {
+        task.active = false;
+      }
+    }
+
+    void RunTask(std::size_t index, Time scheduled, std::uint64_t generation) {
+      auto& task = tasks_[index];
+      Frame frame;
+      auto* parent = frame_;
+      frame_ = &frame;
+      ++task_depth_;
+      const Time start = platform_.now();
+      {
+        ContextGuard context(
+            platform_, {task.module_name, task.name, CallbackKind::task, this});
+        task.invoke(task.object, task.index);
+      }
+      const Time duration = platform_.now() - start;
+      --task_depth_;
+      frame_ = parent;
+      if (parent) {
+        parent->nested += duration;
+      }
+      Guard guard(platform_);
+      task.executing = false;
+      auto& stats = statistics_.tasks[index];
+      if (task.generation == generation) {
+        ++task.completed;
+      }
+      if (!stats.executions || duration < stats.min_duration) {
+        stats.min_duration = duration;
+      }
+      if (duration > stats.max_duration) {
+        stats.max_duration = duration;
+      }
+      ++stats.executions;
+      stats.total_duration += duration;
+      stats.total_self_duration += duration - frame.nested;
+      stats.total_nested_duration += frame.nested;
+      if (start > scheduled) {
+        ++stats.late_starts;
+        if (start - scheduled > stats.max_lateness) {
+          stats.max_lateness = start - scheduled;
+        }
+      }
+    }
 
     bool AcceptsWork() const {
       return lifecycle_.state() == State::fresh ||
@@ -757,6 +842,8 @@ namespace daveos::core {
           return Status::not_running;
         }
       }
+      context.kind = CallbackKind::command;
+      context.scheduler = this;
       ContextGuard guard(platform_, context);
       return callback(argument);
     }
@@ -819,6 +906,8 @@ namespace daveos::core {
       }
     }
 
+    Frame* frame_ = nullptr;
+    std::size_t task_depth_ = 0;
     P& platform_;
     [[no_unique_address]] Logging logging_;
     std::array<Registration, sizeof...(Modules)> modules_{};
@@ -828,6 +917,7 @@ namespace daveos::core {
     Statistics<kTasks> statistics_{};
     std::size_t module_count_ = 0, task_count_ = 0, event_count_ = 0;
     bool registration_error_ = false, used_ = false, stop_requested_ = false;
+    const std::size_t yield_limit_;
     Lifecycle lifecycle_;
     Status failure_ = Status::initialization_failed;
     InitializationFailure initialization_failure_;
@@ -838,22 +928,26 @@ namespace daveos::core {
   // borrowed and must use the same platform and outlive the scheduler.
   template <typename Event = NoEvent, std::size_t Events = 32,
             std::size_t Timers = 16, typename P, typename... Modules>
-  auto make_scheduler(P& platform, ModuleList<Modules...> modules) {
+  auto make_scheduler(P& platform, ModuleList<Modules...> modules,
+                      std::size_t yield_depth = 4) {
     return Scheduler<Event, ModuleList<Modules...>, NoLogging, P, Events,
-                     Timers>(platform, modules);
+                     Timers>(platform, modules, {}, yield_depth);
   }
 
   template <typename Event = NoEvent, std::size_t Events = 32,
             std::size_t Timers = 16, typename P, typename... Modules,
             typename L>
     requires LoggerFor<L, P>
-  auto make_scheduler(P& platform, ModuleList<Modules...> modules, L& logger) {
+  auto make_scheduler(P& platform, ModuleList<Modules...> modules, L& logger,
+                      std::size_t yield_depth = 4) {
 #if DAVEOS_LOGGING
     return Scheduler<Event, ModuleList<Modules...>, LogService<L>, P, Events,
-                     Timers>(platform, modules, LogService<L>(logger));
+                     Timers>(platform, modules, LogService<L>(logger),
+                             yield_depth);
 #else
     (void)logger;
-    return make_scheduler<Event, Events, Timers>(platform, modules);
+    return make_scheduler<Event, Events, Timers>(platform, modules,
+                                                 yield_depth);
 #endif
   }
 

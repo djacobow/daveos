@@ -240,3 +240,25 @@ then verifies explicit heap denial. OTA tests also record the uploading image's
 watermark/counters before reboot and both destination slots after startup. Artifacts include `*-memory.json` and
 raw `*-stack.bin` dumps. See [STM32 memory](memory.md) for the policy and limits
 of binary inspection and watermark measurements.
+
+## Optional SPI SD fixture
+
+Build the H563 console with `-Dspi_sd_probe=true` to include `sd probe`.
+`tests/hil/h563/test_spi.py` checks five full read-only inspections on an SD card
+connected to SPI1 (PA5/PG9/PB5, PD14 CS): startup, CSD/CID, CRC-checked repeated
+sector reads at 250 kHz/1 MHz, and partition/filesystem identification, followed
+by health/fault queries. It expects a card supporting at least 1 MHz.
+With `-Dfatfs=true`, the same HIL file also checks read-only mount, listing,
+missing-file errors, media reservation, unmount/remount and watchdog health.
+The `storage` host test exercises actual FatFs over a synthetic file image plus
+scripted async SD completion/error paths. See [storage](storage.md).
+The portable `sd-inspect` test covers wire decoding and malformed on-card data.
+It factory-provisions main flash through the normal HIL fixture and never
+writes the card or real OTP. See [SPI/I2C](spi-i2c.md) for wiring and scope.
+The portable `hal` test covers both buses using scripted backends, including
+callback chaining, stale alarms, contention, and concurrent result publication.
+
+Watchdog progress fault injection selects its target by module and task name,
+not registration index, so optional application modules do not redirect the
+fault. It uses debugger memory expressions without calling target functions or
+requiring a Python-enabled ARM GDB.

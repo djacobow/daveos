@@ -29,7 +29,7 @@ jump *0x00000400""")
 
 def test_latched_task_failure(board):
     board.uart.drain()
-    board.prepare_execution('set var app::application.scheduler_.tasks_._M_elems[0].completed = 0')
+    board.prepare_execution(board.task_progress_fault('health', 'Heartbeat'))
     board.ready()
     board.query(board.uart, 'health fault', 'task_progress health.Heartbeat')
     board.query(board.uart, 'health fault', 'Exception frame unavailable')

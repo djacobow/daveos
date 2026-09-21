@@ -13,3 +13,6 @@
 [submodule "platform/stm32/lan8742"]
 	path = platform/stm32/lan8742
 	url = https://github.com/STMicroelectronics/stm32-lan8742.git
+[submodule "storage/fatfs"]
+	path = storage/fatfs
+	url = https://github.com/zephyrproject-rtos/fatfs.git

@@ -24,9 +24,11 @@ namespace {
 
     bool in_interrupt() const { return __get_IPSR() != 0; }
 
+    // Return a snapshot: nested callbacks replace the active context.
+    // cppcheck-suppress returnByReference
     core::Context context() const { return context_; }
 
-    void context(core::Context value) { context_ = value; }
+    void context(const core::Context& value) { context_ = value; }
 
     void notify() {}
 

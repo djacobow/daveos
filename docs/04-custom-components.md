@@ -188,3 +188,10 @@ Scheduler lifecycle ticks occur at initialization, run, and shutdown boundaries
 under the existing platform guard. Their counts measure lifecycle requests,
 not scheduler loop iterations. Watchdog failure notification is an entry action,
 so a latched failure notifies exactly once.
+
+## Portable SPI/I2C drivers
+
+Inject a `hal::spi::Device` or `hal::i2c::Device` into a peripheral driver. The
+application owns controller configuration and alias registries; the driver owns
+its transaction descriptors and buffers. See [SPI/I2C](spi-i2c.md) for callback
+and polling-helper examples, STM32 IRQ wiring, and the read-only H563 SD fixture.

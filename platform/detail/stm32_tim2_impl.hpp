@@ -159,7 +159,7 @@ namespace daveos::platform::detail {
   }
 
   template <typename Derived>
-  void Stm32Tim2<Derived>::context(core::Context value) {
+  void Stm32Tim2<Derived>::context(const core::Context& value) {
     if (!in_interrupt()) {
       context_ = value;
     }

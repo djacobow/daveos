@@ -466,3 +466,19 @@ selects the emulator explicitly. Real OTP programming is a separate deliberate
 qualification step, after host and emulator coverage. H755 OTP is outside this
 initial adapter implementation. File paths and injected objects outlive their
 borrowers and remain valid for file-scope construction.
+
+## Read-only filesystem service
+
+The optional `storage/` component owns no hardware. Its injected block-device
+contract supplies readiness, capacity, synchronous reads and an exclusive mount
+lease. An adapter may implement a synchronous read by pumping asynchronous HAL
+completion with task-only yield. Accepted I/O must complete or time out before
+borrowed buffers are released. All volumes are accessed on one execution thread;
+same-volume re-entry fails immediately rather than waiting.
+
+FatFs is a pinned submodule, configured without heap allocation or writes.
+Application-owned volumes attach explicitly to a fixed C-ABI drive registry.
+The optional module serializes requests in a one-shot worker and returns between
+output records. Paths are copied before command dispatch returns. The initial
+commands mount, unmount, list and preview files; FAT12/16/32 and 512-byte sectors
+are supported. See [storage](../storage.md) for limits, configuration and tests.

@@ -15,6 +15,8 @@ namespace daveos::core {
     std::size_t timers = 16;
     std::size_t line = 256;
     std::size_t arguments = 8;
+    // Maximum active task callbacks, including the outer task.
+    std::size_t yield_depth = 4;
   };
 
   namespace detail {
@@ -61,8 +63,9 @@ namespace daveos::core {
             std::size_t LineCapacity = 256, std::size_t ArgumentCapacity = 8>
   class Application {
    public:
-    Application(P& platform, Modules modules, Logging logging, Sources sources)
-        : scheduler_(platform, modules, logging),
+    Application(P& platform, Modules modules, Logging logging, Sources sources,
+                std::size_t yield_depth = 4)
+        : scheduler_(platform, modules, logging, yield_depth),
           commands_(modules, scheduler_, sources) {}
 
     Application(const Application&) = delete;
@@ -113,7 +116,8 @@ namespace daveos::core {
   auto make_application(P& platform, ModuleList<M...> modules) {
     return Application<Event, ModuleList<M...>, NoLogging, P,
                        detail::NoCommandSources, Capacity.events,
-                       Capacity.timers>(platform, modules, {}, {});
+                       Capacity.timers>(platform, modules, {}, {},
+                                        Capacity.yield_depth);
   }
 
   // Commands without logging. Sources remain externally owned and stable.
@@ -124,7 +128,7 @@ namespace daveos::core {
     return Application<Event, ModuleList<M...>, NoLogging, P,
                        CommandSourceList<Sources>, Capacity.events,
                        Capacity.timers, Capacity.line, Capacity.arguments>(
-        platform, modules, {}, sources);
+        platform, modules, {}, sources, Capacity.yield_depth);
   }
 
   // Logging without commands. Disabled builds retain no logger attachment.
@@ -135,8 +139,8 @@ namespace daveos::core {
 #if DAVEOS_LOGGING
     return Application<Event, ModuleList<M...>, LogService<L>, P,
                        detail::NoCommandSources, Capacity.events,
-                       Capacity.timers>(platform, modules,
-                                        LogService<L>(logger), {});
+                       Capacity.timers>(
+        platform, modules, LogService<L>(logger), {}, Capacity.yield_depth);
 #else
     (void)logger;
     return make_application<Event, Capacity>(platform, modules);
@@ -153,7 +157,8 @@ namespace daveos::core {
     return Application<Event, ModuleList<M...>, LogService<L>, P,
                        CommandSourceList<Sources>, Capacity.events,
                        Capacity.timers, Capacity.line, Capacity.arguments>(
-        platform, modules, LogService<L>(logger), sources);
+        platform, modules, LogService<L>(logger), sources,
+        Capacity.yield_depth);
 #else
     (void)logger;
     return make_application<Event, Capacity>(platform, modules, sources);

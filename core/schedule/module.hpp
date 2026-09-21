@@ -96,6 +96,7 @@ namespace daveos::core {
       Status (*timer)(void*, Time, const TimerCallback&);
       Status (*cancel_timer)(void*, const TimerCallback&);
       Status (*stop)(void*);
+      Status (*yield)(void*);
       void (*reset)(void*);
       void (*log_statistics)(void*);
 #if DAVEOS_LOGGING
@@ -127,6 +128,7 @@ namespace daveos::core {
               return static_cast<Impl*>(self)->cancel_timer(callback);
             },
             [](void* self) { return static_cast<Impl*>(self)->stop(); },
+            [](void* self) { return static_cast<Impl*>(self)->yield(); },
             [](void* self) { static_cast<Impl*>(self)->reset_statistics(); },
             [](void* self) { static_cast<Impl*>(self)->log_statistics(); },
 #if DAVEOS_LOGGING
@@ -260,6 +262,16 @@ namespace daveos::core {
 
     // Request cooperative stop if supported; returns not_running outside run().
     Status stop() { return operations_->stop(object_); }
+
+    // Task-call-chain only. Run at most one other due task, without sleeping
+    // or dispatching events/logs. Never wait for resources held by a suspended
+    // ancestor. empty means no eligible task; not_running means stop requested.
+    // The caller must still finish/cancel its own borrowed-buffer operations
+    // before returning. Fake time is not advanced by yield().
+    Status yield() {
+      return operations_ ? operations_->yield(object_)
+                         : Status::invalid_context;
+    }
 
     // Clear scheduler diagnostics/timing totals; logger counters are separate.
     void reset_statistics() { operations_->reset(object_); }
