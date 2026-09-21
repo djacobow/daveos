@@ -5,6 +5,7 @@ test_support_dep = declare_dependency(include_directories: include_directories('
 subdir('core')
 subdir('yield')
 subdir('hal')
+subdir('mcp3425')
 subdir('sd_inspect')
 subdir('state_machine')
 subdir('reliability')

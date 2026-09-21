@@ -488,8 +488,10 @@ address/write and payload, repeated START, address/read and reception, then
 STOP. The attached-device configuration supplies the bus address.
 
 Consecutive writes remain separate addressed phases, as do consecutive reads.
-Callers wanting one continuous write provide one buffer. The initial I2C API
-has read and write actions only; pauses are not supported.
+Callers wanting one continuous write provide one buffer. The I2C API has read and write data actions plus a standalone address-only
+`probe()` action; pauses are not supported. A probe sends the write address
+and STOP without a data byte, completing with ACK (`ok`) or `nack`. It cannot
+be combined with other actions.
 
 Payloads are arbitrary bytes; the HAL has no register-address interpretation.
 A device driver may include a register address in its write buffer when its
@@ -788,8 +790,8 @@ card or display. Full device-protocol models are not required for this phase.
   and 1 MHz, with matching data and healthy watchdog/fault checks. The connected
   card has an MBR FAT32 partition; the probe checks its BPB without mounting.
   This is not filesystem consistency testing or qualification of every SPI
-  mode. H755 bus adapters have ARM compile coverage; physical I2C and H755
-  bus qualification require fixtures. See [SD inspection](../spi-i2c.md#h563-sd-fixture-and-validation).
+  mode. H563 I2C1 now has MCP3425 scan/conversion coverage (see below);
+  H755 bus adapters remain build-tested only. See [SD inspection](../spi-i2c.md#h563-sd-fixture-and-validation).
 - The optional [FatFs worker](../storage.md) uses the initialized card
   through an injected SD reader. SPI DMA, efficient staged/multiblock capture,
   automatic I2C bus-release pulses, and wider
@@ -858,3 +860,18 @@ thread-local storage. STM32 checks exception state separately, so an interrupt
 cannot inherit a preempted task's permission to yield. This is API misuse
 checking, not a security boundary; applications must not forge context values.
 See [task yielding](../yield.md).
+
+### H563 I2C ADC diagnostic fixture
+
+The optional `i2c_adc_probe` example component uses I2C1 on PB8/PB9 and an
+MCP3425 at seven-bit address 0x68. Its portable reader borrows a HAL device,
+performs nonblocking 16-bit gain-1 one-shot conversions, checks configuration
+readback, and preserves transfer-buffer ownership on timeout. The fixture also
+provides separate `i2c` and `adc` modules: `i2c scan` prints a serialized
+16-column by 8-row address map for each configured bus, `i2c stats` reports
+named counters for all configured buses, and `adc sample` requests a conversion. The ADC holds an I2C lease across the
+conversion so scans cannot change its device address between transactions.
+A standalone I2C `probe` action sends the write address followed by STOP, with no payload; only ACK and
+NACK classify presence. Reserved addresses are excluded. Probe transactions
+contribute to transaction/error statistics, not read/write action counters.
+See [SPI/I2C](../spi-i2c.md) for commands, wiring, timing and validation limits.

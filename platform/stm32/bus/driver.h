@@ -465,6 +465,8 @@ namespace daveos::platform::stm32::detail {
 
    private:
     void Chunk(bool start) {
+      // A standalone probe uses NBYTES=0 in write direction: AUTOEND
+      // generates STOP after the address ACK/NACK, without a data byte.
       const auto count = std::min<std::size_t>(total_ - offset_, 255);
       chunk_end_ = offset_ + count;
       registers_->CR2 =

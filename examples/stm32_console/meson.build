@@ -15,6 +15,20 @@ component_stop = []
 component_early = []
 component_failure = []
 component_irqs = []
+if get_option('i2c_adc_probe')
+  if board != 'h563'
+    error('i2c_adc_probe requires the H563 PB8/PB9 fixture')
+  endif
+  component_deps += hal_dep
+  component_includes += '#include "adc_probe.hpp"'
+  component_includes += '#include "i2c_probe.hpp"'
+  component_members += '    I2cBus i2c1{platform};'
+  component_members += '    I2cProbe i2c{i2c1};'
+  component_members += '    AdcProbe adc{platform, i2c1};'
+  component_modules += ', i2c, adc'
+  component_irqs += 'extern "C" void I2C1_EV_IRQHandler() { app::components.i2c1.interrupt(); }'
+  component_irqs += 'extern "C" void I2C1_ER_IRQHandler() { app::components.i2c1.interrupt(); }'
+endif
 if get_option('spi_sd_probe')
   if board != 'h563'
     error('spi_sd_probe requires the H563 SPI A fixture')

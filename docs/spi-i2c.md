@@ -57,10 +57,19 @@ CS stays asserted across the list, including pauses and polling.
 multiple of eight clock cycles. Idle clocks count as a transaction, not a
 read/write action. There is no internal transaction queue, retry or cancellation.
 
-I2C actions are `write` and `read`. Every action starts an addressed phase,
+I2C data actions are `write` and `read`. Every action starts an addressed phase,
 including repeated START between consecutive writes or consecutive reads. Only
 the last action ends with STOP. Register addresses, if needed, are ordinary
 bytes in the caller's write buffer.
+
+A standalone `i2c::probe()` sends an address in the write direction, then STOP,
+without a data byte. Completion reports `ok` for ACK or `nack` for an absent
+responder. Other errors remain errors, not evidence of absence. Probes count
+as transactions but not read/write actions; ordinary empty reads/writes are
+still invalid. Do not combine a probe with other actions. Scans exclude the
+reserved address ranges, and a successful probe identifies a responder, not
+its device model.
+
 
 ## Application wiring
 
@@ -206,7 +215,74 @@ The expansion passed host 30/30, ASan/UBSan 30/30, formatting, cppcheck
 (including explicit inspection-header checks), an H563 A/B firmware build,
 and the SPI HIL case above. This does not qualify other SPI modes, high-speed signal
 integrity, arbitrary sectors, or filesystem contents. H755 bus adapters remain
-build-tested only. I2C physical validation awaits a device fixture.
+build-tested only. H563 I2C now has the MCP3425 fixture described below; H755 I2C remains
+build-tested only.
+
+## H563 MCP3425 fixture
+
+Enable `-Di2c_adc_probe=true` with the H563 example. Connect I2C1 PB8 SCL,
+PB9 SDA, common ground and suitable power to the MCP3425; external pull-ups
+must bring both bus lines high. The pins use AF4 open-drain, with no internal
+pull-ups. The fixture selects HSI 64 MHz for I2C1 and conservative Standard-mode
+TIMINGR `0xf0421317` (SCL below 100 kHz; waveform/rise-time qualification is not
+claimed). Do not assign PB8/PB9 or I2C1 to another component simultaneously.
+
+Commands:
+
+- `i2c scan`: address-only probes of `0x08`–`0x77`; a 16-column, 8-row ACK map
+  uses spaced hexadecimal column labels, `*` for ACK and a blank otherwise.
+  Reserved positions remain blank.
+  Each configured bus has its own named map. Bus errors abort that bus’s scan
+  explicitly; scanning continues with the remaining buses. Only one scan or
+  sample runs at a time.
+- `adc sample`: start one 16-bit, gain-1 conversion and log signed raw code and
+  integer microvolts. No scheduler task blocks while waiting.
+- `i2c stats`: named read/write/transaction/error counters for every configured
+  bus (low 32 bits).
+  Scan NACKs count as failed transactions, so they are expected in this output.
+
+`hal/adapters/i2c_module.hpp` provides `hal::I2cModule<Event, Buses...>` over
+borrowed named bus adapters. The H563 composition passes only `I2C1`; adding
+another adapter includes it in both scan and stats without changing the command
+handlers. The module initializes the buses and reserves them for a scan,
+rolling back partial reservations on `busy`. ADC sampling holds a task-time
+lease through the conversion and all HAL completions, so scanning cannot change
+its address between transactions. `adc` is a separate module with only `sample`;
+it does not own interrupt routing or bus initialization.
+
+`hal/devices/mcp3425.h` provides the board-independent `hal::Mcp3425` reader,
+using an injected `i2c::Device`. Its constructor is passive. One task calls
+`request()`, then `tick(monotonic_microseconds)`, and inspects `result()`.
+The reader owns its transaction buffers, starts a one-shot with `0x88`, checks
+configuration readback, and polls ready at five-millisecond intervals. Bus
+transactions have a ten-millisecond timeout; the conversion budget is 250 ms.
+An expired conversion never releases buffers still owned by a HAL transaction.
+There are no automatic error retries. Keep the reader alive until completion.
+
+The fixture uses **seven-bit address `0x68`**, encoded on the wire as `0xd0`
+(write) or `0xd1` (read). Sample scaling is 62.5 uV/LSB, truncated toward zero
+for integer microvolts. See the [Microchip MCP3425 datasheet](https://ww1.microchip.com/downloads/aemDocuments/documents/OTH/ProductDocuments/DataSheets/22072b.pdf).
+The reference driver in the Form repository informed the selected mode; its
+singleton and vendor-specific I2C API are not used.
+
+`tests/mcp3425/` exercises signed endpoints, repeated conversions, busy
+responses, configuration mismatch, write/read NACKs, transfer and conversion
+timeouts, and buffer lifetime. `tests/hil/h563/test_i2c.py` factory-provisions
+main flash, scans three times and takes 30 conversions, then checks watchdog,
+retained faults, stack and heap diagnostics. It neither writes the SD card nor
+programs OTP. This fixture does not qualify clock stretching, forced stuck-bus
+recovery, repeated START on hardware, higher bus rates, or ADC accuracy against
+a calibrated source.
+
+H563 hardware validation passed three scans (only `0x68` acknowledged) and 30
+conversions around 1.630 V, with zero transaction timeouts, healthy watchdog,
+no retained fault and no heap requests. Stack painting observed 2,968 bytes after separating the modules;
+this is not a worst-case bound. The 333 failed transactions were expected NACKs
+from the 111 absent addresses over three scans. Host ASan/UBSan passed 33/33;
+targeted TSan HAL/ADC tests passed 2/2, followed by a passing ADC/diagnostics
+rerun after the module split. Two-bus host tests cover named output, scanning
+every address, reservation rollback and continuing after an individual bus
+error. H755 was not flashed for this change.
 
 Fake backends in `platform/fake/bus.hpp` accept borrowed scripts and record
 fixed-capacity traces. `BusClock::take_due()` separates timer selection from

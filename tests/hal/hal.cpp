@@ -641,3 +641,36 @@ TEST_CASE("SPI rejects malformed polling windows") {
   }
   CHECK(f.backend.begins == 0);
 }
+
+TEST_CASE("I2C address-only probes report ACK or NACK without data") {
+  const auto answer = GENERATE(hal::Status::ok, hal::Status::nack);
+  fake::BusClock<> clock;
+  fake::BusCritical critical;
+  fake::I2cBus backend;
+  hal::Controller<fake::I2cBus, fake::BusClock<>, fake::BusCritical, 1> bus{
+      backend, clock, critical, {{{{0x68}, 100000}}}};
+  REQUIRE(bus.init() == hal::Status::ok);
+  const std::array actions{i2c::probe()};
+  const std::array script{fake::I2cBus::Step{actions[0], {}, answer}};
+  backend.script(script);
+  i2c::Completion done;
+  REQUIRE(done.start(bus.device<0>(), actions) == hal::Status::ok);
+  while (backend.take_pending()) {
+    bus.interrupt();
+  }
+  REQUIRE(done.result()->status == answer);
+  REQUIRE(backend.trace_count == 1);
+  REQUIRE(backend.trace[0].first);
+  REQUIRE(backend.trace[0].last);
+  REQUIRE(bus.statistics().read_attempts == 0);
+  REQUIRE(bus.statistics().write_attempts == 0);
+  REQUIRE(bus.statistics().accepted == 1);
+
+  const std::array compound{i2c::probe(), i2c::probe()};
+  REQUIRE(done.start(bus.device<0>(), compound) ==
+          hal::Status::invalid_argument);
+  std::array<std::uint8_t, 1> byte{};
+  const std::array malformed{i2c::Action{i2c::Operation::probe, byte}};
+  REQUIRE(done.start(bus.device<0>(), malformed) ==
+          hal::Status::invalid_argument);
+}

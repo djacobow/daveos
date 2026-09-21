@@ -156,8 +156,13 @@ namespace daveos::hal::detail {
                                           : Status::invalid_argument;
   }
 
-  inline Status Measure(const i2c::Action& a, std::size_t, std::uint64_t& bits,
-                        std::uint64_t&) {
+  inline Status Measure(const i2c::Action& a, std::size_t count,
+                        std::uint64_t& bits, std::uint64_t&) {
+    if (a.operation == i2c::Operation::probe) {
+      return count == 1 && a.tx.empty() && a.rx.empty() && Add(bits, 11)
+                 ? Status::ok
+                 : Status::invalid_argument;
+    }
     if ((!Reads(a) && !Writes(a)) ||
         (Reads(a) && (a.rx.empty() || !a.tx.empty())) ||
         (Writes(a) && (a.tx.empty() || !a.rx.empty()))) {

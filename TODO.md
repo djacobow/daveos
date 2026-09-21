@@ -140,7 +140,8 @@ section supersedes older H755 hardware deferrals; remaining gaps are explicit.
 - [x] Add software CRC32 with injected hardware support and H563 hardware CRC implementation.
 - [x] Add injected SPI/I2C HALs with callback completion, polling helper, aliased registries, per-controller ownership, statistics, fake backends, and H563/H755 IRQ adapters. [API guide](docs/spi-i2c.md). H563 read-only SD startup/OCR passed five times at 250 kHz; H755 bus adapters are build-tested only.
 - [x] Remove task-index assumptions from watchdog HIL fault injection. H563 now locates `health.Heartbeat` by name and passes with the optional SD module; H755 uses the same helper but has not been hardware-rerun for this test change.
-- [ ] Qualify I2C with a physical device, H755 SPI/I2C with fixtures, and additional SPI modes/speeds. Optimize the reusable SD reader beyond its fixed response capture window.
+- [x] Validate H563 I2C1 PB8/PB9 with MCP3425 at 0x68: three address scans and 30 one-shot conversions, watchdog/fault and zero-heap checks passed. Optional `i2c_adc_probe` fixture provides `i2c scan`, `i2c stats`, and `adc sample`.
+- [ ] Qualify H755 SPI/I2C with fixtures and additional SPI modes/speeds. Optimize the reusable SD reader beyond its fixed response capture window.
 - [ ] Add SPI DMA after the fake and interrupt-driven H563/H755 HAL backends, particularly for SPI SD-card throughput. Preserve the portable transaction API; no I2C DMA work is currently planned.
 
 ## For STM32
@@ -161,6 +162,7 @@ section supersedes older H755 hardware deferrals; remaining gaps are explicit.
   passed with only its newly created temporary file removed.
 - [ ] Qualify write power-loss/media-removal behavior; add
   multiblock writes and further file operations separately.
+- [ ] Qualify I2C clock stretching, physical stuck-bus recovery and repeated START; H755 I2C hardware remains unqualified.
 - [ ] Implement a display driver module for ssd1306 devices using DI of the I2C via the layer above
 
 - [x] Add task-only nested `yield()`, one eligible callback per call, bounded depth, context diagnostics and elapsed/self/nested accounting.

@@ -5,7 +5,7 @@
 namespace daveos::hal::i2c {
 
 
-  enum class Operation : std::uint8_t { write, read };
+  enum class Operation : std::uint8_t { write, read, probe };
 
   struct Action {
     Operation operation;
@@ -28,6 +28,11 @@ namespace daveos::hal::i2c {
   constexpr Action read(std::span<std::uint8_t> bytes) {
     return {Operation::read, {}, bytes};
   }
+
+  // Standalone address-only write followed by STOP. Reports nack when no
+  // device acknowledges; no data byte is sent or received. Reserved addresses
+  // remain excluded by Address::valid().
+  constexpr Action probe() { return {Operation::probe}; }
 
   using Result = hal::Result<Action>;
   using Callback = hal::Callback<Result>;
