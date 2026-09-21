@@ -7,6 +7,7 @@ import time
 
 import pytest
 import ota
+from memory_cases import inspect_memory
 
 def check_rejection_and_bidirectional_update(board):
     image = (board.firmware / 'application.ota').read_bytes()
@@ -63,6 +64,8 @@ def check_rejection_and_bidirectional_update(board):
                 worker.join(3)
                 assert not worker.is_alive() and results and not failures, failures
                 tcp.close()
+                source = 'A' if destination == 'B' else 'B'
+                inspect_memory(board, f'upload-from-{source}', slot=source)
                 board.uart.drain()
                 assert ota.request(sock, 5)['status'] == 'ok'
         finally:
@@ -70,6 +73,7 @@ def check_rejection_and_bidirectional_update(board):
             worker.join(3)
             tcp.close()
         board.ready(destination, trial=True)
+        inspect_memory(board, f'boot-{destination}', slot=destination)
         summary = f'OTA ->{destination}: {len(results)} concurrent timers, max {max(results):.3f}s'
         print(summary)
         with (board.output / 'ota-timing.log').open('a') as log:

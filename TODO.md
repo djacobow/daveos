@@ -99,7 +99,7 @@ section supersedes older H755 hardware deferrals; remaining gaps are explicit.
 - [x] Confirm H755 dual-core startup, M4 sleep, M7 scheduler idle, and approximate TIM2 rate through OpenOCD/GDB.
 - [ ] Complete H755 injected USART3/DMA error recovery, physical LED/button confirmation, timing-accuracy, and extended sleep/wake hardware validation. Current command and burst checks do not cover those physical/fault-injection cases.
 - [x] Diagnose H755 newlib-nano `%llu` log-formatting HardFault; use toolchain full newlib for M7.
-- [ ] Validate embedded formatting heap use with full newlib.
+- [x] Audit STM32 ELF allocation paths and embedded formatting: H755 statistics previously grew the heap by 744 bytes. Remove floating-point statistics formatting and exception-pool startup dependencies; reject `_sbrk`, report allocation call sites at build time, and check zero heap requests on both boards. See [memory policy and audit](docs/memory.md).
 - [x] Diagnose H755 clock mismatch (25 MHz assumed, 8 MHz measured); confirm 8 MHz ST-LINK rate, then select internal HSI and correct PLL settings as requested.
 - [x] Add H755 USB CDC command/log console; verify enumeration, commands, and DTR session reset on hardware.
 - [x] Validate H755 USB cable unplug/replug and command recovery (user hardware check).
@@ -120,9 +120,9 @@ section supersedes older H755 hardware deferrals; remaining gaps are explicit.
 - [x] Extract shared console helpers and CRTP module; make USB application-owned and consume TCP input in bounded chunks.
 
 - [x] Fix the original H563 startup stack overflow by reserving 64 KiB; later move application objects to static storage.
-- [ ] Measure H563 whole-program stack high-water usage under console/network/interrupt load, then right-size the retained 64 KiB reservation in both linker and CubeMX settings.
+- [x] Give the H563 stack all remaining contiguous SRAM above statics, with a 64 KiB minimum-headroom assertion rather than a fixed reservation. Add startup painting and hardware watermark checks; measurements are workload evidence, not worst-case qualification.
 - [x] Hardware-test the current H755 firmware over UART, USB, and TCP, including static storage, FIFO/16-line input, Meson board/component selection, bound timers, and reusable command binding. Current reliability bring-up supersedes the earlier hardware deferral; standalone starter hardware testing remains outstanding.
-- [ ] Revisit H755 stack reservation and RAM placement; its Cortex-M7 has no MSPLIM guard. The full A/B console currently reserves 128,792 of 129,024 DTCM bytes, including a 16 KiB stack and 512-byte heap. Measure stack high-water and move suitable buffers into available AXI SRAM before adding more DTCM globals.
+- [x] Give H755 M7/M4 stacks their remaining contiguous RAM, remove the heap reservation, and retain minimum-headroom assertions. The full A/B M7 console has 17,200 stack bytes; Cortex-M7 has no MSPLIM guard. Revisit DTCM/AXI buffer placement before growing static allocations; see the measured workloads in [memory policy and audit](docs/memory.md).
 
 - [x] Fix H563 UART burst overruns with hardware FIFO reception and a 16-line queue; validated 580 unpaced commands at 1 Mb/s, including 4,112-byte bursts and overlength recovery.
 

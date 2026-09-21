@@ -43,6 +43,9 @@
 #ifndef HSEM_ID_0
 #define HSEM_ID_0 (0U) /* HW semaphore 0*/
 #endif
+/* M4 paints its full remaining SRAM before entering stop. Allow that
+   bounded startup work when M7 boots directly, without the bootloader. */
+static const int32_t kBootSyncBudget = 1000000;
 #endif /* DUAL_CORE_BOOT_SYNC_SEQUENCE */
 
 /* USER CODE END PD */
@@ -104,7 +107,7 @@ int main(void)
 /* USER CODE BEGIN Boot_Mode_Sequence_1 */
 #if defined(DUAL_CORE_BOOT_SYNC_SEQUENCE)
   /* Wait until CPU2 boots and enters in stop mode or timeout*/
-  timeout = 0xFFFF;
+  timeout = kBootSyncBudget;
   while((__HAL_RCC_GET_FLAG(RCC_FLAG_D2CKRDY) != RESET) && (timeout-- > 0));
   if ( timeout < 0 )
   {
@@ -134,7 +137,7 @@ HAL_HSEM_FastTake(HSEM_ID_0);
 /*Release HSEM in order to notify the CPU2(CM4)*/
 HAL_HSEM_Release(HSEM_ID_0,0);
 /* wait until CPU2 wakes up from stop mode */
-timeout = 0xFFFF;
+timeout = kBootSyncBudget;
 while((__HAL_RCC_GET_FLAG(RCC_FLAG_D2CKRDY) == RESET) && (timeout-- > 0));
 if ( timeout < 0 )
 {

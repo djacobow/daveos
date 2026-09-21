@@ -11,7 +11,7 @@ changes, and link to it rather than duplicating requirements.
 | [Concept and core](../../PROJECT.md) | Project principles, modules, scheduling, events, timers, queues, logging, commands, composition, and state machines. |
 | [Utilities and services](services.md) | Reusable networking, console plumbing, CRC/version utilities, boot/update policy, watchdog health checks, and OTP storage/modules. |
 | [Platforms](platforms.md) | Injected platform contract, host/fake adapters, file-backed hardware models, and build/programming conventions. |
-| [STM32 integration](stm32.md) | H563/H755 board support, console integration, H563 boot/OTA/OTP hardware, and qualification boundaries. |
+| [STM32 integration](stm32.md) | H563/H755 board support, console integration, H563/H755 boot/OTA, H563 OTP hardware, and qualification boundaries. |
 
 These components sit outside the scheduler. Their service contracts remain
 portable through dependency injection. The currently supported hardware bindings

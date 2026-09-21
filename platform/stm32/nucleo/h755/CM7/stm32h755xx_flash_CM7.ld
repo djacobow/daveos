@@ -47,8 +47,8 @@ ITCMRAM (xrw)      : ORIGIN = 0x00000000, LENGTH = 64K
 /* Highest address of the user mode stack */
 _estack = 0x20020000;    /* end of RAM */
 /* Generate a link error if heap and stack don't fit into RAM */
-_Min_Heap_Size = 0x200;      /* required amount of heap  */
-_Min_Stack_Size = 0x4000; /* required amount of stack */
+_Min_Heap_Size = 0; /* No runtime heap; _sbrk always fails. */
+_Min_Stack_Size = 0x4000; /* Minimum headroom, not the stack limit. */
 
 /* Define output sections */
 SECTIONS
@@ -221,18 +221,18 @@ SECTIONS
     . = ALIGN(32);
   } >AXIRAM
 
-  /* User_heap_stack section, used to check that there is enough RAM left */
-  ._user_heap_stack (NOLOAD) :
+  /* The stack owns every remaining byte in this contiguous RAM region.
+     Do not advance '.' by the minimum: report static RAM usage separately. */
+  .stack (NOLOAD) :
   {
     . = ALIGN(8);
-    PROVIDE ( end = . );
-    PROVIDE ( _end = . );
-    . = . + _Min_Heap_Size;
-    . = . + _Min_Stack_Size;
-    . = ALIGN(8);
+    _sstack = ABSOLUTE(.);
+    PROVIDE(end = .);
+    PROVIDE(_end = .);
   } >RAM
-
-
+  __stack_size = _estack - _sstack;
+  ASSERT(_sstack <= _estack && __stack_size >= _Min_Stack_Size,
+         "Static data leaves insufficient minimum stack headroom")
 
   /* Remove information from the standard libraries */
   /DISCARD/ :

@@ -21,7 +21,7 @@ board_linker_path = meson.current_source_dir() / 'STM32H563xx_FLASH.ld'
 board_sources = files(
   'Core/Src/main.c', 'Core/Src/stm32h5xx_it.c',
   'Core/Src/stm32h5xx_hal_msp.c', 'Core/Src/system_stm32h5xx.c',
-  'Core/Src/sysmem.c', 'Core/Src/syscalls.c', 'startup_stm32h563xx.s',
+  'Core/Src/syscalls.c', 'startup_stm32h563xx.s',
   'console.cpp', '../../../stm32h5/fault_handlers.S')
 board_includes = include_directories('.', 'Core/Inc')
 board_args = []

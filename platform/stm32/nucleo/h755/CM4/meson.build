@@ -8,10 +8,10 @@ cm4_cpu = ['-mcpu=cortex-m4', '-mthumb', '-mfpu=fpv4-sp-d16', '-mfloat-abi=hard'
 linker_script = files('stm32h755xx_flash_CM4.ld')
 firmware = executable('stm32h755-sleep-m4',
   'Core/Src/main.c', 'Core/Src/stm32h7xx_it.c',
-  'Core/Src/stm32h7xx_hal_msp.c', 'Core/Src/sysmem.c', 'Core/Src/syscalls.c',
+  'Core/Src/stm32h7xx_hal_msp.c', 'Core/Src/syscalls.c',
   '../Common/Src/system_stm32h7xx_dualcore_boot_cm4_cm7.c',
   'Core/Startup/startup_stm32h755xx_CM4.s',
-  dependencies: firmware_deps, name_suffix: 'elf',
+  dependencies: firmware_deps + [stm32_memory_dep], name_suffix: 'elf',
   include_directories: include_directories('Core/Inc'),
   link_language: 'c',
   c_args: cm4_cpu + ['-DCORE_CM4', '-DUSE_PWR_DIRECT_SMPS_SUPPLY', '-DUSER_VECT_TAB_ADDRESS'],
@@ -33,3 +33,5 @@ endforeach
 if not get_option('bootloader')
   firmware_images += [firmware]
 endif
+
+memory_audit_images += [firmware]

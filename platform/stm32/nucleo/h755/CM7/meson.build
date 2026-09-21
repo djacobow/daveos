@@ -18,7 +18,7 @@ board_linker_script = files('stm32h755xx_flash_CM7.ld')
 board_linker_path = meson.current_source_dir() / 'stm32h755xx_flash_CM7.ld'
 board_sources = files(
   'Core/Src/main.c', 'Core/Src/stm32h7xx_it.c',
-  'Core/Src/stm32h7xx_hal_msp.c', 'Core/Src/sysmem.c', 'Core/Src/syscalls.c',
+  'Core/Src/stm32h7xx_hal_msp.c', 'Core/Src/syscalls.c',
   '../Common/Src/system_stm32h7xx_dualcore_boot_cm4_cm7.c',
   'Core/Startup/startup_stm32h755xx_CM7.s', 'console.cpp', '../../../../stm32h7/fault_handlers.S')
 board_includes = include_directories('.', 'Core/Inc')

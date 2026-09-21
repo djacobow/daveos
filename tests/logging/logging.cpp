@@ -312,3 +312,27 @@ TEST_CASE("integer log display avoids 64-bit printf and marks capped values") {
   CHECK(std::string_view(core::LogUnsigned(core::kForever).c_str()) ==
         "4294967295+");
 }
+
+TEST_CASE("average log display uses bounded integer arithmetic") {
+  const auto display = [](std::uint64_t total, std::uint64_t count) {
+    return std::string(core::LogAverage(total, count).c_str());
+  };
+  CHECK(display(0, 0) == "0.0");
+  CHECK(display(1, 3) == "0.3");
+  CHECK(display(2, 3) == "0.7");
+  CHECK(display(25, 20) == "1.3");
+  CHECK(display(199, 100) == "2.0");
+  CHECK(display(UINT64_MAX, UINT64_MAX) == "1.0");
+  CHECK(display(UINT64_MAX - 1, UINT64_MAX) == "1.0");
+  CHECK(display(UINT64_MAX / 2, UINT64_MAX) == "0.5");
+  CHECK(display(UINT64_MAX, 1) == "4294967295+");
+  CHECK(display(UINT32_MAX, 1) == "4294967295.0");
+  CHECK(display(UINT64_C(42949672959), 10) == "4294967295+");
+  for (std::uint64_t count = 1; count <= 101; ++count) {
+    for (std::uint64_t total = 0; total <= 303; ++total) {
+      const auto tenths = (total * 20 + count) / (count * 2);
+      CHECK(display(total, count) ==
+            std::to_string(tenths / 10) + "." + std::to_string(tenths % 10));
+    }
+  }
+}

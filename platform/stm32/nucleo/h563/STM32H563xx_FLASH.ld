@@ -45,10 +45,9 @@ MEMORY
 }
 /* Highest address of the user mode stack */
 _estack = ORIGIN(RAM) + LENGTH(RAM); /* end of "RAM" Ram type memory */
-_sstack = _estack - _Min_Stack_Size;
 
-_Min_Heap_Size = 0x200;      /* required amount of heap  */
-_Min_Stack_Size = 0x10000; /* 64 KiB: console objects, call frames, IRQs */
+_Min_Heap_Size = 0; /* No runtime heap; _sbrk always fails. */
+_Min_Stack_Size = 0x10000; /* Minimum headroom, not the stack limit. */
 
 /* Sections */
 SECTIONS
@@ -217,16 +216,18 @@ SECTIONS
   PROVIDE( __bss_size = __bss_end - __bss_start );
 
 
-  /* User_heap_stack section, used to check that there is enough "RAM" Ram  type memory left */
-  ._user_heap_stack (NOLOAD) :
+  /* The stack owns every remaining byte in this contiguous RAM region.
+     Do not advance '.' by the minimum: report static RAM usage separately. */
+  .stack (NOLOAD) :
   {
     . = ALIGN(8);
-    PROVIDE ( end = . );
-    PROVIDE ( _end = . );
-    . = . + _Min_Heap_Size;
-    . = . + _Min_Stack_Size;
-    . = ALIGN(8);
+    _sstack = ABSOLUTE(.);
+    PROVIDE(end = .);
+    PROVIDE(_end = .);
   } >RAM
+  __stack_size = _estack - _sstack;
+  ASSERT(_sstack <= _estack && __stack_size >= _Min_Stack_Size,
+         "Static data leaves insufficient minimum stack headroom")
 
   /* Remove information from the compiler libraries */
   /DISCARD/ :

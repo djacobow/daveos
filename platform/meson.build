@@ -1,4 +1,5 @@
 if platform in ['stm32h5', 'stm32h7']
+  subdir('stm32/memory')
   if (get_option('examples') or get_option('stm32_support')) and get_option('usb_console')
     subdir('stm32')
   endif

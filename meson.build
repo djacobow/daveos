@@ -21,6 +21,10 @@ if platform == 'stm32'
   cpu_flags += ['-mthumb', '-mfloat-abi=hard', '-Os', '-g3']
   add_project_arguments(cpu_flags + ['-ffreestanding', '-ffunction-sections',
     '-fdata-sections'], language: ['c', 'cpp'])
+  # Apply to libraries too: GCC's assertion reporter pulls in allocating
+  # exception/stdio machinery even with C++ exceptions disabled. Our explicit
+  # validation and the existing C-assert policy are unchanged.
+  add_project_arguments(['-U_GLIBCXX_ASSERTIONS', '-D_GLIBCXX_NO_ASSERTIONS'], language: 'cpp')
   add_project_link_arguments(cpu_flags, language: ['c', 'cpp'])
 endif
 
@@ -43,6 +47,7 @@ if get_option('networking')
   subdir('net')
 endif
 firmware_images = []
+memory_audit_images = []
 subdir('platform')
 if get_option('bootloader')
   if platform not in ['stm32h5', 'stm32h7'] or not get_option('examples')
@@ -71,6 +76,9 @@ if get_option('examples')
 endif
 if get_option('examples') and firmware_images.length() > 0
   subdir('tools/programming')
+endif
+if memory_audit_images.length() > 0
+  subdir('tools/memory')
 endif
 if platform in ['stm32h5', 'stm32h7']
   subdir('tests/arm')

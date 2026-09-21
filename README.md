@@ -37,6 +37,7 @@ Build outputs stay under the ignored `build/` directory.
 ## References and starters
 
 - [Testing: portable checks and H563/H755 HIL](docs/testing.md)
+- [STM32 stack policy and allocation audit](docs/memory.md)
 - [Application API guide](docs/application-guide.md)
 - [Build, board setup, programming, and API reference](docs/reference.md)
 - [Host/fake application starter](starters/application/README.md)

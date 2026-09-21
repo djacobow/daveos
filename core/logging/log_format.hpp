@@ -29,6 +29,49 @@ namespace daveos::core {
     std::array<char, 12> bytes_{};
   };
 
+  // One decimal place, rounded half up, without floating-point printf or
+  // overflowing total * 10. Wide values use the same cap as LogUnsigned.
+  class LogAverage {
+   public:
+    LogAverage(std::uint64_t total, std::uint64_t count) {
+      constexpr auto limit = std::numeric_limits<std::uint32_t>::max();
+      auto whole = count ? total / count : 0;
+      const auto remainder = count ? total % count : 0;
+      if (whole > limit || (whole == limit && remainder)) {
+        std::snprintf(bytes_.data(), bytes_.size(), "%" PRIu32 "+", limit);
+        return;
+      }
+      std::uint32_t digit = 0;
+      std::uint64_t fraction = 0;
+      if (count) {
+        // Compute (10 * remainder) / count and its remainder by bounded
+        // additions. Even UINT64_MAX-sized counters cannot overflow.
+        for (std::uint32_t i = 0; i < 10; ++i) {
+          if (fraction >= count - remainder) {
+            fraction -= count - remainder;
+            ++digit;
+          } else {
+            fraction += remainder;
+          }
+        }
+        if (fraction >= count / 2 + count % 2) {
+          ++digit;
+        }
+        if (digit == 10) {
+          digit = 0;
+          ++whole;
+        }
+      }
+      std::snprintf(bytes_.data(), bytes_.size(), "%" PRIu32 ".%" PRIu32,
+                    static_cast<std::uint32_t>(whole), digit);
+    }
+
+    const char* c_str() const { return bytes_.data(); }
+
+   private:
+    std::array<char, 13> bytes_{};
+  };
+
   // Optional subscriber-side presentation; buffered records retain full names
   // and microsecond timestamps. Days have at least three digits, milliseconds
   // truncate sub-millisecond time. Context is left aligned and ellipsized to

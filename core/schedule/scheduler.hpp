@@ -594,12 +594,13 @@ namespace daveos::core {
       this->log(Level::info,
                 "Module/task | calls late | lateness min max avg (us)");
       for (const auto& task : stats.tasks) {
-        this->log(Level::info, "%s/%s | %s %s | %s %s %s %.1f", task.module,
+        this->log(Level::info, "%s/%s | %s %s | %s %s %s %s", task.module,
                   task.task, LogUnsigned(task.executions).c_str(),
                   LogUnsigned(task.late_starts).c_str(),
                   LogUnsigned(task.max_lateness).c_str(),
                   LogUnsigned(task.min_duration).c_str(),
-                  LogUnsigned(task.max_duration).c_str(), task.average());
+                  LogUnsigned(task.max_duration).c_str(),
+                  LogAverage(task.total_duration, task.executions).c_str());
       }
       this->log(Level::info, "Overflow events=%s timers=%s",
                 LogUnsigned(stats.event_overflows).c_str(),

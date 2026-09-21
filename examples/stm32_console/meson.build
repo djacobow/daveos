@@ -150,3 +150,8 @@ if get_option('bootloader')
 else
   firmware_images += [firmware]
 endif
+
+memory_audit_images += [firmware]
+if get_option('bootloader')
+  memory_audit_images += [slot_b]
+endif

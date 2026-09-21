@@ -85,7 +85,7 @@ namespace daveos::core {
         return {Status::ok, i};
       }
       if (query.size() < candidate.size() &&
-          EqualName(query, candidate.substr(0, query.size()))) {
+          EqualName(query, std::string_view(candidate.data(), query.size()))) {
         result = {result.status == Status::not_found ? Status::ok
                                                      : Status::ambiguous_match,
                   i};

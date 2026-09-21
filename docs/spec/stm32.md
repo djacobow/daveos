@@ -11,7 +11,7 @@ changes, and link to it rather than duplicating requirements.
 | [Concept and core](../../PROJECT.md) | Project principles, modules, scheduling, events, timers, queues, logging, commands, composition, and state machines. |
 | [Utilities and services](services.md) | Reusable networking, console plumbing, CRC/version utilities, boot/update policy, watchdog health checks, and OTP storage/modules. |
 | [Platforms](platforms.md) | Injected platform contract, host/fake adapters, file-backed hardware models, and build/programming conventions. |
-| [STM32 integration](stm32.md) | H563/H755 board support, console integration, H563 boot/OTA/OTP hardware, and qualification boundaries. |
+| [STM32 integration](stm32.md) | H563/H755 board support, console integration, H563/H755 boot/OTA, H563 OTP hardware, and qualification boundaries. |
 
 This document owns the hardware-specific integration. Portable algorithms and
 modules retain their contracts in the [services specification](services.md).
@@ -88,8 +88,8 @@ passed for DHCP/static IPv4, ping, cable reconnection, and USB console
 responsiveness. H563 initial hardware validation passed for UART/USB commands,
 TX DMA, LEDs/button, timer completion, reset, DHCP, ping, and TCP commands.
 USB works in both USB-C orientations; USB/Ethernet recover after physical
-reconnection. Its
-Cortex-M33 stack reservation is 64 KiB, enforced by MSPLIM. Long-lived STM32
+reconnection. Its Cortex-M33 stack uses all remaining contiguous main SRAM,
+with MSPLIM guarding the aligned end of static data. Long-lived STM32
 application objects (modules, logger, scheduler, dispatcher, and transport
 buffers) have file-scope storage rooted in `examples/stm32_console/appmain.cpp`.
 Optional UART, USB, networking, and TCP components live in separate files selected
@@ -106,13 +106,13 @@ generated `Core/Src/main.c` entry points include `appmain.h` and call `appmain()
 after CubeMX peripheral setup; `appmain()` initializes the platform and calls
 `application.run()`. Hardware setup waits for initialization;
 Application binds command sources after both initialization stages succeed. The
-64 KiB reservation addressed the old 34,216-byte application stack frame; the
-current debug `appmain()` frame is 32 bytes. Total stack high-water usage has
-not been measured, so the reservation is retained pending that measurement.
-Keep linker and CubeMX settings consistent when resizing it. The H755 console
-now has hardware coverage for these changes; its total stack high-water usage
-still needs measurement. H755 reserves the first 2 KiB of DTCM for retained
-fault data and an emergency exception stack.
+old 64 KiB reservation addressed a 34,216-byte application stack frame before
+objects moved to static storage. It now specifies minimum headroom only; the
+stack uses the whole remaining RAM gap and no heap is reserved. H755 likewise
+uses the remaining DTCM above static objects, with a 16 KiB minimum check. Both
+boards reserve retained fault data and an emergency exception stack separately.
+Startup stack painting, binary allocation reports and HIL counters are described
+in [STM32 memory](../memory.md).
 
 ## Console library and device starter
 

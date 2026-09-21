@@ -75,6 +75,12 @@ Change `worker.hpp` for application behavior. For another board, replace the
 [the hardware guide](../../docs/03-hardware-console.md) and
 [custom components](../../docs/04-custom-components.md) in the DaveOS repository.
 
+The board support supplies a no-heap `_sbrk` and a main stack spanning the RAM
+remaining above static data, subject to a linker minimum-headroom check. Startup
+paints the stack for debugging. Generated CubeMX `sysmem.c` is not linked. See
+[STM32 memory](../../docs/memory.md) before choosing libc formatting operations;
+caller-supplied output buffers alone do not guarantee allocation-free formatting.
+
 ## Updating the dependency pin
 
 For a release, commit the framework changes first, then set `revision` in both starter `subprojects/daveos.wrap` files to that

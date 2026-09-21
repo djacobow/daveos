@@ -13,3 +13,5 @@ test('reliability', reliability_test, suite: 'unit', timeout: 30)
 test('factory-tool', python, args: ['-B', '-m', 'pytest', '-q', files('test_factory.py')], suite: 'unit')
 
 test('version-tool', python, args: ['-B', '-m', 'pytest', '-q', files('test_version.py')], suite: 'unit')
+
+test('memory-report-tool', python, args: ['-B', '-m', 'pytest', '-q', files('test_memory_report.py')], suite: 'unit')

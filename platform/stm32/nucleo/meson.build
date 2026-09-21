@@ -3,8 +3,8 @@
 objcopy = find_program('objcopy')
 subdir(board)
 stm32_nucleo_sources_dep = declare_dependency(sources: board_sources,
-  include_directories: board_includes, dependencies: firmware_deps,
-  compile_args: board_args + cpu_flags,
+  include_directories: board_includes, dependencies: firmware_deps + [stm32_memory_dep],
+  compile_args: board_args + cpu_flags + ['-U_GLIBCXX_ASSERTIONS', '-D_GLIBCXX_NO_ASSERTIONS'],
   link_args: cpu_flags + ['--specs=nosys.specs',
                          '-Wl,--gc-sections'])
 stm32_nucleo_dep = declare_dependency(dependencies: stm32_nucleo_sources_dep,

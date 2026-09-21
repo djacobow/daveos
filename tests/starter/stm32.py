@@ -1,6 +1,7 @@
 """Build a separate Nucleo consumer against this checkout, without downloads."""
 from pathlib import Path
 import os
+import json
 import shutil
 import subprocess
 import sys
@@ -28,3 +29,9 @@ assert 'my-device.elf' in plan.stdout
 assert ('stm32h755-sleep-m4.elf' in plan.stdout) == (board == 'h755')
 assert (build / 'my-device.elf').is_file()
 assert (build / 'my-device.bin').stat().st_size > 0
+subprocess.run([sys.executable, '-B', str(root / 'tools/memory_report.py'),
+                '--elf', str(build / 'my-device.elf'),
+                '--output', str(build / 'my-device-memory.json')], check=True, env=env)
+memory = json.loads((build / 'my-device-memory.json').read_text())
+assert memory['reserved_heap_bytes'] == 0
+assert memory['stack_bytes'] >= memory['minimum_stack_bytes']

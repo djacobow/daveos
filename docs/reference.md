@@ -201,7 +201,8 @@ GPDMA and SRAM clocks remain enabled during shallow sleep. Echo, line-oriented
 logs, whole-frame overflow drops, DMA statistics, and immediate reset match H755.
 The internal 64 MHz HSI drives PLL1 (M=16/N=125/P=2), giving nominal 250 MHz CPU,
 62.5 MHz PCLK1, and a 125 MHz TIM2 kernel divided down to 1 MHz. No external
-crystal is required. Both console targets retain full newlib (including floating-point statistics).
+crystal is required. Both console targets retain full newlib; statistics use integer decimal formatting
+to avoid its allocating floating-point formatting path.
 H563 also provides the same independent USB CDC command/log transport on
 **CN13 (USB Type-C)**, using PA11/PA12 and the USB DRD FS controller. Keep ST-LINK
 connected for power/debugging and connect CN13 to a USB host with a data cable.
@@ -246,13 +247,11 @@ scope. Their constructors store references and metadata; UART/USB/network setup
 runs in stage1. Application binds command sources after both initialization
 stages succeed; `Board` only provides board commands.
 The platform timer is initialized after CubeMX peripheral setup and before
-scheduler initialization. The `.ioc` and FLASH linker script retain a 64 KiB
-stack reservation, enforced by MSPLIM. This was raised to accommodate the old
-34,216-byte application frame; `appmain()` now uses 32 bytes in the debug
-build. That frame size is not a whole-program high-water mark. The reservation
-is retained pending measurement of nested calls and interrupts; keep the linker
-and CubeMX settings consistent when it is resized. GCC's `.su` reports are
-emitted beside the example's object files. C++ exceptions and RTTI are disabled. The example
+scheduler initialization. The stack uses all main SRAM above static data, with MSPLIM guarding that
+boundary. The linker checks at least 64 KiB of headroom rather than limiting the
+stack to that size. Heap growth is disabled. See [STM32 memory](memory.md) for
+allocation auditing and stack watermarking. GCC's `.su` reports are emitted
+beside the example's object files. C++ exceptions and RTTI are disabled. The example
 and the ARM core compile check allow hosted headers: ST's umbrella header
 includes `math.h`, and GCC 13's `<chrono>` requires this mode. They still target
 newlib without host/OS APIs; these headers do not themselves require allocation.
@@ -746,9 +745,11 @@ The M7 uses the shared H5/H7 TIM2 adapter at 1 MHz and shallow sleep. TIM2 belon
 exclusively to DaveOS. The example uses the internal 64 MHz HSI RC oscillator, with PLL M=4/N=50/P=2
 for a nominal 400 MHz M7 and 50 MHz TIM2 kernel clock. UART baud and timer accuracy
 follow HSI accuracy; no external clock or solder-bridge changes are needed. Direct-SMPS
-power configuration is retained. The M7 stack reservation is 16 KiB. M7 logging uses full newlib from the toolchain: newlib-nano misread `%llu`
+power configuration is retained. The M7 stack uses all remaining DTCM, with a 16 KiB minimum-headroom check. M7 logging uses full newlib from the toolchain: newlib-nano misread `%llu`
 arguments and caused a hardware-confirmed HardFault in the log subscriber. The
-M4 retains newlib-nano. Formatting heap use still needs validation.
+M4 retains newlib-nano. All images reject heap growth. Built-in statistics avoid
+floating-point formatting; see the [allocation audit](memory.md) for the
+remaining libc paths and application-format limitations.
 Core-specific Meson flags select M7 double-precision and M4 single-precision FPUs,
 and explicitly locate each core's vector table in its own flash bank.
 

@@ -39,7 +39,7 @@ jump *{pc:#x}''')
     (0x60000000, 0, 1 << 12),
 ], ids=['psp', 'stack-limit', 'unreadable-psp'])
 def test_process_stack_capture(board, stack, limit, error):
-    # Valid storage is unused reserved stack, not .bss; the third case is unmapped.
+    # Valid storage is unused stack space, not .bss; the third case is unmapped.
     invalid = bool(error)
     binary, labels = board.stub('psp', f'''ldr r0, ={limit:#x}
 msr psplim, r0
@@ -80,7 +80,7 @@ cmp r1, #0
 beq wait
 ldr r0, =0xe000edf0
 ldr r1, [r0]
-ldr r0, =0x2009d000
+ldr r0, =0x20000444
 str r1, [r0]
 fault: udf #0
 ''')
@@ -97,7 +97,9 @@ set $pc = 0x20000400''')
     finally:
         board.control('poll on')
     debug = board.output / 'debug-state.bin'
-    board.control(f'dump_image {tcl_word(str(debug))} 0x2009d000 4')
+    # Keep this evidence beside the injection flag in reserved scratch RAM;
+    # ordinary stack space is painted again during the recovery boot.
+    board.control(f'dump_image {tcl_word(str(debug))} 0x20000444 4')
     assert not (struct.unpack('<I', debug.read_bytes())[0] & 1)
     record = board.output / 'unattended-retained.bin'
     board.control(f'dump_image {tcl_word(str(record))} 0x20000000 256')

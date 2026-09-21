@@ -131,7 +131,9 @@ namespace daveos::console {
       if (line.view().starts_with(shown_.view())) {
         // Appending input needs only the new bytes, not an erase and redraw
         // of the entire line at every polling tick.
-        WriteVisible(line.view().substr(shown_.size));
+        auto suffix = line.view();
+        suffix.remove_prefix(shown_.size);
+        WriteVisible(suffix);
         shown_ = line;
         return;
       }

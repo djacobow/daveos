@@ -231,3 +231,12 @@ scheduler latency measurements. The watchdog still enforces task progress.
 Physical power cuts, actual flash ECC injection, and cache-enabled flash-operation
 qualification remain separate work; simulated torn-write tests do not replace
 those hardware checks.
+
+### Heap and stack checks
+
+Both board suites include `test_memory.py`. It checks zero `_sbrk` requests at
+startup and after UART/USB/TCP command/statistics traffic and Ethernet load,
+then verifies explicit heap denial. OTA tests also record the uploading image's
+watermark/counters before reboot and both destination slots after startup. Artifacts include `*-memory.json` and
+raw `*-stack.bin` dumps. See [STM32 memory](memory.md) for the policy and limits
+of binary inspection and watermark measurements.

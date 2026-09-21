@@ -181,8 +181,3 @@ extern "C" int main() {
   }
   h5::reset();
 }
-
-// Bootloader has no heap; libc formatting failures remain best effort.
-extern "C" void* _sbrk(std::ptrdiff_t) {
-  return reinterpret_cast<void*>(UINTPTR_MAX);
-}
