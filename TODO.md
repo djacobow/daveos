@@ -159,9 +159,9 @@ section supersedes older H755 hardware deferrals; remaining gaps are explicit.
   command paths, metadata sync and open-handle/reentry protection. ASan/UBSan
   and logging-disabled storage tests passed; H563 create/remove/remount HIL
   passed with only its newly created temporary file removed.
-- [ ] Qualify write power-loss/media-removal behavior; add efficient SD busy
-  polling, multiblock writes and further file operations separately.
-- [ ] Implememnt a display driver module for ssd1306 devices using DI of the I2C via the layer above
+- [ ] Qualify write power-loss/media-removal behavior; add
+  multiblock writes and further file operations separately.
+- [ ] Implement a display driver module for ssd1306 devices using DI of the I2C via the layer above
 
 - [x] Add task-only nested `yield()`, one eligible callback per call, bounded depth, context diagnostics and elapsed/self/nested accounting.
 - [x] Integrate FatFs through a serialized filesystem worker and asynchronous SD reader that yields while waiting. Same-volume nested calls and competing requests fail immediately. See [storage](docs/storage.md).
@@ -176,3 +176,9 @@ section supersedes older H755 hardware deferrals; remaining gaps are explicit.
   Watchdog/fault checks passed. Host tests retain fragmented-file coverage.
 - [ ] Validate card-removal recovery, fragmented files on hardware, independent
   source-file comparisons and larger directory workloads.
+
+- [x] Replace the fixed SD write delay with bounded SPI response polling,
+  preserving CS, the original deadline, normal cleanup and per-window counters.
+- [ ] Extract SD initialization from the example into storage/sd.
+- [ ] Design a cooperative wait helper that distinguishes timeout from released
+  peripheral-buffer ownership; add explicit watchdog/yield integration coverage.

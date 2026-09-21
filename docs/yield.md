@@ -73,3 +73,8 @@ Snapshot/reset covers these counters with the existing statistics API.
 `tests/yield/` covers selection, reentry prevention, backlog, nested accounting,
 context restoration/rejection, depth limits and stop unwinding. The optional
 [FatFs worker](storage.md) uses this primitive while waiting for SD transfers.
+
+A pending wait repeatedly yielding with no eligible work still spins: yield
+does not invoke idle callbacks, enter WFI, or sleep. Bounded protocol polling
+can shorten this period, but battery-powered applications need a separate
+idle/wait design rather than assuming yield reduces power consumption.

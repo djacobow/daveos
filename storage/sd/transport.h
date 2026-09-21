@@ -98,7 +98,7 @@ namespace daveos::storage::sd {
 
     // Write one sector at a time. A bounded response check prevents payload
     // transmission after a rejected CMD24. Hold CS through data/response and
-    // a conservative 500 ms programming allowance, then require ready and
+    // bounded response polling, then require ready and
     // clean CMD13 status before reporting success. No automatic write retry.
     bool write(std::uint32_t sector, std::span<const std::uint8_t> source) {
       if (busy_ || !pump_.run || !rate_ || rate_ > kMaximumHz ||
@@ -135,18 +135,15 @@ namespace daveos::storage::sd {
         auto& ready = diagnostics_.ready;
         response.fill(0xff);
         accepted.fill(0xff);
-        const std::array actions{
-            hal::spi::write(tx),
-            hal::spi::read(response),
-            hal::spi::check_response(response, 0),
-            hal::spi::write(header),
-            hal::spi::write(bytes),
-            hal::spi::write(trailer),
-            hal::spi::read(accepted),
-            hal::spi::check_response(accepted, 5, 0x1f),
-            hal::spi::pause(kWriteBusyAllowance),
-            hal::spi::read(ready),
-            hal::spi::check_response(std::span{ready}.last(1), 0xff, 0xff, 0)};
+        const std::array actions{hal::spi::write(tx),
+                                 hal::spi::read(response),
+                                 hal::spi::check_response(response, 0),
+                                 hal::spi::write(header),
+                                 hal::spi::write(bytes),
+                                 hal::spi::write(trailer),
+                                 hal::spi::read(accepted),
+                                 hal::spi::check_response(accepted, 5, 0x1f),
+                                 hal::spi::poll_response(ready, 0xff)};
         if (!Transfer(actions, kWriteTimeout) || !Gap()) {
           return false;
         }
@@ -171,7 +168,6 @@ namespace daveos::storage::sd {
     }
 
    private:
-    static constexpr auto kWriteBusyAllowance = std::chrono::milliseconds{500};
     static constexpr auto kWriteTimeout = std::chrono::milliseconds{1000};
 
     bool Gap() {

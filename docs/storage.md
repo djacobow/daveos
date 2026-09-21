@@ -110,12 +110,14 @@ rename or formatting commands. With no RTC, FatFs uses the fixed date
 in `storage/config.h`.
 
 The SD writer sends CMD24, checks R1 before sending the token/data/CRC16,
-checks the data-response token, and holds CS through a conservative 500 ms
-programming allowance. It then requires ready and clean CMD13 status. Each
-sector has a one-second HAL deadline; failures invalidate the example's media
-readiness. The next operation requires unmount/probe/remount. The fixed allowance
-is deliberately slow; adaptive busy polling is future work. Other tasks can
-run through yield during the wait.
+checks the data-response token, and polls eight-byte ready windows with CS held.
+The final byte must be 0xff; earlier bytes can straddle busy release. Polling
+stops immediately on readiness, then requires clean CMD13 status. The original
+one-second HAL deadline bounds the whole command/data/poll transaction and is
+never restarted by polling. No fixed programming delay remains. Failures
+invalidate the example's media readiness; unmount/probe/remount before retrying.
+The caller still busy-waits through yield: this improves latency, not sleeping
+power consumption. Other tasks can run during the wait.
 
 Protocol reference: [Elm-Chan's SD SPI write sequence](https://elm-chan.org/docs/mmc/mmc_e.html).
 The SPI response-check action inspects already received bytes while CS remains
@@ -214,3 +216,12 @@ On H563 the opt-in cycle created and removed `daveos-rm-test-20260921.txt`,
 then remounted and confirmed `no_file`. Read-only and root-path rejection,
 watchdog health and retained-fault checks also passed. Only that newly created
 test file was removed; previous files remain. Formatting and lint passed.
+
+Bounded busy polling passed the H563 opt-in create/readback/remove/remount
+cycle. Against the preceding fixed-delay run on this card, logged command
+completion times changed from 4,079 to 1,082 ms for creation and 2,543 to 546 ms
+for removal. These are observed end-to-end runs, not general throughput bounds;
+the fixed-window read path remains a significant cost. The temporary test file
+was removed. ASan/UBSan passed 32/32, targeted TSan HAL/storage tests passed,
+both H563/H755 A/B builds passed, and formatting/lint passed. H755 was not
+flashed for this change.

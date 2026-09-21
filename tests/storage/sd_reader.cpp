@@ -167,7 +167,7 @@ TEST_CASE(
     r1[1] = failure == 1 ? 4 : 0;
     response[0] = failure == 2 ? 0x0b : 0xe5;
     // Busy release can straddle a byte: only the final ready sample must be ff.
-    std::array<std::uint8_t, 8> ready{};
+    std::array<std::uint8_t, 8> busy{}, ready{};
     ready.fill(failure == 3 ? 0 : 0xff);
     if (failure != 3) {
       ready[0] = 3;
@@ -183,8 +183,11 @@ TEST_CASE(
         fake::SpiBus::Step{hal::spi::write(payload)},
         fake::SpiBus::Step{hal::spi::write(suffix)},
         fake::SpiBus::Step{hal::spi::read(f.scratch), response},
+        fake::SpiBus::Step{hal::spi::read(f.scratch), busy},
         fake::SpiBus::Step{hal::spi::read(f.scratch), ready},
-        fake::SpiBus::Step{hal::spi::idle_clocks(8)},
+        failure == 3 ? fake::SpiBus::Step{hal::spi::read(f.scratch), busy,
+                                          hal::Status::ok, true}
+                     : fake::SpiBus::Step{hal::spi::idle_clocks(8)},
         fake::SpiBus::Step{hal::spi::write(status_command)},
         fake::SpiBus::Step{hal::spi::read(f.scratch), status},
         fake::SpiBus::Step{hal::spi::idle_clocks(8)}};
@@ -197,8 +200,11 @@ TEST_CASE(
     if (failure == 2) {
       CHECK(f.backend.trace_count == 6);
     }
-    if (failure == 0 || failure >= 3) {
-      CHECK(f.pumps >= 500);
+    if (failure == 3) {
+      CHECK(f.pumps >= 1000);
+      CHECK(f.reader.write_diagnostics().status == hal::Status::timeout);
+    } else {
+      CHECK(f.pumps < 500);
     }
   }
 }

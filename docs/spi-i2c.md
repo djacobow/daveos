@@ -47,7 +47,12 @@ The response check scans at most 32 previously received bytes, skips leading
 idle bytes (default 0xff), and compares the first response under the mask
 (default 0xff). Mismatch or no response ends the transaction with
 `response_mismatch`; subsequent actions never start. It performs no bus I/O.
-CS stays asserted across the list, including pauses.
+`poll_response(window, expected, mask=0xff, fill=0xff)` repeatedly clocks a
+borrowed 1–32-byte receive window until its **last** byte matches under the mask.
+It keeps CS asserted and requires an explicit transaction timeout; the deadline
+never restarts. Each window counts as a read attempt, but successful polling
+completes one logical action. Backend errors abort immediately.
+CS stays asserted across the list, including pauses and polling.
 `idle_clocks(80)` is a standalone transaction: MOSI high, CS inactive, positive
 multiple of eight clock cycles. Idle clocks count as a transaction, not a
 read/write action. There is no internal transaction queue, retry or cancellation.

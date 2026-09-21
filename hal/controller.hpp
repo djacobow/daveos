@@ -227,7 +227,11 @@ namespace daveos::hal {
                 c.again_ = true;
                 break;
               }
-              ++c.completed_;
+              c.poll_retry_ = detail::Polls(c.actions_[c.completed_]) &&
+                              !detail::PollMatched(c.actions_[c.completed_]);
+              if (!c.poll_retry_) {
+                ++c.completed_;
+              }
               c.started_ = false;
             }
             if (c.completed_ == c.actions_.size()) {
@@ -260,9 +264,13 @@ namespace daveos::hal {
             }
             c.RecordAttempts(action);
             c.started_ = true;
-            const auto status =
-                c.backend_.start(action, c.completed_ == 0,
-                                 c.completed_ + 1 == c.actions_.size());
+            c.backend_action_ = detail::TransferAction(action);
+            // Polling is SPI-only: finish() releases CS after a match.
+            // I2C's last/AUTOEND handling therefore remains unchanged.
+            const auto status = c.backend_.start(
+                c.backend_action_, c.completed_ == 0 && !c.poll_retry_,
+                c.completed_ + 1 == c.actions_.size() &&
+                    !detail::Polls(action));
             if (status != Status::ok) {
               c.status_ = status;
               c.RecordActionError();
@@ -415,8 +423,10 @@ namespace daveos::hal {
                              : Status::invalid_argument;
       if (status == Status::ok) {
         for (const auto& action : actions) {
-          status = detail::Checks(action) ? Status::ok
-                                          : backend_.validate_action(action);
+          status =
+              detail::Checks(action)
+                  ? Status::ok
+                  : backend_.validate_action(detail::TransferAction(action));
           if (status != Status::ok) {
             break;
           }
@@ -436,6 +446,7 @@ namespace daveos::hal {
       }
       deadline_ = deadline;
       actions_ = actions;
+      poll_retry_ = false;
       callback_ = callback;
       device_ = index;
       completed_ = 0;
@@ -485,6 +496,8 @@ namespace daveos::hal {
     bool setup_failed_ = false;
     std::size_t device_ = 0, completed_ = 0;
     std::uint64_t deadline_ = 0, pause_due_ = 0;
+    Action backend_action_{};
+    bool poll_retry_ = false;
     std::span<const Action> actions_;
     TransferCallback callback_, notification_;
     TransferResult notification_result_{};

@@ -40,7 +40,8 @@ namespace daveos::hal::detail {
   }
 
   inline bool Reads(const spi::Action& a) {
-    return a.operation == spi::Operation::read ||
+    return a.operation == spi::Operation::poll_response ||
+           a.operation == spi::Operation::read ||
            a.operation == spi::Operation::exchange;
   }
 
@@ -56,6 +57,25 @@ namespace daveos::hal::detail {
   inline bool Writes(const i2c::Action& a) {
     return a.operation == i2c::Operation::write;
   }
+
+  inline bool Polls(const spi::Action& a) {
+    return a.operation == spi::Operation::poll_response;
+  }
+
+  inline bool Polls(const i2c::Action&) { return false; }
+
+  inline bool PollMatched(const spi::Action& a) {
+    return (a.rx.back() & static_cast<std::uint8_t>(a.amount >> 8)) ==
+           static_cast<std::uint8_t>(a.amount);
+  }
+
+  inline bool PollMatched(const i2c::Action&) { return false; }
+
+  inline spi::Action TransferAction(const spi::Action& a) {
+    return Polls(a) ? spi::read(a.rx, a.fill) : a;
+  }
+
+  inline i2c::Action TransferAction(const i2c::Action& a) { return a; }
 
   inline bool Checks(const spi::Action& a) {
     return a.operation == spi::Operation::check_response;
@@ -106,6 +126,14 @@ namespace daveos::hal::detail {
         }
         n = a.tx.size();
         break;
+      case spi::Operation::poll_response:
+        if (a.rx.empty() || a.rx.size() > 32 || !a.tx.empty() ||
+            a.amount > 0xffff || !(a.amount >> 8) ||
+            (static_cast<std::uint8_t>(a.amount) & ~(a.amount >> 8))) {
+          return Status::invalid_argument;
+        }
+        n = a.rx.size();
+        break;
       case spi::Operation::check_response:
         return !a.tx.empty() && a.tx.size() <= 32 && a.rx.empty() &&
                        a.amount <= 0xffff && (a.amount >> 8) &&
@@ -152,6 +180,9 @@ namespace daveos::hal::detail {
     }
     std::uint64_t bits = 0, pauses = 0;
     for (const auto& action : actions) {
+      if (Polls(action) && !requested) {
+        return Status::invalid_argument;
+      }
       if (Measure(action, actions.size(), bits, pauses) != Status::ok) {
         return Status::invalid_argument;
       }

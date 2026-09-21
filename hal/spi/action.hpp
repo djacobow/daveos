@@ -11,7 +11,8 @@ namespace daveos::hal::spi {
     exchange,
     pause,
     idle_clocks,
-    check_response
+    check_response,
+    poll_response
   };
 
   // Borrowed buffers: exchange spans must be equal-sized and nonoverlapping.
@@ -60,6 +61,21 @@ namespace daveos::hal::spi {
             {},
             std::uint64_t{expected} | (std::uint64_t{mask} << 8),
             idle};
+  }
+
+  // Repeatedly read a 1..32-byte window, with CS held, until its LAST byte
+  // matches under mask. Earlier bytes may straddle a busy-release transition.
+  // Requires an explicit whole-transaction timeout. Window is borrowed and
+  // overwritten on each poll; no application callback runs between windows.
+  constexpr Action poll_response(std::span<std::uint8_t> window,
+                                 std::uint8_t expected,
+                                 std::uint8_t mask = 0xff,
+                                 std::uint8_t fill = 0xff) {
+    return {Operation::poll_response,
+            {},
+            window,
+            std::uint64_t{expected} | (std::uint64_t{mask} << 8),
+            fill};
   }
 
   using Result = hal::Result<Action>;

@@ -438,6 +438,22 @@ context, invokes no application code, and adds no read/write attempts. Reject
 invalid lengths/masks during admission. Like pauses, checks remain subject to
 the whole-transaction deadline and normal cleanup.
 
+### SPI response polling
+
+`spi::poll_response(window, expected, mask=0xff, fill=0xff)` repeatedly reads
+a borrowed 1–32-byte window and compares its final byte under the mask.
+CS and controller ownership remain held. Reject malformed windows/masks and
+polling without an explicit transaction timeout before hardware activity.
+Use the original whole-transaction deadline, never a new deadline per window.
+
+The controller translates each window into an ordinary backend read. Backend
+errors abort immediately; a nonmatching response requests another read.
+Each window counts as a read attempt, while the logical action completes only
+once after a match. A timeout leaves the polling action incomplete and performs
+normal cleanup before the completion callback. No caller predicate or callback
+executes between windows. This is protocol polling, not automatic retry of
+failed transactions. IRQ processing retains the existing bounded work budget.
+
 ### SPI initialization clocks with CS inactive
 
 Provide a dedicated SPI operation type for generating clocks while CS remains

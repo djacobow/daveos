@@ -564,3 +564,80 @@ TEST_CASE(
   }
   CHECK(f.backend.begins == 0);
 }
+
+TEST_CASE(
+    "SPI polls a response window under one CS assertion until its final sample "
+    "matches") {
+  Fixture f;
+  std::array<std::uint8_t, 2> window{};
+  const std::array<std::uint8_t, 2> busy{0, 0}, transition{0xff, 3},
+      ready{3, 0xef};
+  const std::array<std::uint8_t, 1> payload{42};
+  const std::array actions{spi::poll_response(window, 0x0f, 0x0f),
+                           spi::write(payload)};
+  const std::array script{fake::SpiBus::Step{spi::read(window), busy},
+                          fake::SpiBus::Step{spi::read(window), transition},
+                          fake::SpiBus::Step{spi::read(window), ready},
+                          fake::SpiBus::Step{spi::write(payload)}};
+  f.backend.script(script);
+  spi::Completion completion;
+  CHECK(completion.start(f.bus.device<0>(), actions) ==
+        hal::Status::invalid_argument);
+  REQUIRE(completion.start(f.bus.device<0>(), actions,
+                           chrono::milliseconds{10}) == hal::Status::ok);
+  f.pump();
+  REQUIRE(completion.ready());
+  CHECK(completion.result()->status == hal::Status::ok);
+  CHECK(completion.result()->completed_actions == 2);
+  CHECK(f.backend.begins == 1);
+  CHECK(f.backend.finishes == 1);
+  REQUIRE(f.backend.trace_count == 4);
+  CHECK(f.backend.trace[0].first);
+  CHECK_FALSE(f.backend.trace[1].first);
+  for (std::size_t i = 0; i < f.backend.trace_count; ++i) {
+    CHECK(f.backend.trace[i].selected);
+  }
+}
+
+TEST_CASE(
+    "SPI response polling retains the original deadline and releases ownership "
+    "on timeout") {
+  Fixture f;
+  std::array<std::uint8_t, 1> window{}, busy{0};
+  const std::array actions{spi::poll_response(window, 0xff)};
+  const std::array script{
+      fake::SpiBus::Step{spi::read(window), busy},
+      fake::SpiBus::Step{spi::read(window), busy},
+      fake::SpiBus::Step{spi::read(window), busy, hal::Status::ok, true}};
+  f.backend.script(script);
+  spi::Completion completion;
+  REQUIRE(completion.start(f.bus.device<0>(), actions,
+                           chrono::milliseconds{10}) == hal::Status::ok);
+  // Complete the first window at 6 ms, then let the second window finish.
+  REQUIRE(f.backend.take_pending());
+  f.bus.interrupt();
+  f.clock.advance(6000);
+  f.pump();
+  REQUIRE_FALSE(completion.ready());
+  f.advance(4000);
+  REQUIRE(completion.ready());
+  CHECK(completion.result()->status == hal::Status::timeout);
+  CHECK(completion.result()->completed_actions == 0);
+  CHECK_FALSE(f.backend.selected);
+}
+
+TEST_CASE("SPI rejects malformed polling windows") {
+  Fixture f;
+  std::array<std::uint8_t, 33> window{};
+  for (auto action :
+       {spi::poll_response({}, 0), spi::poll_response(window, 0),
+        spi::poll_response(std::span{window}.first(1), 1, 0),
+        spi::poll_response(std::span{window}.first(1), 0x80, 0x0f)}) {
+    spi::Completion completion;
+    const std::array actions{action};
+    CHECK(
+        completion.start(f.bus.device<0>(), actions, chrono::milliseconds{1}) ==
+        hal::Status::invalid_argument);
+  }
+  CHECK(f.backend.begins == 0);
+}
