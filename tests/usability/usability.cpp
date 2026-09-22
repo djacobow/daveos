@@ -217,6 +217,39 @@ TEST_CASE(
   }
 }
 
+TEST_CASE("binding helper fails initialization when command routes collide") {
+  // A fixed command_prefix() gives every instance the same route.
+  struct Fixed : core::Module<Fixed, test::Event> {
+    explicit Fixed(const char* name) : Module(name) {}
+
+    static constexpr const char* name() { return "fixed"; }
+
+    static constexpr const char* command_prefix() { return "shared"; }
+
+    static constexpr auto commands() {
+      return std::array{DAVEOS_COMMAND(Fixed, Go, "go", "Go")};
+    }
+
+    core::Status Go() { return core::Status::ok; }
+  };
+
+  test::Fake platform;
+  Fixed first{"first"}, second{"second"};
+  core::CommandSource source;
+  auto binding =
+      core::make_command_binding<test::Event>(core::CommandSourceList{source});
+  auto modules = core::ModuleList{&binding, &first, &second};
+  auto scheduler = core::make_scheduler<test::Event>(platform, modules);
+  core::CommandDispatcher dispatcher(modules, scheduler);
+  binding.connect(dispatcher);
+  // init(), not run(): without dispatch, a regression fails instead of hanging.
+  CHECK(scheduler.init() == core::Status::duplicate_name);
+  const auto failure = scheduler.initialization_failure();
+  CHECK(std::string_view(failure.module) == "commands");
+  CHECK(failure.stage == core::InitStage::stage2);
+  CHECK(source.dispatch("shared go") == core::Status::not_running);
+}
+
 TEST_CASE("identical member bodies retain independent timer identities") {
   struct Target {
     int calls = 0;

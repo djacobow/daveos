@@ -6,9 +6,11 @@ namespace daveos::core {
 
 
   // Optional wiring module. Construction only copies source pointers. Connect
-  // a dispatcher before init/run; stage2 binds sources after all stage1 hooks.
-  // The dispatcher and source objects must outlive this module's use. The
-  // module name "commands" must be unique in the application.
+  // a dispatcher before init/run; stage2 binds sources after all stage1 hooks
+  // and fails initialization with the dispatcher's status if its command routes
+  // are invalid or duplicated (no source is bound then). The dispatcher and
+  // source objects must outlive this module's use. The module name "commands"
+  // must be unique in the application.
   template <typename Event, std::size_t Sources>
   class CommandBinding final
       : public Module<CommandBinding<Event, Sources>, Event> {
@@ -22,7 +24,7 @@ namespace daveos::core {
     void connect(Dispatcher& dispatcher) {
       dispatcher_ = &dispatcher;
       bind_ = [](void* context, CommandSourceList<Sources> sources) {
-        static_cast<Dispatcher*>(context)->bind_sources(sources);
+        return static_cast<Dispatcher*>(context)->bind_sources(sources);
       };
     }
 
@@ -31,7 +33,7 @@ namespace daveos::core {
         if (!bind_) {
           return Status::not_running;
         }
-        bind_(dispatcher_, sources_);
+        return bind_(dispatcher_, sources_);
       }
       return Status::ok;
     }
@@ -39,7 +41,7 @@ namespace daveos::core {
    private:
     CommandSourceList<Sources> sources_;
     void* dispatcher_ = nullptr;
-    void (*bind_)(void*, CommandSourceList<Sources>) = nullptr;
+    Status (*bind_)(void*, CommandSourceList<Sources>) = nullptr;
   };
 
   template <typename Event, std::size_t Sources>
