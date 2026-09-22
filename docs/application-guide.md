@@ -39,13 +39,14 @@ the displayed name from the function identifier. Use
 `TaskDescriptor<Worker>{"custom name", &Worker::Poll}` when a different name is
 useful. The typed `schedule` and `cancel` helpers reject unregistered functions
 at compile time. To schedule another module, use
-`scheduler().schedule<&Other::Task>(other, delay)`; runtime member-pointer forms
-are still available. Helpers may be called after the scheduler binds the module,
-including in init, but never from its constructor.
+`scheduler().schedule<&Other::Task>(other, delay)`. Helpers may be called after
+the scheduler binds the module, including in init, but never from its constructor.
 
-Raw integer delays still mean microseconds. Integral chrono durations make units
-explicit: `std::chrono::milliseconds{10}`, or `10ms` with the individual literal
-operator imported above. Negative, overflowing, and fractional-microsecond values
+Delays are integral chrono durations: `std::chrono::milliseconds{10}`, or `10ms`
+with the individual literal operator imported above. A bare integer does not
+compile, so a unit is always visible. To pass a value already measured in
+`core::Time` (for example a parsed command argument), use
+`core::Microseconds{value}`. Negative, overflowing, and fractional-microsecond values
 return `invalid_argument` without replacing pending work. Floating-point durations
 are rejected at compile time. Duration conversion errors take precedence over
 lifecycle errors. A zero-delay one-shot is valid; repeat intervals and
@@ -122,8 +123,8 @@ binding when using those explicit pieces.
 ## Failures
 
 Check the status from scheduling and lifecycle operations. Lifecycle and new
-convenience calls are `[[nodiscard]]`; an explicit `(void)` documents deliberate
-ignoring. Existing raw-microsecond APIs retain their previous annotation behavior.
+scheduling and timer calls are `[[nodiscard]]`; an explicit `(void)` documents
+deliberate ignoring.
 
 After an initialization failure, `application.initialization_failure()` returns
 `status`, `module`, and `stage`, even with no logger. A null module identifies

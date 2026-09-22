@@ -513,38 +513,6 @@ namespace daveos::core {
       return Status::ok;
     }
 
-    // Multiplex a positive-delay callback over the one platform timer. Safe
-    // from interrupts, but rejected before run(). Replacing a callback needs no
-    // new slot; a new callback at capacity fails and increments
-    // timer_overflows.
-    Status timer(Time delay, const TimerCallback& callback) {
-      Guard guard(platform_);
-      if (lifecycle_.state() != State::running) {
-        return Status::not_running;
-      }
-      if (!delay || !callback) {
-        return Status::invalid_argument;
-      }
-      std::size_t slot = TimerCapacity;
-      for (std::size_t index = 0; index < TimerCapacity; ++index) {
-        if (timers_[index].active && timers_[index].callback == callback) {
-          slot = index;
-          break;
-        }
-        if (!timers_[index].active) {
-          slot = index;
-        }
-      }
-      if (slot == TimerCapacity) {
-        ++statistics_.timer_overflows;
-        return Status::full;
-      }
-      timers_[slot] = {true, After(platform_.now(), delay), callback};
-      Rearm();
-      platform_.notify();
-      return Status::ok;
-    }
-
     // ISR-safe cancellation of a pending callback, identified by function
     // pointer.
     Status cancel_timer(const TimerCallback& callback) {
@@ -634,6 +602,38 @@ namespace daveos::core {
 
    private:
     friend class SchedulerInterface<Event>;
+
+    // Multiplex a positive-delay callback over the one platform timer. Reached
+    // only through SchedulerInterface::timer after chrono conversion. Safe from
+    // interrupts, but rejected before run(). Replacing a callback needs no new
+    // slot; a new callback at capacity fails and increments timer_overflows.
+    Status TimerSlot(Time delay, const TimerCallback& callback) {
+      Guard guard(platform_);
+      if (lifecycle_.state() != State::running) {
+        return Status::not_running;
+      }
+      if (!delay || !callback) {
+        return Status::invalid_argument;
+      }
+      std::size_t slot = TimerCapacity;
+      for (std::size_t index = 0; index < TimerCapacity; ++index) {
+        if (timers_[index].active && timers_[index].callback == callback) {
+          slot = index;
+          break;
+        }
+        if (!timers_[index].active) {
+          slot = index;
+        }
+      }
+      if (slot == TimerCapacity) {
+        ++statistics_.timer_overflows;
+        return Status::full;
+      }
+      timers_[slot] = {true, After(platform_.now(), delay), callback};
+      Rearm();
+      platform_.notify();
+      return Status::ok;
+    }
 
     struct Frame {
       Time nested = 0;

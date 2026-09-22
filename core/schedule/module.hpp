@@ -123,7 +123,7 @@ namespace daveos::core {
               return static_cast<Impl*>(self)->post(event, sender);
             },
             [](void* self, Time delay, const TimerCallback& callback) {
-              return static_cast<Impl*>(self)->timer(delay, callback);
+              return static_cast<Impl*>(self)->TimerSlot(delay, callback);
             },
             [](void* self, const TimerCallback& callback) {
               return static_cast<Impl*>(self)->cancel_timer(callback);
@@ -148,42 +148,11 @@ namespace daveos::core {
     }
 
     // Schedule a registered module/task pair, replacing its pending request.
-    // delay is in microseconds; repeat uses it as both initial delay and
-    // interval. Zero is allowed only for once. Before run(), delays start at
-    // the common run start time; while running they start at this call. Safe
-    // from interrupts.
-    template <typename M>
-      requires ModuleFor<M, Event>
-    Status schedule(M& module, void (M::*callback)(), Time delay,
-                    Mode mode = Mode::once) {
-      auto tasks = M::tasks();
-      for (std::size_t index = 0; index < tasks.size(); ++index) {
-        if (tasks[index].callback == callback) {
-          return operations_->schedule(object_, &module, index, delay, mode);
-        }
-      }
-      return Status::not_found;
-    }
-
-    template <typename M, DurationRep Rep, typename Period>
-      requires ModuleFor<M, Event>
-    [[nodiscard]] Status schedule(M& module, void (M::*callback)(),
-                                  std::chrono::duration<Rep, Period> delay,
-                                  Mode mode = Mode::once) {
-      Time micros;
-      const auto status = to_microseconds(delay, micros);
-      return status == Status::ok ? schedule(module, callback, micros, mode)
-                                  : status;
-    }
-
-    template <auto Function, typename M>
-      requires ModuleFor<M, Event>
-    [[nodiscard]] Status schedule(M& module, Time delay,
-                                  Mode mode = Mode::once) {
-      return operations_->schedule(object_, &module, TaskIndex<M, Function>(),
-                                   delay, mode);
-    }
-
+    // Function must appear in M::tasks() (checked at compile time). Repeat uses
+    // delay as both initial delay and interval. Zero is allowed only for once.
+    // Before run(), delays start at the common run start time; while running
+    // they start at this call. Inexact or out-of-range durations return
+    // invalid_argument without replacing pending work. Safe from interrupts.
     template <auto Function, typename M, DurationRep Rep, typename Period>
       requires ModuleFor<M, Event>
     [[nodiscard]] Status schedule(M& module,
@@ -191,28 +160,18 @@ namespace daveos::core {
                                   Mode mode = Mode::once) {
       Time micros;
       const auto status = to_microseconds(delay, micros);
-      return status == Status::ok ? schedule<Function>(module, micros, mode)
-                                  : status;
+      return status == Status::ok
+                 ? operations_->schedule(object_, &module,
+                                         TaskIndex<M, Function>(), micros, mode)
+                 : status;
     }
 
+    // Cancel pending execution (not an already executing callback). Returns
+    // not_found for an inactive task; interrupt callers are rejected.
     template <auto Function, typename M>
       requires ModuleFor<M, Event>
     [[nodiscard]] Status cancel(M& module) {
       return operations_->cancel(object_, &module, TaskIndex<M, Function>());
-    }
-
-    // Cancel pending execution (not an already executing callback). Returns
-    // not_found for an unknown/inactive task; interrupt callers are rejected.
-    template <typename M>
-      requires ModuleFor<M, Event>
-    Status cancel(M& module, void (M::*callback)()) {
-      auto tasks = M::tasks();
-      for (std::size_t index = 0; index < tasks.size(); ++index) {
-        if (tasks[index].callback == callback) {
-          return operations_->cancel(object_, &module, index);
-        }
-      }
-      return Status::not_found;
     }
 
     // Copy a variant broadcast, optionally excluding a registered sender.
@@ -233,20 +192,19 @@ namespace daveos::core {
     // Interrupt-context one-shot, available only while running. Delay must be
     // positive and callback non-null. Reusing callback identity replaces its
     // timer.
-    Status timer(Time delay, const TimerCallback& callback) {
-      return operations_->timer(object_, delay, callback);
-    }
-
     template <DurationRep Rep, typename Period>
     [[nodiscard]] Status timer(std::chrono::duration<Rep, Period> delay,
                                const TimerCallback& callback) {
       Time micros;
       const auto status = to_microseconds(delay, micros);
-      return status == Status::ok ? timer(micros, callback) : status;
+      return status == Status::ok
+                 ? operations_->timer(object_, micros, callback)
+                 : status;
     }
 
-    template <auto Function, typename Object, typename Delay>
-    [[nodiscard]] Status timer(Object& object, Delay delay) {
+    template <auto Function, typename Object, DurationRep Rep, typename Period>
+    [[nodiscard]] Status timer(Object& object,
+                               std::chrono::duration<Rep, Period> delay) {
       return timer(delay, TimerCallback::bind<Function>(object));
     }
 
@@ -363,9 +321,11 @@ namespace daveos::core {
     SchedulerInterface<Event>& scheduler() { return *scheduler_; }
 
     // Self-scheduling helpers validate the callback against tasks() at compile
-    // time. Raw microseconds and integral chrono durations are both accepted.
-    template <auto Function, typename Delay>
-    [[nodiscard]] Status schedule(Delay delay, Mode mode = Mode::once) {
+    // time. Delays are integral chrono durations; use core::Microseconds for a
+    // value already measured in Time.
+    template <auto Function, DurationRep Rep, typename Period>
+    [[nodiscard]] Status schedule(std::chrono::duration<Rep, Period> delay,
+                                  Mode mode = Mode::once) {
       return scheduler().template schedule<Function>(
           static_cast<Derived&>(*this), delay, mode);
     }
@@ -376,8 +336,8 @@ namespace daveos::core {
           static_cast<Derived&>(*this));
     }
 
-    template <auto Function, typename Delay>
-    [[nodiscard]] Status timer(Delay delay) {
+    template <auto Function, DurationRep Rep, typename Period>
+    [[nodiscard]] Status timer(std::chrono::duration<Rep, Period> delay) {
       return scheduler().template timer<Function>(static_cast<Derived&>(*this),
                                                   delay);
     }

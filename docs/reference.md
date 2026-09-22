@@ -421,8 +421,8 @@ Callback identity relies on distinct function addresses. Do not enable unsafe
 linker folding such as `--icf=all`; this also affects plain function callbacks.
 The supplied host and ARM builds do not request that option.
 
-Timers still execute in interrupt context. Delays accept raw microseconds or
-integral chrono durations; invalid conversions are rejected without changing
+Timers still execute in interrupt context. Delays accept only integral chrono
+durations (`core::Microseconds` for `Time` values); invalid conversions are rejected without changing
 pending work. Zero timer delays are invalid. Valid pre-run timer requests return
 `not_running`; pre-run *task* schedules are retained instead. See the
 [application guide](application-guide.md) for examples and conversion rules.

@@ -823,12 +823,15 @@ echo should be disabled; wrapped-line editing is outside the initial scope.
 Existing explicitly named task descriptors remain supported. A module can call
 `schedule<&Type::Function>(delay, mode)` and `cancel<&Type::Function>()`; the
 scheduler interface additionally takes the target module. These typed forms
-validate task registration at compile time. Runtime member-pointer forms remain
-available for dynamic selection. Module lifecycle/event/sleep hooks have explicit
-signature diagnostics at their CRTP boundaries.
+validate task registration at compile time and are the only way to name a task.
+Module lifecycle/event/sleep hooks have explicit signature diagnostics at their
+CRTP boundaries.
 
-Scheduling and timer delays accept integral `std::chrono::duration` values as well
-as existing raw microseconds. Reject negative counts, non-integral microseconds,
+Public scheduling and timer delays accept only integral `std::chrono::duration`
+values; a bare integer does not compile. `core::Microseconds` (unsigned, `Time`
+count) passes a value already measured in `Time` without narrowing. Raw `Time`
+remains internal to the scheduler and at hardware/wire boundaries. Reject
+negative counts, non-integral microseconds,
 and results at or above `kForever`, without changing pending work. Conversion is
 exact and avoids intermediate overflow; floating-point duration representations
 are not supported. Duration conversion errors are returned before lifecycle
