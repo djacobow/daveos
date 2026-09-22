@@ -192,6 +192,15 @@ section supersedes older H755 hardware deferrals; remaining gaps are explicit.
   H563 console/network/reset HIL 6/6, ASan/UBSan 33/33, portable Python
   21 passed (5 opt-in skips), H563/H755 A/B builds, the H563 IRQ-only
   no-networking build, formatting and lint passed. No I2C DMA work is planned.
+- [x] Latch failed SD sessions until explicit reinitialization, preserve buffer
+  ownership through timeout cleanup, and add `sd reset` plus failure diagnostics.
+  Host tests cover read-phase timeouts, failed cleanup, caller abandonment and
+  no write replay; ASan/UBSan 33/33 and targeted TSan HAL/storage 2/2 passed.
+  Both ARM A/B builds pass. H563 read-only DMA timeout HIL passed: both
+  channels disabled, SPI requests/IRQs off, CS released, readiness latched off,
+  no idle traffic, and explicit controller reset successful. One subsequent
+  card probe failed at CMD0; this interrupted card needs a power cycle.
+  H755 timeout injection remains untested.
 - [ ] Qualify SPI DMA with D-cache enabled, injected timeout/error cleanup, card removal and recovery
   from an interrupted data block. An aborted DMA read during bring-up left this
   card sending the remainder of its block; repeated probes eventually restored

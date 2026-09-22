@@ -909,3 +909,14 @@ The I2C module also provides `i2c reset` with per-bus outcomes. Statistics remai
 64-bit; text output saturates each overflowing field to `4294967295+` instead
 of silently truncating. Peripheral drivers live in the separate `drivers/`
 component and `daveos-drivers` dependency; MCP3425 is the first driver.
+
+### SPI/SD timeout policy
+
+SPI always performs bounded cleanup and returns buffers before completion;
+failed cleanup latches the controller fault until an explicit successful reset.
+SD separately invalidates its initialized-card session after an accepted I/O
+failure or abandoned protocol sequence. Successful SPI cleanup/reset does not
+clear that condition. Recovery and retries belong to application policy, with
+no automatic command replay, card reinitialization, or power cycle. Failed
+write outcomes are uncertain. See [storage recovery](../storage.md#failure-and-explicit-recovery)
+for the example's unmount, controller-reset, probe and remount sequence.

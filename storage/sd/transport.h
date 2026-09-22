@@ -18,7 +18,10 @@ namespace daveos::storage::sd {
   // transfer ALWAYS finishes (including its HAL timeout) before buffers are
   // released. Pump must keep making progress even after requesting abort; fake
   // platforms advance there. No ISR calls. One execution thread owns the
-  // transport and its scratch buffer.
+  // transport and its scratch buffer. An accepted transfer failure or bad card
+  // response latches failed(); no subsequent I/O is issued by this instance.
+  // Reconstruct only after explicit card reinitialization. Rejected arguments
+  // and reentry do not invalidate an otherwise usable transport.
   class Transport {
    public:
     static constexpr std::uint32_t kMaximumHz = 1000000;
@@ -35,6 +38,10 @@ namespace daveos::storage::sd {
 
     const WriteDiagnostics& write_diagnostics() const { return diagnostics_; }
 
+    bool failed() const { return failed_; }
+
+    hal::Status status() const { return diagnostics_.status; }
+
     struct Pump {
       void* context;
       bool (*run)(void*);
@@ -49,7 +56,7 @@ namespace daveos::storage::sd {
           pump_(pump) {}
 
     bool read(std::uint32_t sector, std::span<std::uint8_t> destination) {
-      if (busy_ || !pump_.run || !rate_ || rate_ > kMaximumHz ||
+      if (failed_ || busy_ || !pump_.run || !rate_ || rate_ > kMaximumHz ||
           destination.empty() || destination.size() % kSectorBytes ||
           std::uint64_t{sector} + destination.size() / kSectorBytes >
               sectors_ ||
@@ -62,6 +69,7 @@ namespace daveos::storage::sd {
         return false;
       }
       busy_ = true;
+      operation_started_ = false;
 
       struct Release {
         bool& busy;
@@ -70,6 +78,7 @@ namespace daveos::storage::sd {
       } release{busy_};
 
       if (!pump_.run(pump_.context)) {
+        diagnostics_.status = hal::Status::aborted;
         return false;
       }
       auto wire = capture_.first(receive_size);
@@ -83,7 +92,7 @@ namespace daveos::storage::sd {
         }
         auto payload = data(wire, kSectorBytes, 1);
         if (!payload) {
-          return false;
+          return Fail(hal::Status::response_mismatch);
         }
         std::copy(payload->begin(), payload->end(),
                   destination.begin() + offset);
@@ -100,7 +109,7 @@ namespace daveos::storage::sd {
     // bounded response polling, then require ready and
     // clean CMD13 status before reporting success. No automatic write retry.
     bool write(std::uint32_t sector, std::span<const std::uint8_t> source) {
-      if (busy_ || !pump_.run || !rate_ || rate_ > kMaximumHz ||
+      if (failed_ || busy_ || !pump_.run || !rate_ || rate_ > kMaximumHz ||
           source.empty() || source.size() % kSectorBytes ||
           std::uint64_t{sector} + source.size() / kSectorBytes > sectors_ ||
           std::uint64_t{sector} + source.size() / kSectorBytes >
@@ -108,6 +117,7 @@ namespace daveos::storage::sd {
         return false;
       }
       busy_ = true;
+      operation_started_ = false;
 
       struct Release {
         bool& busy;
@@ -116,6 +126,7 @@ namespace daveos::storage::sd {
       } release{busy_};
 
       if (!pump_.run(pump_.context)) {
+        diagnostics_.status = hal::Status::aborted;
         return false;
       }
       diagnostics_ = {};
@@ -160,7 +171,7 @@ namespace daveos::storage::sd {
                          [](auto value) { return value != 0xff; });
         if (first == status.end() || first + 1 == status.end() || *first != 0 ||
             first[1] != 0) {
-          return false;
+          return Fail(hal::Status::response_mismatch);
         }
       }
       return true;
@@ -168,6 +179,12 @@ namespace daveos::storage::sd {
 
    private:
     static constexpr auto kWriteTimeout = std::chrono::milliseconds{1000};
+
+    bool Fail(hal::Status status) {
+      failed_ = true;
+      diagnostics_.status = status;
+      return false;
+    }
 
     bool Gap() {
       const std::array actions{hal::spi::idle_clocks(8)};
@@ -177,9 +194,16 @@ namespace daveos::storage::sd {
     bool Transfer(std::span<const hal::spi::Action> actions,
                   std::chrono::milliseconds timeout = std::chrono::milliseconds{
                       250}) {
-      if (completion_.start(device_, actions, timeout) != hal::Status::ok) {
+      const auto start = completion_.start(device_, actions, timeout);
+      if (start != hal::Status::ok) {
+        diagnostics_.status = start;
+        if (operation_started_ || start == hal::Status::faulted ||
+            start == hal::Status::not_initialized) {
+          failed_ = true;
+        }
         return false;
       }
+      operation_started_ = true;
       bool keep_going = true;
       while (!completion_.ready()) {
         if (!pump_.run(pump_.context)) {
@@ -188,7 +212,12 @@ namespace daveos::storage::sd {
       }
       diagnostics_.status = completion_.result()->status;
       diagnostics_.completed_actions = completion_.result()->completed_actions;
-      return keep_going && diagnostics_.status == hal::Status::ok;
+      if (diagnostics_.status != hal::Status::ok) {
+        return Fail(diagnostics_.status);
+      }
+      // Even a completed transfer may be just one part of the card protocol.
+      // A caller abandoning that protocol must initialize the card again.
+      return keep_going || Fail(hal::Status::aborted);
     }
 
     WriteDiagnostics diagnostics_;
@@ -198,7 +227,7 @@ namespace daveos::storage::sd {
     std::uint64_t sectors_;
     Pump pump_;
     hal::spi::Completion completion_;
-    bool busy_ = false;
+    bool busy_ = false, failed_ = false, operation_started_ = false;
   };
 
 

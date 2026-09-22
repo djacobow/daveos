@@ -263,6 +263,45 @@ flash byte-for-byte. It checks that preparation leaves flash unchanged and
 installs/boots/confirms A→B→A with concurrent console timers. H563 uses the shared case in
 `tests/hil/h563/test_spi.py`, with its own build/package/config.
 
+## Failure and explicit recovery
+
+There are no automatic retries or recovery commands. After a transfer timeout,
+HAL cleanup must finish before the SD call returns and releases its buffers.
+Cleanup failure faults the SPI controller; successful cleanup only establishes
+that the bus and borrowed buffers are safe to reuse. It does not establish the
+card's protocol state.
+
+`storage::sd::Transport::failed()` latches after an accepted-transfer error,
+bad response/CRC, or abandoning a started sequence. Later reads and writes on
+that instance fail without bus traffic. Inspect `status()` for the failure;
+`aborted` means the caller's pump abandoned the SD sequence, after waiting for
+any accepted HAL transfer. This adds no HAL cancellation API. Invalid arguments,
+reentry, and preflight abandonment before bus activity do not poison a usable
+transport. Reconstruct it only after explicit card initialization. Failed reads
+may have copied earlier sectors; discard their output. Failed writes may have
+changed media and must not be replayed automatically.
+
+The example marks the block device unavailable after a failed I/O. Release
+any OTA file reservation (`ota disable`, then wait for cleanup) and unmount
+before attempting recovery:
+
+```text
+fs unmount
+sd reset
+# Wait for SPI1 reset: ok. The card is still unavailable.
+sd probe
+# Only after SD ready:
+fs mount
+```
+
+`sd reset` repairs the controller only; `sd probe` attempts initialization and
+read-only inspection once. Both reject leased/mounted media. `sd stats` reports
+controller fault, card readiness, and the last SD error. A failed probe leaves
+readiness false and may require a physical card power cycle. No speculative
+clocks are sent to finish an interrupted block, because an interrupted write
+could otherwise be completed unintentionally. Application policy chooses when
+to retry or power-cycle; the library does neither automatically.
+
 ## Validation
 
 SD-file OTA passed an H755 A→B→A HIL run using a compatible older package.
@@ -455,3 +494,23 @@ Pre-push regression passed host 32/32, ASan/UBSan 33/33, TSan 32/32, fake
 skips. Both SD A/B firmware builds and programming plans, formatting and lint
 passed. These software checks supplement the hardware runs above; the user
 also manually completed the H563 SD update workflow successfully.
+
+### H563 injected DMA timeout and explicit recovery
+
+The opt-in read-only timeout HIL passed with SPI1 DMA enabled. GDB changed the
+TX DMA request to inactive SPI2 during a CMD17 payload read. The transfer
+reported `timeout`; register inspection found both channel control registers
+zero, SPI DMA requests and interrupts disabled, and GPIO CS high. SD readiness
+remained false and mounting was rejected. IRQ, poll, DMA-chunk and byte counters
+were unchanged over the subsequent idle interval: no automatic retry occurred.
+
+`sd reset` succeeded but did not restore card readiness. The single explicit
+`sd probe` then failed at CMD0 with `response_mismatch`; this card requires a
+physical power cycle after this interrupted read. Watchdog health and retained
+fault checks passed. This validates cleanup and failure containment, not
+power-cycle-free card recovery. The test performs no SD or OTP writes.
+
+ASan/UBSan passed 33/33, targeted TSan HAL/storage passed 2/2, both H563/H755
+A/B builds passed, and formatting/lint passed. H755 timeout injection, DMA
+hardware-error injection, cache-enabled operation and physical card removal
+remain unqualified.

@@ -285,3 +285,15 @@ Watchdog progress fault injection selects its target by module and task name,
 not registration index, so optional application modules do not redirect the
 fault. It uses debugger memory expressions without calling target functions or
 requiring a Python-enabled ARM GDB.
+
+### H563 SD timeout injection (opt-in)
+
+`DAVEOS_HIL_SD_FAULT=1` enables
+`tests/hil/h563/test_sd_timeout.py` with an H563 `spi_sd_dma=true` build.
+It factory-programs the board and interrupts a read-only sector transfer by
+redirecting its DMA request through GDB. It checks timeout cleanup, disabled
+DMA/interrupts, released CS, the unavailable-card latch, and explicit reset.
+It then attempts card initialization once and records whether it succeeded.
+This deliberately leaves a card mid-block; manual SD power cycling may be
+needed before or after the test. Keep it out of unattended suites. No SD or
+OTP writes are performed.

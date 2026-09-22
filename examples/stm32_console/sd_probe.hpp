@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <atomic>
 #include <cinttypes>
 
 #include "application.h"
@@ -77,6 +78,8 @@ namespace app {
           DAVEOS_COMMAND(SdProbe, Probe, "probe",
                          "Identify SD, CRC-check sectors and inspect "
                          "filesystem (read-only)"),
+          DAVEOS_COMMAND(SdProbe, ResetBus, "reset",
+                         "Reset SPI controller; unmount first, then sd probe"),
           DAVEOS_COMMAND(SdProbe, Stats, "stats",
                          "SPI polls and DMA payload counters (since startup)")};
     }
@@ -97,11 +100,20 @@ namespace app {
     }
 
     core::Status Probe() {
-      if (running_ || requested_ || leased_) {
+      if (running_ || requested_ || reset_requested_ || leased_) {
         return core::Status::busy;
       }
       ready_ = false;
       requested_ = true;
+      return core::Status::ok;
+    }
+
+    core::Status ResetBus() {
+      if (running_ || requested_ || reset_requested_ || leased_) {
+        return core::Status::busy;
+      }
+      ready_ = false;
+      reset_requested_ = true;
       return core::Status::ok;
     }
 
@@ -113,6 +125,8 @@ namespace app {
       I_("SPI1 IRQs=%" PRIu32 " polls=%" PRIu32 " DMA chunks=%" PRIu32
          " bytes=%" PRIu32,
          interrupts, counters.polls, counters.dma_chunks, counters.dma_bytes);
+      I_("SPI1 faulted=%s; SD ready=%s; last error=%s",
+         bus_.faulted() ? "yes" : "no", ready_ ? "yes" : "no", error_);
       return core::Status::ok;
     }
 
@@ -128,6 +142,8 @@ namespace app {
                 }
                 auto reader = self.Transport();
                 if (!reader.read(sector, bytes)) {
+                  self.error_ = enum_name(reader.status());
+                  self.ReadFailure(sector);
                   self.ready_ = false;
                   return false;
                 }
@@ -151,6 +167,7 @@ namespace app {
                 }
                 auto transport = self.Transport();
                 if (!transport.write(sector, bytes)) {
+                  self.error_ = enum_name(transport.status());
                   self.WriteFailure(sector, transport.write_diagnostics());
                   self.ready_ = false;
                   return false;
@@ -167,6 +184,11 @@ namespace app {
     void Tick() { machine_.tick(*this); }
 
    private:
+    void ReadFailure(std::uint32_t sector) {
+      E_("SD read LBA %" PRIu32 ": %s; reinitialization required", sector,
+         error_);
+    }
+
     void WriteFailure(
         std::uint32_t sector,
         const daveos::storage::sd::Transport::WriteDiagnostics& d) {
@@ -197,7 +219,16 @@ namespace app {
                }}};
     }
 
-    enum class State { idle, initializing, command, gap, done, failed, count };
+    enum class State {
+      idle,
+      resetting,
+      initializing,
+      command,
+      gap,
+      done,
+      failed,
+      count
+    };
 
     struct Machine
         : core::StateMachine<Machine, State, State::idle,
@@ -207,7 +238,11 @@ namespace app {
           case State::idle:
           case State::done:
           case State::failed:
-            if (p.requested_) {
+            if (p.reset_requested_) {
+              p.reset_requested_ = false;
+              p.running_ = true;
+              ns = State::resetting;
+            } else if (p.requested_) {
               p.requested_ = false;
               p.running_ = true;
               p.backend_.speed(kStartupHz);
@@ -219,6 +254,17 @@ namespace app {
               p.error_ = "invalid command response";
               (void)p.initializer_.request();
               ns = State::initializing;
+            }
+            break;
+          case State::resetting:
+            if (p.reset_ready_.load(std::memory_order_acquire)) {
+              if (p.reset_status_ != hal::Status::ok) {
+                p.error_ = enum_name(p.reset_status_);
+              }
+              p.running_ = false;
+              p.ResetReport(p.reset_status_);
+              // Reset only repairs SPI; card readiness remains false.
+              ns = State::idle;
             }
             break;
           case State::initializing:
@@ -237,13 +283,18 @@ namespace app {
             break;
           case State::gap:
             if (auto result = p.completion_.result()) {
-              ns = result->status == hal::Status::ok ? State::command
-                                                     : State::failed;
+              if (result->status == hal::Status::ok) {
+                ns = State::command;
+              } else {
+                p.error_ = enum_name(result->status);
+                ns = State::failed;
+              }
             }
             break;
           case State::command:
             if (auto result = p.completion_.result()) {
               if (result->status != hal::Status::ok) {
+                p.error_ = enum_name(result->status);
                 ns = State::failed;
                 break;
               }
@@ -270,7 +321,14 @@ namespace app {
       }
 
       void OnEnter(State state, SdProbe& p) {
-        if (state == State::gap) {
+        if (state == State::resetting) {
+          p.reset_ready_.store(false, std::memory_order_release);
+          const auto status = p.bus_.reset(
+              hal::Callback<hal::ResetResult>::bind<&SdProbe::ResetDone>(p));
+          if (status != hal::Status::ok) {
+            p.ResetDone({status});
+          }
+        } else if (state == State::gap) {
           p.actions_[0] = spi::idle_clocks(8);
           (void)p.completion_.start(p.bus_.device<0>(),
                                     std::span{p.actions_}.first(1),
@@ -291,9 +349,19 @@ namespace app {
       }
     };
 
+    void ResetDone(const hal::ResetResult& result) {
+      reset_status_ = result.status;
+      reset_ready_.store(true, std::memory_order_release);
+    }
+
+    void ResetReport(hal::Status status) {
+      I_("SPI1 reset: %s; SD requires sd probe", enum_name(status));
+    }
+
     void Report(bool success) {
       ready_ = success;
       if (success) {
+        error_ = "ok";
         I_("SD inspection complete: CRC verified, repeated reads match "
            "(read-only)");
         I_("SD ready: SPI1 %" PRIu32 " Hz, OCR 0x%08" PRIx32
@@ -488,6 +556,8 @@ namespace app {
     Bus bus_;
     daveos::storage::sd::Initializer initializer_;
     spi::Completion completion_;
+    std::atomic<bool> reset_ready_{false};
+    hal::Status reset_status_ = hal::Status::ok;
     Machine machine_;
     std::array<std::uint8_t, 6> tx_{};
     std::array<std::uint8_t, kReceiveCapacity> rx_{};
@@ -501,6 +571,7 @@ namespace app {
     std::array<spi::Action, 6> actions_{};
     std::uint32_t command_ = 0, ocr_ = 0;
     bool requested_ = false, running_ = false, ready_ = false, leased_ = false;
+    bool reset_requested_ = false;
   };
 
 

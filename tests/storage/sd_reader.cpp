@@ -69,6 +69,8 @@ TEST_CASE("SD command CRC and asynchronous sector adapter validate data") {
   wire[514] ^= 1;
   f.backend.script(script);
   CHECK_FALSE(f.reader.read(5, bytes));
+  CHECK(f.reader.failed());
+  CHECK(f.reader.status() == hal::Status::response_mismatch);
 }
 
 TEST_CASE("SD reader rejects forbidden waits before touching hardware") {
@@ -77,6 +79,8 @@ TEST_CASE("SD reader rejects forbidden waits before touching hardware") {
   std::array<std::uint8_t, 512> bytes{};
   CHECK_FALSE(f.reader.read(0, bytes));
   CHECK(f.backend.begins == 0);
+  CHECK_FALSE(f.reader.failed());
+  CHECK(f.reader.status() == hal::Status::aborted);
 }
 
 TEST_CASE("SD reader waits for timeout before releasing buffers after abort") {
@@ -205,6 +209,12 @@ TEST_CASE(
     f.backend.script(script);
     CHECK(f.reader.write(7, payload) == (failure == 0));
     CHECK_FALSE(f.backend.selected);
+    CHECK(f.reader.failed() == (failure != 0));
+    if (failure) {
+      const auto starts = f.backend.begins;
+      CHECK_FALSE(f.reader.write(7, payload));
+      CHECK(f.backend.begins == starts);  // Never replay an uncertain write.
+    }
     if (failure == 1) {
       CHECK(f.backend.trace_count == 2);
     }
@@ -239,5 +249,122 @@ TEST_CASE("SD staged reads reject R1 and token errors before payload") {
     CHECK_FALSE(f.backend.selected);
     CHECK(
         std::all_of(bytes.begin(), bytes.end(), [](auto b) { return b == 0; }));
+  }
+}
+
+TEST_CASE("SD timeout latches failure at every read phase without replay") {
+  for (std::size_t phase = 0; phase < 5; ++phase) {
+    Fixture f;
+    const auto tx = sd::command(17, 0);
+    std::array<std::uint8_t, sd::Transport::kCaptureBytes> wire;
+    wire.fill(0xff);
+    wire[0] = 0;
+    wire[1] = 0xfe;
+    wire[514] = 0x7f;
+    wire[515] = 0xa1;
+    std::array script{
+        fake::SpiBus::Step{hal::spi::write(tx)},
+        fake::SpiBus::Step{hal::spi::read(f.scratch), std::span{wire}.first(1)},
+        fake::SpiBus::Step{hal::spi::read(f.scratch),
+                           std::span{wire}.subspan(1, 1)},
+        fake::SpiBus::Step{hal::spi::read(f.scratch),
+                           std::span{wire}.subspan(2)},
+        fake::SpiBus::Step{hal::spi::idle_clocks(8)}};
+    script[phase].hang = true;
+    f.backend.script(script);
+    std::array<std::uint8_t, 512> bytes{};
+    REQUIRE_FALSE(f.reader.read(0, bytes));
+    CHECK(f.reader.failed());
+    CHECK(f.reader.status() == hal::Status::timeout);
+    CHECK_FALSE(f.backend.selected);
+    CHECK(f.clock.pending() == 0);
+    const auto starts = f.backend.begins;
+    const auto trace = f.backend.trace_count;
+    CHECK_FALSE(f.reader.read(0, bytes));
+    CHECK_FALSE(f.reader.write(0, bytes));
+    for (std::size_t tick = 0; tick < 300; ++tick) {
+      f.Pump();
+    }
+    CHECK(f.backend.begins == starts);
+    CHECK(f.backend.trace_count == trace);
+    CHECK(f.bus.statistics().timed_out == 1);
+    CHECK_FALSE(f.bus.faulted());  // Bus cleanup is distinct from card state.
+  }
+}
+
+TEST_CASE("SD faulted bus is latched while argument rejection is not") {
+  Fixture f;
+  std::array<std::uint8_t, 512> bytes{};
+  CHECK_FALSE(f.reader.read(8192, bytes));
+  CHECK_FALSE(f.reader.failed());
+  const auto tx = sd::command(17, 0);
+  const std::array script{
+      fake::SpiBus::Step{hal::spi::write(tx), {}, hal::Status::ok, true}};
+  f.backend.script(script);
+  f.backend.cleanup_result = hal::Status::hardware_error;
+  CHECK_FALSE(f.reader.read(0, bytes));
+  REQUIRE(f.bus.faulted());
+  REQUIRE(f.reader.failed());
+  CHECK(f.reader.status() == hal::Status::timeout);
+  CHECK(f.bus.statistics().cleanup_failures == 1);
+  // Repairing SPI does not silently make the card session usable again.
+  hal::Status reset = hal::Status::busy;
+  REQUIRE(f.bus.reset({&reset, [](void* p, const hal::ResetResult& r) {
+                         *static_cast<hal::Status*>(p) = r.status;
+                       }}) == hal::Status::ok);
+  f.Pump();
+  CHECK(reset == hal::Status::ok);
+  CHECK_FALSE(f.bus.faulted());
+  const auto starts = f.backend.begins;
+  CHECK_FALSE(f.reader.read(0, bytes));
+  CHECK(f.backend.begins == starts);
+}
+
+TEST_CASE("SD failure between transactions invalidates the card session") {
+  for (const bool abandon : {false, true}) {
+    Fixture f;
+    const auto tx = sd::command(17, 0);
+    std::array<std::uint8_t, sd::Transport::kCaptureBytes> wire;
+    wire.fill(0xff);
+    wire[0] = 0;
+    wire[1] = 0xfe;
+    wire[514] = 0x7f;
+    wire[515] = 0xa1;
+    const std::array script{
+        fake::SpiBus::Step{hal::spi::write(tx)},
+        fake::SpiBus::Step{hal::spi::read(f.scratch), std::span{wire}.first(1)},
+        fake::SpiBus::Step{hal::spi::read(f.scratch),
+                           std::span{wire}.subspan(1, 1)},
+        fake::SpiBus::Step{hal::spi::read(f.scratch),
+                           std::span{wire}.subspan(2)}};
+    f.backend.script(script);
+
+    struct Context {
+      Fixture& f;
+      bool abandon;
+    } context{f, abandon};
+
+    sd::Transport reader{f.bus.device<0>(),
+                         f.scratch,
+                         1000000,
+                         8192,
+                         {&context, [](void* p) {
+                            auto& c = *static_cast<Context*>(p);
+                            c.f.Pump();
+                            if (c.f.backend.begins) {
+                              c.f.clock.fail_arm = !c.abandon;
+                              return !c.abandon;
+                            }
+                            return true;
+                          }}};
+    std::array<std::uint8_t, 512> bytes{};
+    CHECK_FALSE(reader.read(0, bytes));
+    CHECK(reader.failed());
+    CHECK(reader.status() ==
+          (abandon ? hal::Status::aborted : hal::Status::timer_error));
+    CHECK_FALSE(f.backend.selected);
+    CHECK(f.backend.begins == 1);
+    CHECK_FALSE(reader.read(0, bytes));
+    CHECK(f.backend.begins == 1);
   }
 }

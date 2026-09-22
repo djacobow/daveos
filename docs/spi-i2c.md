@@ -392,3 +392,23 @@ worked, with a running watchdog and no retained failure. Stack painting in
 the scan/conversion case observed 2,808 bytes and zero heap attempts; this is
 not a worst-case stack bound. No SD or OTP writes were performed. H755 was
 not flashed; physical clock stretching and repeated START remain unqualified.
+
+## Timeout cleanup and explicit recovery
+
+A failed or timed-out transaction completes exactly once after bounded
+cleanup. SPI disables DMA requests/interrupts, stops both DMA directions,
+deasserts every CS and resets the peripheral. Completion returns the borrowed
+buffers even when cleanup fails: DMA adapters must isolate them with private
+staging. A cleanup failure faults the controller and rejects later starts;
+only an explicitly requested successful controller `reset()` clears that fault.
+Successful cleanup makes the bus reusable but does not establish the attached
+device's protocol state. Neither the HAL nor the SD layer retries transfers.
+
+SD I/O failure invalidates card readiness. Application policy decides whether
+to attempt recovery; an interrupted write has an uncertain outcome and must
+not be replayed automatically. Release the filesystem/OTA reservation, request
+`sd reset` (SPI controller only), then `sd probe` (one card initialization and
+read-only inspection), and finally `fs mount`. Reset and probe reject mounted
+or otherwise leased media. A failed probe leaves the card unavailable; it may
+require a physical card power cycle. No automatic recovery clocks or commands
+are issued after a failed SD transfer.
