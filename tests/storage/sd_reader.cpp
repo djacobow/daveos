@@ -44,16 +44,20 @@ TEST_CASE("SD command CRC and asynchronous sector adapter validate data") {
   REQUIRE(sd::command(0, 0)[5] == 0x95);
   REQUIRE(sd::command(8, 0x1aa)[5] == 0x87);
   Fixture f;
-  std::array<std::uint8_t, sd::Transport::kCaptureBytes - 1> wire;
+  std::array<std::uint8_t, sd::Transport::kCaptureBytes> wire;
   wire.fill(0xff);
   wire[0] = 0;
   wire[1] = 0xfe;
   wire[514] = 0x7f;
   wire[515] = 0xa1;  // 512 bytes of ff, CRC16.
   const auto tx = sd::command(17, 5);
-  const std::array script{fake::SpiBus::Step{hal::spi::write(tx)},
-                          fake::SpiBus::Step{hal::spi::read(f.scratch), wire},
-                          fake::SpiBus::Step{hal::spi::idle_clocks(8)}};
+  const std::array script{
+      fake::SpiBus::Step{hal::spi::write(tx)},
+      fake::SpiBus::Step{hal::spi::read(f.scratch), std::span{wire}.first(1)},
+      fake::SpiBus::Step{hal::spi::read(f.scratch),
+                         std::span{wire}.subspan(1, 1)},
+      fake::SpiBus::Step{hal::spi::read(f.scratch), std::span{wire}.subspan(2)},
+      fake::SpiBus::Step{hal::spi::idle_clocks(8)}};
   f.backend.script(script);
   std::array<std::uint8_t, 512> bytes{};
   REQUIRE(f.reader.read(5, bytes));
@@ -109,19 +113,26 @@ TEST_CASE("SD reader waits for timeout before releasing buffers after abort") {
 
 TEST_CASE("SD reader handles consecutive sectors and rejects reentry") {
   Fixture f;
-  std::array<std::uint8_t, sd::Transport::kCaptureBytes - 1> wire;
+  std::array<std::uint8_t, sd::Transport::kCaptureBytes> wire;
   wire.fill(0xff);
   wire[0] = 0;
   wire[1] = 0xfe;
   wire[514] = 0x7f;
   wire[515] = 0xa1;
   const auto first = sd::command(17, 10), second = sd::command(17, 11);
-  const std::array script{fake::SpiBus::Step{hal::spi::write(first)},
-                          fake::SpiBus::Step{hal::spi::read(f.scratch), wire},
-                          fake::SpiBus::Step{hal::spi::idle_clocks(8)},
-                          fake::SpiBus::Step{hal::spi::write(second)},
-                          fake::SpiBus::Step{hal::spi::read(f.scratch), wire},
-                          fake::SpiBus::Step{hal::spi::idle_clocks(8)}};
+  const std::array script{
+      fake::SpiBus::Step{hal::spi::write(first)},
+      fake::SpiBus::Step{hal::spi::read(f.scratch), std::span{wire}.first(1)},
+      fake::SpiBus::Step{hal::spi::read(f.scratch),
+                         std::span{wire}.subspan(1, 1)},
+      fake::SpiBus::Step{hal::spi::read(f.scratch), std::span{wire}.subspan(2)},
+      fake::SpiBus::Step{hal::spi::idle_clocks(8)},
+      fake::SpiBus::Step{hal::spi::write(second)},
+      fake::SpiBus::Step{hal::spi::read(f.scratch), std::span{wire}.first(1)},
+      fake::SpiBus::Step{hal::spi::read(f.scratch),
+                         std::span{wire}.subspan(1, 1)},
+      fake::SpiBus::Step{hal::spi::read(f.scratch), std::span{wire}.subspan(2)},
+      fake::SpiBus::Step{hal::spi::idle_clocks(8)}};
   f.backend.script(script);
 
   struct Context {
@@ -206,5 +217,27 @@ TEST_CASE(
     } else {
       CHECK(f.pumps < 500);
     }
+  }
+}
+
+TEST_CASE("SD staged reads reject R1 and token errors before payload") {
+  for (const auto fail_response : {true, false}) {
+    Fixture f;
+    const auto tx = sd::command(17, 0);
+    std::array<std::uint8_t, 1> idle{0xff},
+        response{static_cast<std::uint8_t>(fail_response ? 4 : 0)}, token{0x0b};
+    const std::array script{
+        fake::SpiBus::Step{hal::spi::write(tx)},
+        fake::SpiBus::Step{hal::spi::read(f.scratch), idle},
+        fake::SpiBus::Step{hal::spi::read(f.scratch), response},
+        fake::SpiBus::Step{hal::spi::read(f.scratch), idle},
+        fake::SpiBus::Step{hal::spi::read(f.scratch), token}};
+    f.backend.script(script);
+    std::array<std::uint8_t, 512> bytes{};
+    REQUIRE_FALSE(f.reader.read(0, bytes));
+    CHECK(f.backend.trace_count == (fail_response ? 3 : 5));
+    CHECK_FALSE(f.backend.selected);
+    CHECK(
+        std::all_of(bytes.begin(), bytes.end(), [](auto b) { return b == 0; }));
   }
 }

@@ -5,24 +5,24 @@
 
 #include "hal/spi/action.hpp"
 #include "protocol.h"
+#include "read.h"
 #include "storage/block_device.h"
 
 namespace daveos::storage::sd {
 
 
   // CMD17/CMD24 adapter for an initialized SDHC/SDXC card. Does not own
-  // initialization, bus speed or CS configuration. rate must be the actual
-  // SCK rate, <=1 MHz. Caller supplies a capture buffer and a cooperative pump.
-  // Pump returns false to request abort; an accepted transfer ALWAYS finishes
-  // (including its HAL timeout) before buffers are released. Pump must keep
-  // making progress even after requesting abort; fake platforms advance there.
-  // No ISR calls. One execution thread owns the transport and its scratch
-  // buffer.
+  // initialization, bus speed or CS configuration; use Initializer first. rate
+  // must be the actual SCK rate, <=1 MHz. Caller supplies a capture buffer and
+  // a cooperative pump. Pump returns false to request abort; an accepted
+  // transfer ALWAYS finishes (including its HAL timeout) before buffers are
+  // released. Pump must keep making progress even after requesting abort; fake
+  // platforms advance there. No ISR calls. One execution thread owns the
+  // transport and its scratch buffer.
   class Transport {
    public:
     static constexpr std::uint32_t kMaximumHz = 1000000;
-    static constexpr std::size_t kCaptureBytes =
-        kMaximumHz / 80 + 8 + 1 + kSectorBytes + 2 + 1;
+    static constexpr std::size_t kCaptureBytes = kSectorBytes + 4;
 
     struct WriteDiagnostics {
       hal::Status status = hal::Status::ok;
@@ -57,8 +57,7 @@ namespace daveos::storage::sd {
               (std::uint64_t{1} << 32)) {
         return false;
       }
-      const auto wait_bytes = rate_ / 80 + 1;
-      const auto receive_size = 8 + wait_bytes + kSectorBytes + 2;
+      const auto receive_size = kCaptureBytes;
       if (capture_.size() < receive_size) {
         return false;
       }
@@ -78,11 +77,11 @@ namespace daveos::storage::sd {
            offset += kSectorBytes) {
         const auto tx = command(17, sector++);
         std::fill(wire.begin(), wire.end(), 0xff);
-        const std::array actions{hal::spi::write(tx), hal::spi::read(wire)};
+        const auto actions = read_actions(tx, wire);
         if (!Transfer(actions)) {
           return false;
         }
-        auto payload = data(wire, kSectorBytes, wait_bytes);
+        auto payload = data(wire, kSectorBytes, 1);
         if (!payload) {
           return false;
         }

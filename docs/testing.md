@@ -243,9 +243,11 @@ of binary inspection and watermark measurements.
 
 ## Optional SPI SD fixture
 
-Build the H563 console with `-Dspi_sd_probe=true` to include `sd probe`.
-`tests/hil/h563/test_spi.py` checks five full read-only inspections on an SD card
-connected to SPI1 (PA5/PG9/PB5, PD14 CS): startup, CSD/CID, CRC-checked repeated
+Build either Nucleo console with `-Dspi_sd_probe=true` to include `sd probe`.
+`tests/hil/h563/test_spi.py` and `tests/hil/h755/test_sd.py` share the cases
+in `tests/hil/sd_cases.py`, with board-specific HIL configurations. SPI1 uses
+PA5/PG9/PB5 on H563 or PA5/PA6/PB5 on H755 for SCK/MISO/MOSI, with PD14 GPIO CS
+on both. The suite checks five full read-only inspections: startup, CSD/CID, CRC-checked repeated
 sector reads at 250 kHz/1 MHz, and partition/filesystem identification, followed
 by health/fault queries. It expects a card supporting at least 1 MHz.
 With `-Dfatfs=true`, the same HIL file also checks read-only mount, listing,
@@ -260,6 +262,22 @@ new file, refuses overwrite, syncs/closes, remounts and verifies the contents.
 It then removes its newly created file and verifies absence after remounting,
 including read-only/root-directory rejection checks. A used name is an error,
 not permission to replace or remove an existing file. Real OTP remains untouched. See [SPI/I2C](spi-i2c.md) for wiring and scope.
+Both boards default to DMA for payloads; `-Dspi_sd_dma=false` keeps the
+interrupt-only path. The inspection case verifies nonzero DMA chunk/byte
+counts when enabled and zero counts when disabled.
+
+With `-Dbootloader=true`, `DAVEOS_HIL_SD_UPDATE_PATH=/app_h563.ota` (or another
+compatible package path) enables the file-update A→B→A case. It reads the
+supplied package without modifying the card, independently reconstructs both
+images, compares flash before/after preparation, checks exclusive updater and
+filesystem ownership, installs both directions with concurrent TCP timers,
+and verifies the installed bytes and trial confirmation. Full-flash snapshots
+use bounded 256 KiB debug reads so a slower ST-LINK link does not exceed the
+per-request timeout. First-install stack/heap inspection uses the known
+factory ELF; later images may come from an older compatible package.
+`DAVEOS_HIL_SD_FOREIGN_PATH=/application.ota` separately opts into rejection
+of a package for the other product, with reservation cleanup checks.
+
 The portable `hal` test covers both buses using scripted backends, including
 callback chaining, stale alarms, contention, and concurrent result publication.
 

@@ -313,6 +313,20 @@ namespace daveos::storage {
     return result;
   }
 
+  FRESULT Volume::seek(std::uint32_t offset) {
+    Guard guard(*this);
+    if (!guard) {
+      return FR_LOCKED;
+    }
+    if (!file_open_) {
+      return FR_INVALID_OBJECT;
+    }
+    if (offset > f_size(&file_)) {
+      return FR_INVALID_PARAMETER;
+    }
+    return f_lseek(&file_, offset);
+  }
+
   FRESULT Volume::open_directory(std::string_view path) {
     Guard guard(*this);
     if (!guard || file_open_ || directory_open_) {

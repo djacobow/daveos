@@ -674,3 +674,67 @@ TEST_CASE("I2C address-only probes report ACK or NACK without data") {
   REQUIRE(done.start(bus.device<0>(), malformed) ==
           hal::Status::invalid_argument);
 }
+
+TEST_CASE(
+    "SPI read_until preserves following bytes and bounds idle responses") {
+  for (const auto limit : {2u, 3u}) {
+    Fixture f;
+    std::array<std::uint8_t, 1> response{}, payload{}, idle{0xff}, token{0xfe},
+        value{0x55};
+    const std::array actions{spi::read_until(response, 0xff, limit),
+                             spi::read(payload)};
+    const std::array script{fake::SpiBus::Step{spi::read(response), idle},
+                            fake::SpiBus::Step{spi::read(response), idle},
+                            fake::SpiBus::Step{spi::read(response), token},
+                            fake::SpiBus::Step{spi::read(payload), value}};
+    f.backend.script(script);
+    spi::Completion completion;
+    CHECK(completion.start(f.bus.device<0>(), actions) ==
+          hal::Status::invalid_argument);
+    REQUIRE(completion.start(f.bus.device<0>(), actions,
+                             chrono::milliseconds{10}) == hal::Status::ok);
+    f.pump();
+    REQUIRE(completion.ready());
+    CHECK(completion.result()->status ==
+          (limit == 2 ? hal::Status::response_mismatch : hal::Status::ok));
+    CHECK_FALSE(f.backend.selected);
+    if (limit == 3) {
+      CHECK(response[0] == 0xfe);
+      CHECK(payload[0] == 0x55);
+    } else {
+      CHECK(f.backend.trace_count == 2);
+    }
+    for (std::size_t i = 0; i < f.backend.trace_count; ++i) {
+      CHECK(f.backend.trace[i].selected);
+    }
+  }
+}
+
+TEST_CASE(
+    "SPI read_until rejects invalid storage and times out without a response") {
+  Fixture f;
+  std::array<std::uint8_t, 2> bytes{};
+  spi::Completion completion;
+  for (auto span :
+       {std::span<std::uint8_t>{}, std::span<std::uint8_t>{bytes}}) {
+    const std::array actions{spi::read_until(span)};
+    CHECK(
+        completion.start(f.bus.device<0>(), actions, chrono::milliseconds{1}) ==
+        hal::Status::invalid_argument);
+  }
+  const auto one = std::span{bytes}.first(1);
+  const std::array actions{spi::read_until(one)};
+  std::array<std::uint8_t, 1> idle{0xff};
+  const std::array script{
+      fake::SpiBus::Step{spi::read(one), idle},
+      fake::SpiBus::Step{spi::read(one), idle, hal::Status::ok, true}};
+  f.backend.script(script);
+  REQUIRE(completion.start(f.bus.device<0>(), actions,
+                           chrono::milliseconds{10}) == hal::Status::ok);
+  f.pump();
+  REQUIRE_FALSE(completion.ready());
+  f.advance(10000);
+  REQUIRE(completion.ready());
+  CHECK(completion.result()->status == hal::Status::timeout);
+  CHECK_FALSE(f.backend.selected);
+}

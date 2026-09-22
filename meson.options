@@ -20,7 +20,9 @@ option('otp_backend', type: 'combo', choices: ['none', 'flash-emulator', 'h563']
 
 option('otp_programming', type: 'boolean', value: false, description: 'Explicit real H563 OTP provisioning; never enable for automated HIL')
 
-option('spi_sd_probe', type: 'boolean', value: false, description: 'H563 read-only SPI1 SD inspection fixture (PA5/PG9/PB5, PD14 CS)')
+option('spi_sd_probe', type: 'boolean', value: false, description: 'Read-only SPI1 SD fixture (H563 PA5/PG9/PB5; H755 PA5/PA6/PB5; PD14 CS)')
 option('fatfs', type: 'boolean', value: false, description: 'FatFs storage service (read-only mounts by default)')
 
 option('i2c_adc_probe', type: 'boolean', value: false, description: 'H563 MCP3425 I2C1 fixture (PB8 SCL, PB9 SDA, address 0x68)')
+
+option('spi_sd_dma', type: 'boolean', value: true, description: 'Use SPI1 RX/TX DMA for H563/H755 SD payloads')

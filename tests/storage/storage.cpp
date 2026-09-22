@@ -4,9 +4,12 @@
 #include <fstream>
 #include <memory>
 
+#include "core/command/command.hpp"
 #include "platform/host/block_device.h"
+#include "platform/host/flash.h"
 #include "storage/module.hpp"
 #include "support.hpp"
+#include "update/module.hpp"
 
 namespace {
   namespace storage = daveos::storage;
@@ -516,4 +519,100 @@ TEST_CASE("filesystem remove command copies its path before dispatch returns") {
   REQUIRE(volume.mount() == FR_OK);
   CHECK(volume.open("Long name.txt") == FR_NO_FILE);
   REQUIRE(volume.open_directory("/EMPTY") == FR_OK);
+}
+
+TEST_CASE(
+    "SD update commands reserve a real file-backed FatFs volume through "
+    "installation") {
+  namespace update = daveos::update;
+  namespace boot = daveos::boot;
+  Image image;
+  REQUIRE(image.device.close());
+  REQUIRE(image.device.open(image.path.c_str(), true));
+  std::ifstream package(REFERENCE_PACKAGE, std::ios::binary | std::ios::ate);
+  std::vector<std::uint8_t> bytes(static_cast<std::size_t>(package.tellg()));
+  package.seekg(0);
+  package.read(reinterpret_cast<char*>(bytes.data()), bytes.size());
+  {
+    storage::Volume volume(image.device.device());
+    REQUIRE(volume.attach() == FR_OK);
+    REQUIRE(volume.mount(true) == FR_OK);
+    REQUIRE(volume.create("image.ota") == FR_OK);
+    std::uint32_t count = 0;
+    REQUIRE(volume.write(bytes, count) == FR_OK);
+    REQUIRE(count == bytes.size());
+    REQUIRE(volume.close() == FR_OK);
+    REQUIRE(volume.unmount() == FR_OK);
+  }
+  testing::Fake platform;
+  daveos::platform::host::FileFlash flash(
+      &platform, [](void* p) { return static_cast<testing::Fake*>(p)->now(); });
+  auto flash_path = std::filesystem::path(image.directory) / "flash.bin";
+  REQUIRE(flash.open(flash_path.c_str(), {0, 4096, 512},
+                     daveos::platform::host::FileFlash::OpenMode::create) ==
+          core::Status::ok);
+  boot::Layout layout{{1024, 3072}, {0, 512}, 1024, 512, 16, 1, 1};
+  boot::Snapshot factory;
+  factory.counter = 1;
+  factory.images[0] = {1, 16, 0, boot::ImageState::confirmed, 1, 1};
+  boot::Journal journal(flash.driver(), layout);
+  REQUIRE(journal.commit(factory, 1000000, true) == core::Status::ok);
+  update::Engine engine(flash.driver(), layout, 0);
+  storage::Module<testing::Event> fs(image.device.device());
+  update::Module<testing::Event, true> ota(engine, fs.read_file());
+  testing::TestModule control;
+  testing::Sink sink;
+  auto logger =
+      core::make_logger(platform, core::SubscriberList{sink.subscriber()});
+  const auto modules = core::ModuleList{&fs, &ota, &control};
+  auto scheduler =
+      core::make_scheduler<testing::Event>(platform, modules, logger);
+  core::CommandDispatcher<testing::Event, std::remove_cv_t<decltype(modules)>>
+      commands(modules, scheduler);
+  REQUIRE(scheduler.init() == core::Status::ok);
+  control.first_action = [&] {
+    CHECK(commands.dispatch("fs mount") == core::Status::ok);
+  };
+  control.second_action = [&] {
+    CHECK(commands.dispatch("ota init image.ota") == core::Status::ok);
+    CHECK(commands.dispatch("ota init other.ota") == core::Status::busy);
+    CHECK(commands.dispatch("fs unmount") == core::Status::busy);
+    CHECK(commands.dispatch("fs ls") == core::Status::busy);
+  };
+  control.third_action = [&] {
+    CHECK(engine.reserved());
+    CHECK_FALSE(engine.active());
+    CHECK_FALSE(engine.enabled());
+    CHECK(commands.dispatch("ota status") == core::Status::ok);
+    CHECK(commands.dispatch("ota install") == core::Status::ok);
+    control.first_action = [&] {
+      CHECK_FALSE(engine.active());
+      CHECK_FALSE(engine.reserved());
+      CHECK(engine.status() == core::Status::ok);
+      boot::Snapshot state;
+      REQUIRE(journal.load(state) == core::Status::ok);
+      CHECK(state.images[1].state == boot::ImageState::pending);
+      CHECK(commands.dispatch("fs unmount") == core::Status::ok);
+      scheduler.timer(
+          10000, +[] { testing::timer_action(); });
+    };
+    scheduler.schedule(control, &testing::TestModule::first, 1000000);
+  };
+  testing::timer_action = [&] { scheduler.stop(); };
+  scheduler.schedule(control, &testing::TestModule::first, 0);
+  scheduler.schedule(control, &testing::TestModule::second, 10000);
+  scheduler.schedule(control, &testing::TestModule::third, 100000);
+  REQUIRE(scheduler.run() == core::Status::ok);
+#if DAVEOS_LOGGING
+  CHECK(
+      std::any_of(sink.records.begin(), sink.records.end(), [](const auto& r) {
+        return std::string_view(r.message).find("OTA SD prepared") !=
+               std::string_view::npos;
+      }));
+  CHECK(
+      std::any_of(sink.records.begin(), sink.records.end(), [](const auto& r) {
+        return std::string_view(r.message).find("OTA SD done") !=
+               std::string_view::npos;
+      }));
+#endif
 }

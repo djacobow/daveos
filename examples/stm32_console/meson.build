@@ -30,12 +30,10 @@ if get_option('i2c_adc_probe')
   component_irqs += 'extern "C" void I2C1_ER_IRQHandler() { app::components.i2c1.interrupt(); }'
 endif
 if get_option('spi_sd_probe')
-  if board != 'h563'
-    error('spi_sd_probe requires the H563 SPI A fixture')
-  endif
   component_deps += hal_dep
   component_includes += '#include "sd_probe.hpp"'
-  component_members += '    SdProbe sd{platform};'
+  sd_dma = get_option('spi_sd_dma')
+  component_members += '    SdProbe sd{platform, ' + (sd_dma ? 'true' : 'false') + '};'
   component_modules += ', sd'
   if get_option('fatfs')
     component_deps += storage_dep
@@ -44,6 +42,13 @@ if get_option('spi_sd_probe')
     component_modules += ', filesystem'
   endif
   component_irqs += 'extern "C" void SPI1_IRQHandler() { app::components.sd.interrupt(); }'
+  if sd_dma and board == 'h755'
+    component_irqs += 'extern "C" void DMA1_Stream1_IRQHandler() { app::components.sd.interrupt(); }'
+    component_irqs += 'extern "C" void DMA1_Stream2_IRQHandler() { app::components.sd.interrupt(); }'
+  elif sd_dma
+    component_irqs += 'extern "C" void GPDMA1_Channel1_IRQHandler() { app::components.sd.interrupt(); }'
+    component_irqs += 'extern "C" void GPDMA1_Channel2_IRQHandler() { app::components.sd.interrupt(); }'
+  endif
 endif
 if board in ['h563', 'h755']
   component_deps += util_dep
@@ -81,6 +86,17 @@ if get_option('otp_backend') == 'h563'
   component_modules += ', otp.module, otp'
 endif
 
+if get_option('bootloader') and (get_option('networking') or (get_option('spi_sd_probe') and get_option('fatfs')))
+  component_deps += update_dep
+  component_includes += '#include "ota.hpp"'
+  if get_option('spi_sd_probe') and get_option('fatfs')
+    component_members += '    Ota<true> ota{platform, filesystem.read_file()};'
+  else
+    component_members += '    Ota<> ota{platform};'
+  endif
+  component_modules += ', ota.module'
+endif
+
 if get_option('networking')
   component_includes += '#include "platform/stm32/console/network.hpp"'
   component_members += '    stm32::Network<Event> network{platform};'
@@ -88,10 +104,9 @@ if get_option('networking')
   component_stop += '      network.stop();'
   if get_option('bootloader')
     component_deps += network_update_dep
-    component_includes += '#include "ota.hpp"'
-    component_members += '    Ota ota{platform, network.service};'
-    component_modules += ', ota.module'
-    component_stop = ['      ota.stop();'] + component_stop
+    component_includes += '#include "ota_network.hpp"'
+    component_members += '    OtaNetwork ota_network{platform, network.service, ota};'
+    component_stop = ['      ota_network.stop();'] + component_stop
   endif
   if get_option('tcp_console')
     component_includes += '#include "console/tcp.hpp"'

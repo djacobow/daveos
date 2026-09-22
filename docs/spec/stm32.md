@@ -69,8 +69,16 @@ not through the SPI peripheral's hardware NSS output. The backend owns GPIO
 assertion/deassertion according to the portable transaction and error-cleanup
 contract. For this SD-card fixture, that GPIO is PD14.
 
-An SSD1306 display is not yet available for I2C hardware validation; begin
-with the fake backend and retain that hardware validation gap explicitly.
+The H755 fixture uses SPI1 with PA5 SCK, PA6 MISO, PB5 MOSI (AF5), and PD14
+GPIO CS. The same HSI/CKPER 64 MHz source yields 250 kHz startup and 1 MHz
+reads. Board-selected `sd_board.h` supplies the bus adapter and MISO mapping;
+the initialization, inspection and filesystem code is shared. H755's fixed
+lwIP pools live in AXI SRAM to preserve DTCM stack headroom with this fixture.
+Pin assignments follow the [STM32H755 datasheet](https://www.st.com/resource/en/datasheet/stm32h755zi.pdf).
+
+H563 I2C has been validated with an MCP3425 on PB8/PB9 at 0x68, including
+scan, conversion and interrupted-read recovery. An SSD1306 display is not
+available; repeated START and physical clock stretching remain unqualified.
 
 The portable API contract is in the
 [SPI/I2C HAL section](platforms.md#spi-and-i2c-hal).
@@ -79,11 +87,12 @@ The portable API contract is in the
 
 | Component | H563 | H755 M7 / M4 |
 | --- | --- | --- |
-| SPI/I2C HAL | IRQ adapters implemented; SPI SD identification and CRC-checked sector inspection tested at 250 kHz/1 MHz; I2C awaits a fixture | IRQ adapters compile-tested; bus hardware qualification pending |
+| SPI/I2C HAL | IRQ adapters and optional SPI1 GPDMA payloads implemented; SD CRC-checked reads, read-only FatFs and temporary-file write/readback/remove tested; I2C MCP3425 scan/conversion and GPIO recovery tested | SPI SD initialization, CRC-checked 250 kHz/1 MHz reads, read-only FatFs and opt-in create/readback/remove HIL passed, including optional RX/TX DMA payloads; I2C hardware pending |
 | Scheduler platform, TIM2, critical sections, sleep, reset | Implemented; hardware tested | M7 implemented; current console and reset paths hardware tested. M4 only performs boot synchronization and sleeps. |
 | UART DMA/FIFO, USB CDC, board commands, shared console | Implemented; current HIL and earlier physical checks | Implemented; current UART/USB/TCP command and UART burst HIL. |
 | lwIP Ethernet and TCP console | Implemented; hardware tested | Implemented; DHCP, large-packet ping, TCP reconnect and reset HIL. |
 | A/B bootloader, flash journal, OTA integration | Implemented; hardware HIL plus host fault models | Implemented; 23-case HIL covers A/B OTA, journal rollover, watchdog/fault recovery and invalid-image fallback. |
+| SD-file OTA | DMA A→B→A, byte-exact flash verification, unchanged flash during preparation, trial boots and confirmation tested | Same A→B→A checks tested with DMA and a compatible older package |
 | IWDG, startup/trial health policy, retained fault handlers | Implemented; hardware HIL | IWDG1, startup health, and retained fault capture implemented and hardware tested; no IWDG early-warning IRQ. Bootloader starts IWDG; the application confirms healthy trial boots. |
 | Real OTP and bank-B emulator | Implemented; emulator HIL, one authorized real write/lock, then read-only hardware checks | Not implemented; do not assume H563 OTP geometry or register semantics. |
 
@@ -241,6 +250,70 @@ layout definition. Enforce bounds before any erase/program operation. Metadata
 A/B are a redundant journal of shared boot state, not exclusively per-slot
 descriptors. Brief metadata-operation stalls are acceptable; bulk OTA must
 yield to normal application work.
+
+### SD-file update workflow
+
+Reuse the existing OTA package format for SD files. The user mounts the
+filesystem, runs `ota init <path>`, then `ota install`, and explicitly reboots
+when installation succeeds, using the existing `board reset` command.
+No automatic reboot is performed and no command rename is needed.
+
+`ota init <path>` requires an already mounted read-only filesystem. Reject
+an unmounted or read-write-mounted volume without changing its mode or touching
+flash; explain that the user must mount read-only (unmount first if necessary).
+
+`ota init <path>` cooperatively validates the complete package, including its
+structure, target/layout compatibility and the reconstructed image CRC for the
+destination slot, without erasing or programming flash. It prints package
+information (version, target, size and destination) and prepares installation.
+Successful preparation keeps the file open and reserves the filesystem. Close
+the file after the last installation read, before submitting the final payload
+to the engine; retain the filesystem reservation until installation finishes
+or preparation is abandoned. This puts file read/close failures before commit. The prepared state has no
+expiry: it may wait indefinitely for `ota install` or `ota disable`. Validation
+and installation still use bounded I/O timeouts; the network inactivity timeout
+must not expire an otherwise idle, prepared SD update. Other filesystem operations
+return busy while reserved. A second `ota init` returns busy while a file is
+prepared or installing; it never replaces the current selection. `ota disable`
+abandons preparation and releases it before another file can be selected.
+
+`ota install` uses the existing updater to erase/program the inactive slot,
+verify the installed image from flash, and commit it for trial boot. Release
+the file and filesystem reservation on success and on any preparation or
+installation failure. Cleanup must wait for accepted I/O to release borrowed
+buffers; a timeout alone does not establish that ownership has returned.
+A failed preparation/installation is no longer prepared: another attempt
+requires `ota init <path>` again. Failure cleanup does not imply that a damaged
+or removed card is immediately usable without recovery/remounting.
+
+`ota init <path>` itself authorizes the SD-file update; no preceding
+`ota enable` is required. This does not enable network uploads, which retain
+the explicit `ota enable` gate.
+
+SD preparation and TCP uploads share exclusive updater ownership. The first
+accepted `ota init` or TCP upload reserves it, including the SD validation
+phase. An active TCP upload makes `ota init` return busy; SD validation,
+prepared state and installation reject incoming TCP uploads as busy until
+ownership is released. Merely enabling network uploads does not reserve the
+updater. Failed admission must release any partially acquired reservations.
+
+Extend `ota status` to report the update source, selected file path for SD,
+phase (including validating, prepared, installing, done and failed), progress,
+and last error. Successful preparation prints the image details once;
+installation logs progress periodically rather than for every chunk. Keep a
+copied diagnostic summary after success or failure without retaining the file
+handle or filesystem reservation.
+
+The reusable `update::FileUpdate` uses an injected `storage::ReadFile` source
+and the existing flash engine. It has no FatFs, network or platform dependency.
+The filesystem module provides a reserved read-only file adapter; file work
+runs in an optional one-shot OTA task because FatFs reads can yield. The engine
+continues to tick independently. `Module<Event, true>` adds `init`/`install`;
+the default module retains network-only commands. Example composition enables
+SD updates when bootloader, SPI SD and FatFs are selected, independently of
+networking. Tests and hardware qualification are recorded in [storage](../storage.md).
+
+### OTA package representation
 
 Prefer one package containing a base image, block-local relocation records,
 and the expected installed CRC for each slot. Link the same objects at both

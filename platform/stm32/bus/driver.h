@@ -8,6 +8,7 @@
 
 #include "hal/detail/actions.hpp"
 #include "hal/i2c/bus_clear.h"
+#include "spi_dma.h"
 
 namespace daveos::platform::stm32::detail {
 
@@ -85,18 +86,21 @@ namespace daveos::platform::stm32::detail {
   };
 
   // IRQ-driven, 8-bit, full-duplex SPI. Reads synthesize fill bytes and writes
-  // discard RX in the IRQ; no bounce buffer or vendor polling routine.
+  // discard RX in the IRQ. An optional injected DMA engine stages large
+  // actions.
   class SpiBus {
    public:
     using Action = hal::spi::Action;
     using Config = SpiConfig;
 
     constexpr SpiBus(SPI_TypeDef* registers, IRQn_Type irq,
-                     std::uint32_t kernel_hz, const BusHardware& hardware)
+                     std::uint32_t kernel_hz, const BusHardware& hardware,
+                     const SpiDma& dma = {})
         : registers_(registers),
           irq_(irq),
           kernel_hz_(kernel_hz),
-          hardware_(hardware) {}
+          hardware_(hardware),
+          dma_(dma) {}
 
     const void* identity() const { return registers_; }
 
@@ -144,6 +148,12 @@ namespace daveos::platform::stm32::detail {
       if (status != hal::Status::ok) {
         return status;
       }
+      if (dma_) {
+        const auto dma_status = dma_.init(dma_.context);
+        if (dma_status != hal::Status::ok) {
+          return dma_status;
+        }
+      }
       hardware_.reset(hardware_.context);
       for (const auto& d : devices_) {
         d.cs.select(false);
@@ -182,13 +192,43 @@ namespace daveos::platform::stm32::detail {
                    : std::max(action.tx.size(), action.rx.size());
       sent_ = received_ = 0;
       active_ = true;
-      Chunk();
-      return hal::Status::ok;
+      return Chunk();
     }
 
     std::optional<hal::Status> poll() {
       if (!active_) {
         return std::nullopt;
+      }
+      ++counters_.polls;
+      if (dma_active_) {
+        if (registers_->SR &
+            (SPI_SR_OVR | SPI_SR_UDR | SPI_SR_MODF | SPI_SR_TIFRE)) {
+          counters_.spi_error = registers_->SR;
+          return hal::Status::hardware_error;
+        }
+        const auto status = dma_.poll(dma_.context);
+        if (!status) {
+          return std::nullopt;
+        }
+        if (*status != hal::Status::ok) {
+          return *status;
+        }
+        if (!(registers_->SR & SPI_SR_EOT)) {
+          return std::nullopt;
+        }
+        registers_->IER = 0;
+        registers_->CFG1 =
+            registers_->CFG1 & ~(SPI_CFG1_RXDMAEN | SPI_CFG1_TXDMAEN);
+        if (!dma_.stop(dma_.context)) {
+          return hal::Status::hardware_error;
+        }
+        if (!action_.rx.empty()) {
+          dma_.read(dma_.context,
+                    action_.rx.subspan(received_, chunk_end_ - received_));
+        }
+        sent_ = received_ = chunk_end_;
+        dma_active_ = false;
+        return NextChunk();
       }
       constexpr auto errors =
           SPI_SR_OVR | SPI_SR_UDR | SPI_SR_MODF | SPI_SR_TIFRE;
@@ -224,23 +264,19 @@ namespace daveos::platform::stm32::detail {
         registers_->IER = registers_->IER & ~SPI_IER_TXPIE;
       }
       if ((registers_->SR & SPI_SR_EOT) && received_ == chunk_end_) {
-        registers_->IER = 0;
-        registers_->CR1 = SPI_CR1_SSI;
-        registers_->IFCR = SPI_IFCR_EOTC | SPI_IFCR_TXTFC;
-        if (received_ < total_) {
-          Chunk();
-          return std::nullopt;
-        }
-        active_ = false;
-        return hal::Status::ok;
+        return NextChunk();
       }
       return std::nullopt;
     }
 
     // RCC reset terminates even a wedged peripheral without waiting for SUSP.
-    // IRQ-only backend: no independent DMA bus master retains caller buffers.
+    // DMA uses private staging; cleanup failure faults the controller.
     hal::Status finish() {
       registers_->IER = 0;
+      registers_->CFG1 =
+          registers_->CFG1 & ~(SPI_CFG1_RXDMAEN | SPI_CFG1_TXDMAEN);
+      const bool stopped = !dma_ || dma_.stop(dma_.context);
+      dma_active_ = false;
       active_ = false;
       action_ = {};
       // Reset can release alternate-function pin control. Make CS inactive
@@ -252,12 +288,20 @@ namespace daveos::platform::stm32::detail {
       hardware_.reset(hardware_.context);
       selected_ = false;
       NVIC_ClearPendingIRQ(irq_);
-      return hal::Status::ok;
+      return stopped ? hal::Status::ok : hal::Status::hardware_error;
     }
 
     hal::Status reset() { return finish(); }
 
     void pend() { NVIC_SetPendingIRQ(irq_); }
+
+    // Diagnostic counters wrap modulo 2^32; compare unsigned deltas.
+    struct Counters {
+      std::uint32_t polls = 0, dma_chunks = 0, dma_bytes = 0, spi_error = 0;
+    };
+
+    // Caller holds the controller's critical section for a coherent snapshot.
+    Counters counters() const { return counters_; }
 
    private:
     std::uint32_t Prescaler(std::uint32_t maximum) const {
@@ -280,22 +324,54 @@ namespace daveos::platform::stm32::detail {
                          (d.lsb_first ? SPI_CFG2_LSBFRST : 0);
     }
 
-    void Chunk() {
-      chunk_end_ =
-          received_ + std::min<std::uint64_t>(total_ - received_, 65535);
-      registers_->CR2 = static_cast<std::uint32_t>(chunk_end_ - received_);
+    std::optional<hal::Status> NextChunk() {
+      registers_->IER = 0;
+      registers_->CR1 = SPI_CR1_SSI;
+      registers_->IFCR = SPI_IFCR_EOTC | SPI_IFCR_TXTFC;
+      if (received_ < total_) {
+        const auto status = Chunk();
+        return status == hal::Status::ok ? std::nullopt : std::optional{status};
+      }
+      active_ = false;
+      return hal::Status::ok;
+    }
+
+    hal::Status Chunk() {
+      const auto remaining = total_ - received_;
+      dma_active_ = dma_ && remaining >= 32;
+      const auto count = std::min<std::uint64_t>(
+          remaining, dma_active_ ? dma_.capacity : 65535);
+      chunk_end_ = received_ + count;
+      registers_->CR2 = static_cast<std::uint32_t>(count);
       registers_->IFCR = 0xffffffffu;
-      registers_->IER = SPI_IER_RXPIE | SPI_IER_TXPIE | SPI_IER_EOTIE |
-                        SPI_IER_OVRIE | SPI_IER_UDRIE | SPI_IER_MODFIE |
-                        SPI_IER_TIFREIE;
+      registers_->IER = SPI_IER_EOTIE | SPI_IER_OVRIE | SPI_IER_UDRIE |
+                        SPI_IER_MODFIE | SPI_IER_TIFREIE;
+      if (dma_active_) {
+        const auto tx =
+            action_.tx.empty() ? action_.tx : action_.tx.subspan(sent_, count);
+        const auto status = dma_.start(dma_.context, tx, count, action_.fill);
+        if (status != hal::Status::ok) {
+          return status;
+        }
+        ++counters_.dma_chunks;
+        counters_.dma_bytes += static_cast<std::uint32_t>(count);
+        registers_->CFG1 =
+            registers_->CFG1 | SPI_CFG1_RXDMAEN | SPI_CFG1_TXDMAEN;
+      } else {
+        registers_->IER = registers_->IER | SPI_IER_RXPIE | SPI_IER_TXPIE;
+      }
       registers_->CR1 = SPI_CR1_SSI | SPI_CR1_SPE;
       registers_->CR1 = SPI_CR1_SSI | SPI_CR1_SPE | SPI_CR1_CSTART;
+      return hal::Status::ok;
     }
 
     SPI_TypeDef* registers_;
     IRQn_Type irq_;
     std::uint32_t kernel_hz_;
     BusHardware hardware_;
+    SpiDma dma_;
+    Counters counters_;
+    bool dma_active_ = false;
     mutable std::optional<std::size_t> invalid_device_;
     std::span<const Config> devices_;
     Action action_{};

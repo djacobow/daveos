@@ -8,7 +8,12 @@ adding that minimum to the total. Bootloader and application have separate
 layouts and lifetimes; H755 M4 has its own RAM and stack.
 
 H563 uses its main SRAM region; H755 M7 uses DTCM. DMA buffers remain in the
-appropriate separate SRAM regions. One stack cannot span disjoint RAM banks.
+appropriate separate SRAM regions. H755 also places lwIP's fixed packet pools
+(`.bss.memp_memory_*`) in a dedicated `.lwip_bss` section in AXI SRAM. Startup
+zeros that section before constructors on every boot. This preserves DTCM
+stack headroom when SD/FatFs is enabled; the pools remain fixed storage, not a
+runtime heap. Preserve both the linker section and startup clearing loop when
+regenerating CubeMX files. One stack cannot span disjoint RAM banks.
 The retained fault record and emergency exception stack remain separately
 reserved below ordinary RAM. H563's MSPLIM guards `_sstack`; Cortex-M7/M4 do
 not provide that guard.
@@ -105,3 +110,24 @@ that leave bytes untouched and does not establish a worst-case bound for all
 future inputs or interrupts. Measure representative loads and retain margin;
 use the linker minimum to reject clearly undersized builds. Tests that inject
 faults may also use scratch RAM, so their watermarks need separate interpretation.
+
+The initial H755 SD/FatFs plus network-console build used 84,952 bytes of ordinary
+DTCM statics/alignment, 2,048 bytes for retained faults/emergency stack, and
+left 44,072 bytes for the M7 stack. AXI SRAM holds 44,544 bytes of lwIP pools,
+16,384 bytes of UART DMA buffers and 31,648 bytes of Ethernet storage. The
+read-only filesystem HIL workload observed 3,480 stack bytes and zero heap
+attempts. These measurements apply to this configuration, not every feature
+combination or a worst-case execution path.
+
+The subsequent H755 create/readback/remove HIL cycle observed 4,064 stack
+bytes out of the same 44,072-byte region and zero heap attempts. This is
+higher than the read-only workload above, but still a measured workload
+rather than a worst-case bound.
+
+After incremental SD response reads replaced the fixed capture window, the
+H755 DMA configuration leaves 56,360 bytes for the DTCM stack (72,664 bytes
+of ordinary statics/alignment). Two aligned 512-byte SPI DMA staging buffers
+add 1,024 bytes in AXI SRAM, keeping caller buffers valid even in DTCM.
+Read-only filesystem HIL observed 3,328 stack bytes; create/readback/remove
+observed 4,024. Both recorded zero heap attempts. These are measured workloads,
+not worst-case bounds. Broader bulk-data relocation remains a TODO.

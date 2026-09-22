@@ -2,6 +2,7 @@
 #include <array>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 
 #include "catch_amalgamated.hpp"
 #include "console/tcp.hpp"
@@ -10,7 +11,9 @@
 #include "net/module.hpp"
 #include "net/service.h"
 #include "net/tcp_server.h"
+#include "net/update.h"
 #include "platform/fake/platform.h"
+#include "reliability/flash.hpp"
 extern "C" {
 #include "lwip/pbuf.h"
 }
@@ -584,4 +587,49 @@ TEST_CASE(
   service.poll();
   REQUIRE(console.poll_line(line));
   CHECK(line.view() == "sink add");
+}
+
+TEST_CASE("Network stop and reconnect cannot abort a local update owner") {
+  namespace update = daveos::update;
+  reliability::MemoryFlash flash;
+  auto layout = flash.layout();
+  daveos::boot::Snapshot factory;
+  factory.counter = 1;
+  factory.images[0] = {1, 16, 0, daveos::boot::ImageState::confirmed, 1, 1};
+  daveos::boot::Journal journal(flash.driver(), layout);
+  REQUIRE(journal.commit(factory, 1000000, true) == core::Status::ok);
+  std::ifstream package(REFERENCE_PACKAGE, std::ios::binary);
+  std::array<std::byte, 128> header{};
+  package.read(reinterpret_cast<char*>(header.data()), header.size());
+  REQUIRE(package.good());
+  update::Engine engine(flash.driver(), layout, 0);
+  std::uint8_t owner = 0;
+  REQUIRE(engine.reserve(&owner) == core::Status::ok);
+  REQUIRE(engine.begin(header, &owner) == core::Status::ok);
+  for (unsigned i = 0;
+       i < 1000 && engine.state() != update::Engine::State::receiving; ++i) {
+    engine.tick();
+  }
+  REQUIRE(engine.state() == update::Engine::State::receiving);
+  Fake f;
+  net::Service service(f.driver(), f.clock(), Static());
+  REQUIRE(service.init());
+  service.poll();
+  net::UpdateServer server(service, engine, {}, 1000);
+  server.stop();
+  server.poll();
+  engine.tick();
+  CHECK(engine.state() == update::Engine::State::receiving);
+  engine.enable(true);
+  server.poll();
+  f.queue(Arp());
+  service.poll();
+  Connect(f, service, 40000);
+  server.poll();
+  engine.tick();
+  CHECK(engine.state() == update::Engine::State::receiving);
+  server.stop();
+  engine.tick();
+  CHECK(engine.state() == update::Engine::State::receiving);
+  CHECK(engine.reserved());
 }

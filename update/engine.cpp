@@ -13,13 +13,33 @@ namespace daveos::update {
   }
 
   bool Engine::ready() const {
-    return enabled_ && !abort_requested_ && state() == State::receiving &&
+    return Authorized() && !abort_requested_ && state() == State::receiving &&
            !rx_size_ && received_ < total() &&
            reader_.state() != PackageReader::State::ready;
   }
 
-  Status Engine::begin(std::span<const std::byte> bytes) {
-    if (!enabled_) {
+  Status Engine::reserve(const void* owner) {
+    if (!owner) {
+      return Status::invalid_argument;
+    }
+    if (owner_ || active()) {
+      return Status::busy;
+    }
+    owner_ = owner;
+    return Status::ok;
+  }
+
+  void Engine::release(const void* owner) {
+    if (owner_ == owner && !active()) {
+      owner_ = nullptr;
+    }
+  }
+
+  Status Engine::begin(std::span<const std::byte> bytes, const void* owner) {
+    if (owner_ != owner) {
+      return Status::busy;
+    }
+    if (!Authorized()) {
       return Status::not_running;
     }
     if (active()) {
@@ -103,7 +123,7 @@ namespace daveos::update {
             status_ = result;
             ns = State::failed;
           }
-        } else if (!enabled_) {
+        } else if (!Authorized()) {
           ns = State::disabled;
         } else if (cs == State::disabled) {
           status_ = Status::ok;
@@ -113,7 +133,7 @@ namespace daveos::update {
       }
       case State::invalidating: {
         journal_.tick();
-        if (!enabled_ || abort_requested_) {
+        if (!Authorized() || abort_requested_) {
           ns = State::aborting;
         } else if (journal_.status() != Status::busy) {
           if (journal_.status() != Status::ok) {
@@ -129,7 +149,7 @@ namespace daveos::update {
         break;
       }
       case State::receiving: {
-        if (!enabled_ || abort_requested_) {
+        if (!Authorized() || abort_requested_) {
           ns = State::aborting;
           break;
         }
@@ -169,7 +189,7 @@ namespace daveos::update {
         break;
       }
       case State::writing: {
-        if (!enabled_ || abort_requested_) {
+        if (!Authorized() || abort_requested_) {
           writer_.cancel();
           ns = State::aborting;
         } else {
@@ -188,7 +208,7 @@ namespace daveos::update {
         break;
       }
       case State::verifying: {
-        if (!enabled_ || abort_requested_) {
+        if (!Authorized() || abort_requested_) {
           ns = State::aborting;
           break;
         }
@@ -238,7 +258,7 @@ namespace daveos::update {
       }
       case State::committing: {
         journal_.tick();
-        if (!enabled_ || abort_requested_) {
+        if (!Authorized() || abort_requested_) {
           ns = State::aborting;
         } else if (journal_.status() != Status::busy) {
           status_ = journal_.status();

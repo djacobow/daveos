@@ -251,7 +251,18 @@ namespace daveos::hal {
               }
               c.poll_retry_ = detail::Polls(c.actions_[c.completed_]) &&
                               !detail::PollMatched(c.actions_[c.completed_]);
+              if (c.poll_retry_ &&
+                  detail::PollLimit(c.actions_[c.completed_]) &&
+                  ++c.poll_count_ >=
+                      detail::PollLimit(c.actions_[c.completed_])) {
+                c.status_ = Status::response_mismatch;
+                c.RecordActionError();
+                ns = State::finish;
+                c.again_ = true;
+                break;
+              }
               if (!c.poll_retry_) {
+                c.poll_count_ = 0;
                 ++c.completed_;
               }
               c.started_ = false;
@@ -502,6 +513,7 @@ namespace daveos::hal {
       deadline_ = deadline;
       actions_ = actions;
       poll_retry_ = false;
+      poll_count_ = 0;
       callback_ = callback;
       device_ = index;
       completed_ = 0;
@@ -559,6 +571,7 @@ namespace daveos::hal {
     std::uint64_t deadline_ = 0, pause_due_ = 0;
     Action backend_action_{};
     bool poll_retry_ = false;
+    std::uint64_t poll_count_ = 0;
     std::span<const Action> actions_;
     TransferCallback callback_, notification_;
     TransferResult notification_result_{};

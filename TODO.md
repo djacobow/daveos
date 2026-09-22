@@ -5,6 +5,29 @@ section supersedes older H755 hardware deferrals; remaining gaps are explicit.
 
 ## Bootloader and reliability
 
+- [x] Implement SD-file OTA preparation/install using the existing package:
+  `ota init <path>` validates without flash changes and reserves the open file;
+  `ota install` writes/verifies/commits, with explicit reboot afterward. Release
+  reservations on success, failure or disable after I/O ownership returns.
+  Design: [STM32 spec](docs/spec/stm32.md#sd-file-update-workflow).
+  H755 HIL passed A→B→A using the supplied older package, with byte-exact
+  installed-image comparisons, unchanged flash during preparation, read-only
+  mount enforcement, failed-open/disable cleanup, TCP exclusion, healthy
+  watchdog and both trial confirmations. Installs took 21.99/21.80 seconds;
+  692 concurrent timers had a maximum 26.25 ms host-observed round-trip.
+  ASan/UBSan 33/33, targeted TSan 3/3, logging-disabled reliability/storage,
+  formatting and lint passed. H563/H755 A/B builds and an H755 SD updater
+  build without networking passed. H563 DMA SD OTA subsequently passed A→B→A
+  with both trial boots confirmed and both installed images byte-exact.
+  Full-flash comparisons used 256 KiB debug reads (one 2 MiB H563 read exceeds
+  the control timeout). Installs took 37.31/37.34 seconds; 1,184 concurrent
+  timers had a maximum 24.49 ms host round-trip. Stack painting observed
+  3,912/490,224 bytes and zero heap attempts. An initial CMD0 failure stopped
+  before DMA/OTA; reseating the wiring restored repeated CRC-checked reads.
+  Physical power-cut/card-removal qualification remains outstanding. SD OTA
+  tests made no SD or OTP writes; only the separate DMA write test used a
+  temporary SD file.
+
 ### Completed
 
 - [x] H563 bootloader with fixed 32 KiB reservation, redundant metadata, equal 984 KiB A/B slots, CRC verification, one-trial policy, and explicit durable/idempotent confirmation.
@@ -138,14 +161,49 @@ section supersedes older H755 hardware deferrals; remaining gaps are explicit.
 - [x] Validate the reusable console on H563 over UART/USB/TCP, including Ethernet ping and reset recovery; validate the standalone device starter's periodic worker, commands, and reset over UART. H755 has build/programming-plan coverage only for these changes.
 - [x] Add daveos::util for CRC, version identity, and retained-fault records.
 - [x] Add software CRC32 with injected hardware support and H563 hardware CRC implementation.
-- [x] Add injected SPI/I2C HALs with callback completion, polling helper, aliased registries, per-controller ownership, statistics, fake backends, and H563/H755 IRQ adapters. [API guide](docs/spi-i2c.md). H563 read-only SD startup/OCR passed five times at 250 kHz; H755 bus adapters are build-tested only.
+- [x] Add injected SPI/I2C HALs with callback completion, polling helper, aliased registries, per-controller ownership, statistics, fake backends, and H563/H755 IRQ adapters. [API guide](docs/spi-i2c.md). Initial validation: H563 read-only SD startup/OCR passed five times at 250 kHz; H755 bus adapters were build-tested only in that phase. Later SPI/DMA hardware results are recorded below.
 - [x] Remove task-index assumptions from watchdog HIL fault injection. H563 now locates `health.Heartbeat` by name and passes with the optional SD module; H755 uses the same helper but has not been hardware-rerun for this test change.
 - [x] Validate H563 I2C1 PB8/PB9 with MCP3425 at 0x68: three address scans and 30 one-shot conversions, watchdog/fault and zero-heap checks passed. Optional `i2c_adc_probe` fixture provides `i2c scan`, `i2c stats`, and `adc sample`.
-- [ ] Qualify H755 SPI/I2C with fixtures and additional SPI modes/speeds. Optimize the reusable SD reader beyond its fixed response capture window.
-- [ ] Add SPI DMA after the fake and interrupt-driven H563/H755 HAL backends, particularly for SPI SD-card throughput. Preserve the portable transaction API; no I2C DMA work is currently planned.
+- [x] H755 SPI1 SD fixture on PA5/PA6/PB5, PD14 GPIO CS. Share the SD/FatFs
+  code and HIL cases; five read-only probes (60 CRC-checked sector reads),
+  mount/list/error/remount checks passed. Move fixed lwIP pools to AXI SRAM,
+  preserving 44,072 bytes of DTCM stack (3,480 observed, zero heap attempts).
+  H755 console/network/reset HIL passed 4/4; ASan/UBSan 33/33, both A/B
+  builds, H755 standalone build, format/lint passed. No card or OTP writes.
+- [x] H755 opt-in SD write HIL: create/sync/close/remount/exact readback,
+  overwrite refusal, read-only write/remove refusal, removal and absence
+  after remount passed. Only the uniquely named test file was created/removed;
+  zero heap attempts, 4,064 observed stack bytes, healthy watchdog/no retained
+  fault. No OTP writes; power-loss/media-removal qualification remains open.
+- [ ] Qualify H755 I2C and additional SPI modes/speeds.
+- [x] Replace fixed-window SD reads with bounded incremental response/token
+  handling and exact payload reads; shared probe/transport buffer is 516 bytes.
+- [x] Add optional H755 SPI1 RX/TX DMA for SD payloads without changing the
+  portable transaction API. Private AXI staging preserves DTCM buffer support.
+  H755 SD HIL 3/3 and console/network HIL 4/4 passed. Five identical probes
+  used 4,103 SPI/DMA IRQ entries versus 45,915 without DMA; create/remove took
+  93/50 ms after incremental reads. ASan/UBSan 33/33, targeted TSan 3/3,
+  H563/H755 A/B builds, format/lint passed; H563 was not reflashed.
+- [x] Add H563 SPI1 DMA with GPDMA1 channels 1/2 and private SRAM staging;
+  UART retains channel 0. Read-only SD/filesystem HIL passed, including five
+  probes/60 CRC-checked sector reads (30,720 DMA bytes, 7,113 IRQ entries).
+  Temporary-file create/readback/remove and rejection of the H755 package
+  passed; observed stack peaks 3,568/4,016 bytes with zero heap attempts.
+  H563 console/network/reset HIL 6/6, ASan/UBSan 33/33, portable Python
+  21 passed (5 opt-in skips), H563/H755 A/B builds, the H563 IRQ-only
+  no-networking build, formatting and lint passed. No I2C DMA work is planned.
+- [ ] Qualify SPI DMA with D-cache enabled, injected timeout/error cleanup, card removal and recovery
+  from an interrupted data block. An aborted DMA read during bring-up left this
+  card sending the remainder of its block; repeated probes eventually restored
+  it, but one-shot reinitialization after that fault is not guaranteed.
 
 ## For STM32
 
+- [ ] Audit H755 data placement: keep the stack and frequently accessed control
+  state in DTCM; move bulk queues, logging/console buffers, SD capture buffers
+  and filesystem working storage to AXI SRAM where appropriate. Separate
+  buffers from control objects as needed, preserve initialization and DMA/cache
+  coherency requirements, and measure memory use and timing before/after.
 - [x] Implement H563 A/B flash layout; see bootloader and reliability above.
 - [x] Implement H563 bootloader selection by installation order and CRC-valid eligibility.
 - [x] Implement cooperative inactive-slot OTA with chunk/final CRC, injected flash driver, and explicit flash layout.
@@ -189,6 +247,10 @@ section supersedes older H755 hardware deferrals; remaining gaps are explicit.
 
 - [x] Replace the fixed SD write delay with bounded SPI response polling,
   preserving CS, the original deadline, normal cleanup and per-window counters.
-- [ ] Extract SD initialization from the example into storage/sd.
+- [x] Extract SD initialization into `storage/sd/initializer.h`: injected SPI
+  handle, nonblocking request/tick/result, bounded idle retries, reusable
+  completion and diagnostics. Keep board configuration and read-only
+  inspection in the example. ASan/UBSan 33/33, H563 A/B build, format/lint and
+  read-only H563 SD/filesystem HIL 2/2 passed; no card or OTP writes.
 - [ ] Design a cooperative wait helper that distinguishes timeout from released
   peripheral-buffer ownership; add explicit watchdog/yield integration coverage.

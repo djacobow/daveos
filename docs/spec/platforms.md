@@ -454,6 +454,13 @@ normal cleanup before the completion callback. No caller predicate or callback
 executes between windows. This is protocol polling, not automatic retry of
 failed transactions. IRQ processing retains the existing bounded work budget.
 
+`spi::read_until(response, idle=0xff, maximum_bytes=0)` is the byte-preserving
+variant: require a one-byte response span and clock until that byte differs
+from idle. Retain the response; do not consume later payload bytes. A nonzero
+32-bit byte limit returns `response_mismatch` when exhausted. With zero, only
+the required explicit transaction timeout bounds the search. Ownership,
+attempt accounting, bounded IRQ work and cleanup follow `poll_response`.
+
 ### SPI initialization clocks with CS inactive
 
 Provide a dedicated SPI operation type for generating clocks while CS remains
@@ -748,10 +755,12 @@ Start with deterministic fake SPI/I2C backends and interrupt-driven STM32H563
 and STM32H755 backends. Keep the portable transaction and completion contracts
 independent of the transfer mechanism.
 
-Defer SPI DMA to a subsequent phase, particularly for efficient SPI SD-card
-transfers. No I2C DMA implementation is planned initially or as an expected
-follow-up; revisit only if an actual workload justifies it. The DMA buffer and
-cache contracts above apply when a backend implements DMA.
+The subsequent H755 phase adds optional SPI1 DMA for SD payloads through an
+injected engine with private AXI staging, preserving caller-buffer ownership
+and DTCM compatibility. H563 adds GPDMA1 channels 1/2 with private SRAM
+staging through the same engine contract. No I2C DMA implementation
+is planned; revisit only if an actual workload justifies it. The DMA buffer and
+cache contracts above apply.
 
 ### Fake-backend validation
 
@@ -803,11 +812,17 @@ card or display. Full device-protocol models are not required for this phase.
   card has an MBR FAT32 partition; the probe checks its BPB without mounting.
   This is not filesystem consistency testing or qualification of every SPI
   mode. H563 I2C1 now has MCP3425 scan/conversion coverage (see below);
-  H755 bus adapters remain build-tested only. See [SD inspection](../spi-i2c.md#h563-sd-fixture-and-validation).
+  Both boards now have SD/FatFs read/write and RX/TX DMA hardware coverage;
+  H755 I2C remains build-only. See [SD inspection](../spi-i2c.md#nucleo-sd-fixture-and-validation).
 - The optional [FatFs worker](../storage.md) uses the initialized card
-  through an injected SD reader. SPI DMA, efficient staged/multiblock capture,
-  and wider
-  bus/device hardware qualification remain separate work.
+  through an injected SD transport. Incremental response/token reads use a
+  516-byte capture buffer. H755 DMA1 stream 1/2 stage payloads in two aligned
+  512-byte AXI buffers, leaving UART stream 0 independent. H563 GPDMA1
+  channels 1/2 use two private 512-byte SRAM buffers, leaving UART channel 0
+  independent. Commands and tails still use interrupts on both boards.
+  Both DMA directions and SPI must complete before RX is copied back. Failed cleanup faults the controller without retaining caller
+  buffers. Multiblock transfers, higher speeds, injected DMA faults and wider
+  bus/device qualification remain separate work.
 
 ## Injected flash and host file backend
 

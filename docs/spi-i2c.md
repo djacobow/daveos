@@ -52,6 +52,11 @@ borrowed 1–32-byte receive window until its **last** byte matches under the ma
 It keeps CS asserted and requires an explicit transaction timeout; the deadline
 never restarts. Each window counts as a read attempt, but successful polling
 completes one logical action. Backend errors abort immediately.
+`read_until(response, idle=0xff, maximum_bytes=0)` reads one byte at a time
+until it differs from `idle`, preserving subsequent payload bytes for the next
+action. The response span must contain exactly one byte. An explicit transaction
+timeout is required; a nonzero byte limit also bounds the search, returning
+`response_mismatch` on exhaustion. A zero limit relies on the deadline.
 CS stays asserted across the list, including pauses and polling.
 `idle_clocks(80)` is a standalone transaction: MOSI high, CS inactive, positive
 multiple of eight clock cycles. Idle clocks count as a transaction, not a
@@ -190,12 +195,35 @@ controller, so recovery can run after scheduler timers become available.
 the buses during initialization and queues startup recovery for its first task;
 no transfer or GPIO pulse runs during constructors or module initialization.
 Other users of the HAL must explicitly submit reset when `faulted()` is true.
-DMA is not implemented. SPI DMA remains a separate follow-up.
+I2C remains interrupt-driven. The shared SPI backend accepts an optional injected
+DMA engine; without one it retains the FIFO/interrupt path. H755's `Spi1Dma`
+uses DMA1 stream 1 RX and stream 2 TX (DMAMUX requests 37/38), with FIFO enabled
+and byte-sized transfers. Reserve both streams and route their IRQs to the
+same controller as SPI1. UART's stream 0 remains independent.
 
-## H563 SD fixture and validation
+Actions of at least 32 bytes use DMA in chunks of up to 512 bytes. Smaller
+commands, token polling and tails use interrupts. The engine owns aligned TX/RX
+staging in AXI SRAM: application spans may still reside in DTCM, which DMA1
+cannot access. TX is copied/cleaned before starting; RX is invalidated/copied
+only after both streams and SPI complete. Completion/timeout cleanup disables
+DMA requests, stops both streams, deasserts CS and resets SPI. A failed stop
+faults the controller; private staging prevents DMA retaining borrowed caller
+buffers. Do not destroy/reuse the engine or its staging until it is quiescent.
+H563's `Spi1Dma` uses GPDMA1 channel 1 RX and channel 2 TX (requests 6/7),
+with byte-sized single beats and two private 512-byte buffers in ordinary
+nonsecure SRAM. UART retains channel 0. Both DMA IRQs route to the SPI
+controller. Stop suspends an enabled channel and waits for quiescence before
+resetting that channel, with bounded polling; it never resets the DMA controller.
+See [RM0481](https://www.st.com/resource/en/reference_manual/dm00733993.pdf)
+for the GPDMA suspend/reset sequence.
 
-Enable `-Dspi_sd_probe=true` with `-Dboard=h563 -Dexamples=true`. The optional
-module uses SPI1 on PA5 SCK, PG9 MISO, PB5 MOSI, and PD14 GPIO CS. Its kernel
+## Nucleo SD fixture and validation
+
+Enable `-Dspi_sd_probe=true -Dexamples=true` with `-Dboard=h563` or
+`-Dboard=h755`. Both use SPI1 on PA5 SCK, PB5 MOSI and PD14 GPIO CS.
+MISO is PG9 on H563 and PA6 on H755, selected by the board's `sd_board.h`.
+The H755 AF5 assignments are listed in the [ST datasheet](https://www.st.com/resource/en/datasheet/stm32h755zi.pdf).
+The kernel
 clock is HSI/CKPER. Startup uses 250 kHz, and sector verification also uses
 1 MHz (below the card's CSD maximum). The application must not assign these
 pins or change CKPER to another source while using the fixture.
@@ -219,11 +247,15 @@ The `sd probe` command remains a read-only diagnostic. No sector
 writes, formatting, mounting, directory traversal or filesystem consistency
 checks occur within the probe. Optional `-Dfatfs=true` adds a separate
 [filesystem worker](storage.md) with `fs mount/ls/read/unmount`. The fixed SPI action-list API keeps CS asserted for the command
-and data capture. A 13,024-byte module-owned receive buffer accommodates 100 ms
-of token-wait clocks at 1 MHz plus framing and a sector. Each operation clocks
-the whole capture window, even if the card answers early. Transfers are
-asynchronous but deliberately inefficient; this is not the eventual high-speed
-SD/FatFS implementation. A private fixture backend config copy allows speed
+and data capture. `storage/sd/read.h` builds a shared sequence that reads R1
+(with an eight-byte response bound), waits for the data token, rejects bad
+responses before payload transfer, then reads only the payload and CRC. The
+module's receive buffer is 516 bytes; the transaction deadline still bounds
+an absent response. Both boards default to DMA for sector payloads; set
+`-Dspi_sd_dma=false` to compare the interrupt-only path. The option applies to both boards.
+`sd stats` reports SPI/DMA IRQ entries, backend polls, DMA chunks and bytes
+since startup (32-bit counters wrap; compare unsigned deltas). Poll counts are
+not a CPU utilization measurement. A private fixture backend config copy allows speed
 changes only between completed operations without introducing a general HAL
 reconfiguration API.
 
@@ -247,9 +279,15 @@ watchdog and empty retained-fault checks. The connected card reports:
 The expansion passed host 30/30, ASan/UBSan 30/30, formatting, cppcheck
 (including explicit inspection-header checks), an H563 A/B firmware build,
 and the SPI HIL case above. This does not qualify other SPI modes, high-speed signal
-integrity, arbitrary sectors, or filesystem contents. H755 bus adapters remain
-build-tested only. H563 I2C now has the MCP3425 fixture described below; H755 I2C remains
-build-tested only.
+integrity, arbitrary sectors, or filesystem contents. The subsequent H755
+bring-up passed the same five inspections and the read-only filesystem HIL
+case (mount/list/error handling/remount), with zero heap attempts and 3,480
+observed stack bytes. A subsequent H755 opt-in create/readback/remove HIL
+cycle passed with 4,064 observed stack bytes and zero heap attempts; see
+[storage validation](storage.md#validation). Other SPI modes, higher rates,
+media removal and write power-loss behavior remain unqualified.
+H563 I2C has the MCP3425 fixture described below; H755 I2C remains build-tested
+only.
 
 ## H563 MCP3425 fixture
 

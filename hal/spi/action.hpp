@@ -12,7 +12,8 @@ namespace daveos::hal::spi {
     pause,
     idle_clocks,
     check_response,
-    poll_response
+    poll_response,
+    read_until
   };
 
   // Borrowed buffers: exchange spans must be equal-sized and nonoverlapping.
@@ -76,6 +77,15 @@ namespace daveos::hal::spi {
             window,
             std::uint64_t{expected} | (std::uint64_t{mask} << 8),
             fill};
+  }
+
+  // Read one byte at a time, stopping at the first non-idle byte without
+  // consuming any following payload. Requires a whole-transaction timeout.
+  // A nonzero byte limit rejects an idle-only response as response_mismatch.
+  constexpr Action read_until(std::span<std::uint8_t> response,
+                              std::uint8_t idle = 0xff,
+                              std::uint32_t maximum_bytes = 0) {
+    return {Operation::read_until, {}, response, maximum_bytes, idle};
   }
 
   using Result = hal::Result<Action>;

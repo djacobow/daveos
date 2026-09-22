@@ -66,16 +66,21 @@ jobs:
           git -C platform/stm32h5/STM32CubeH5 submodule update --init --recursive Drivers/CMSIS/Device/ST/STM32H5xx Drivers/STM32H5xx_HAL_Driver
       - run: meson setup build/arm --cross-file meson/stm32.ini -Dexamples=true -Dversion_build="$GITHUB_RUN_NUMBER"
       - run: meson compile -C build/arm
-      - name: Build optional read-only H563 SD fixture
+      - name: Build optional H563 SD filesystem and file updater
         run: |
-          meson configure build/arm -Dspi_sd_probe=true -Dfatfs=true
+          meson configure build/arm -Dspi_sd_probe=true -Dfatfs=true -Dbootloader=true
           meson compile -C build/arm
-          meson configure build/arm -Dspi_sd_probe=false -Dfatfs=false
+          meson configure build/arm -Dspi_sd_probe=false -Dfatfs=false -Dbootloader=false
       - run: |
           git submodule update --init platform/stm32h7/STM32CubeH7
           git -C platform/stm32h7/STM32CubeH7 submodule update --init --recursive Drivers/CMSIS/Device/ST/STM32H7xx Drivers/STM32H7xx_HAL_Driver
       - run: meson setup build/h755 --cross-file meson/stm32.ini -Dboard=h755 -Dexamples=true -Dversion_build="$GITHUB_RUN_NUMBER"
       - run: meson compile -C build/h755
+      - name: Build optional H755 SD filesystem and file updater
+        run: |
+          meson configure build/h755 -Dspi_sd_probe=true -Dfatfs=true -Dbootloader=true
+          meson compile -C build/h755
+          meson configure build/h755 -Dspi_sd_probe=false -Dfatfs=false -Dbootloader=false
       - name: Switch boards without replacing the cross file
         run: |
           meson configure build/arm -Dboard=h755

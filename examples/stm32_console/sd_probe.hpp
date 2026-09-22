@@ -7,8 +7,9 @@
 #include "core/state_machine/state_machine.hpp"
 #include "hal/adapters/daveos.hpp"
 #include "hal/controller.hpp"
-#include "platform/stm32h5/bus.h"
+#include "sd_board.h"
 #include "sd_inspect.h"
+#include "storage/sd/initializer.h"
 #include "storage/sd/transport.h"
 
 namespace app {
@@ -16,11 +17,11 @@ namespace app {
 
   namespace hal = daveos::hal;
   namespace spi = hal::spi;
-  namespace h5 = daveos::platform::stm32h5;
 
   // Read-only SPI fixture: identify the card, verify reads and inspect its BPB.
-  // No block writes, filesystem changes or DMA. The periodic task owns all
-  // protocol state; interrupt callbacks only publish the HAL completion result.
+  // No block writes or filesystem changes in the probe. The periodic task owns
+  // all protocol state; interrupt callbacks only publish the HAL completion
+  // result.
   class SdProbe : public core::Module<SdProbe, Event> {
     using Clock = hal::DaveOsClock<core::SchedulerInterface<Event>, Platform>;
 
@@ -28,16 +29,16 @@ namespace app {
     // use <=400 kHz and completed transactions can switch to a conservative
     // data rate. Only this module owns the bus; speed changes occur in Tick
     // after completion, never while a HAL operation owns the peripheral.
-    class SdBus : public h5::SpiBus {
+    class SdBus : public board::SdSpiBus {
      public:
-      SdBus()
-          : h5::SpiBus(SPI1, SPI1_IRQn, HSI_VALUE,
-                       {nullptr, Prepare, Reset, nullptr}) {}
+      explicit SdBus(const daveos::platform::stm32::detail::SpiDma& dma)
+          : board::SdSpiBus(SPI1, SPI1_IRQn, HSI_VALUE,
+                            {nullptr, Prepare, Reset, nullptr}, dma) {}
 
       hal::Status init(std::span<const Config> devices) {
         configs_[0] = devices[0];
         configs_[0].maximum_hz = kStartupHz;
-        return h5::SpiBus::init(configs_);
+        return board::SdSpiBus::init(configs_);
       }
 
       void speed(std::uint32_t hz) { configs_[0].maximum_hz = hz; }
@@ -46,25 +47,24 @@ namespace app {
       std::array<Config, 1> configs_{};
     };
 
-    using Bus = hal::Controller<SdBus, Clock, h5::BusCritical, 1>;
+    using Bus = hal::Controller<SdBus, Clock, board::SdBusCritical, 1>;
     static constexpr std::uint32_t kStartupHz = 400000;
     static constexpr std::uint32_t kReadHz = 1000000;
     static constexpr std::uint32_t kReadRepeats = 3;
     static constexpr std::size_t kSectorSize = 512;
-    // Capture 100 ms of token-wait clocks plus R1, token, payload and CRC.
-    // A prototype fixed-list transaction trades RAM/bandwidth for keeping CS
-    // held without blocking the scheduler or expanding the portable HAL API.
-    static constexpr std::size_t kReceiveCapacity =
-        kReadHz / 80 + 8 + 1 + kSectorSize + 2 + 1;
+    // R1, data token, one sector and its CRC; no fixed token-wait window.
+    static constexpr std::size_t kReceiveCapacity = kSectorSize + 4;
     static constexpr auto kPeriod = std::chrono::milliseconds{1};
     static constexpr auto kTransferTimeout = std::chrono::milliseconds{250};
-    static constexpr std::uint32_t kStartupLimit = 1000;
 
    public:
-    explicit SdProbe(Platform& platform)
+    explicit SdProbe(Platform& platform, bool dma = false)
         : clock_(platform),
+          dma_(dma),
+          backend_(dma_.operations()),
           bus_(backend_, clock_, critical_,
-               {{{{GPIOD, GPIO_PIN_14, false}, kReadHz, 0, false}}}) {}
+               {{{{GPIOD, GPIO_PIN_14, false}, kReadHz, 0, false}}}),
+          initializer_(bus_.device<0>()) {}
 
     static constexpr const char* name() { return "sd"; }
 
@@ -73,9 +73,12 @@ namespace app {
     }
 
     static constexpr auto commands() {
-      return std::array{DAVEOS_COMMAND(
-          SdProbe, Probe, "probe",
-          "Identify SD, CRC-check sectors and inspect filesystem (read-only)")};
+      return std::array{
+          DAVEOS_COMMAND(SdProbe, Probe, "probe",
+                         "Identify SD, CRC-check sectors and inspect "
+                         "filesystem (read-only)"),
+          DAVEOS_COMMAND(SdProbe, Stats, "stats",
+                         "SPI polls and DMA payload counters (since startup)")};
     }
 
     core::Status init(core::InitStage stage) {
@@ -88,7 +91,10 @@ namespace app {
       return core::Status::ok;
     }
 
-    void interrupt() { bus_.interrupt(); }
+    void interrupt() {
+      ++interrupts_;
+      bus_.interrupt();
+    }
 
     core::Status Probe() {
       if (running_ || requested_ || leased_) {
@@ -96,6 +102,17 @@ namespace app {
       }
       ready_ = false;
       requested_ = true;
+      return core::Status::ok;
+    }
+
+    core::Status Stats() {
+      critical_.enter();
+      const auto counters = backend_.counters();
+      const auto interrupts = interrupts_;
+      critical_.leave();
+      I_("SPI1 IRQs=%" PRIu32 " polls=%" PRIu32 " DMA chunks=%" PRIu32
+         " bytes=%" PRIu32,
+         interrupts, counters.polls, counters.dma_chunks, counters.dma_bytes);
       return core::Status::ok;
     }
 
@@ -180,7 +197,7 @@ namespace app {
                }}};
     }
 
-    enum class State { idle, clocks, command, gap, done, failed, count };
+    enum class State { idle, initializing, command, gap, done, failed, count };
 
     struct Machine
         : core::StateMachine<Machine, State, State::idle,
@@ -200,11 +217,24 @@ namespace app {
               p.partition_index_ = 0;
               p.lba_ = 0;
               p.error_ = "invalid command response";
-              p.attempts_ = 0;
-              ns = State::clocks;
+              (void)p.initializer_.request();
+              ns = State::initializing;
             }
             break;
-          case State::clocks:
+          case State::initializing:
+            p.initializer_.tick();
+            if (const auto result = p.initializer_.result()) {
+              p.ocr_ = result->ocr;
+              p.command_ = result->command;
+              if (result->status == hal::Status::ok) {
+                p.command_ = 9;
+                ns = State::gap;
+              } else {
+                p.error_ = enum_name(result->status);
+                ns = State::failed;
+              }
+            }
+            break;
           case State::gap:
             if (auto result = p.completion_.result()) {
               ns = result->status == hal::Status::ok ? State::command
@@ -217,63 +247,8 @@ namespace app {
                 ns = State::failed;
                 break;
               }
-              std::size_t r = 0;
-              while (r < 8 && p.rx_[r] == 0xff) {
-                ++r;
-              }
-              if (r == 8) {
-                ns = State::failed;
-                break;
-              }
-              const auto response = p.rx_[r];
               ns = State::gap;
               switch (p.command_) {
-                case 0:
-                  if (response == 1) {
-                    p.command_ = 8;
-                  } else {
-                    ns = State::failed;
-                  }
-                  break;
-                case 8:
-                  if (response == 1 && r + 4 < p.rx_.size() &&
-                      p.rx_[r + 3] == 1 && p.rx_[r + 4] == 0xaa) {
-                    p.command_ = 55;
-                  } else {
-                    ns = State::failed;
-                  }
-                  break;
-                case 55:
-                  if (response <= 1) {
-                    p.command_ = 41;
-                  } else {
-                    ns = State::failed;
-                  }
-                  break;
-                case 41:
-                  if (response == 0) {
-                    p.command_ = 58;
-                  } else if (response == 1 && ++p.attempts_ < kStartupLimit) {
-                    p.command_ = 55;
-                  } else {
-                    ns = State::failed;
-                  }
-                  break;
-                case 58:
-                  if (response == 0 && r + 4 < p.rx_.size()) {
-                    p.ocr_ = (std::uint32_t{p.rx_[r + 1]} << 24) |
-                             (std::uint32_t{p.rx_[r + 2]} << 16) |
-                             (std::uint32_t{p.rx_[r + 3]} << 8) | p.rx_[r + 4];
-                    if ((p.ocr_ & 0xc0000000) != 0xc0000000) {
-                      p.error_ = "requires ready SDHC/SDXC card";
-                      ns = State::failed;
-                    } else {
-                      p.command_ = 9;
-                    }
-                  } else {
-                    ns = State::failed;
-                  }
-                  break;
                 case 9:
                 case 10:
                 case 17:
@@ -295,33 +270,18 @@ namespace app {
       }
 
       void OnEnter(State state, SdProbe& p) {
-        if (state == State::clocks || state == State::gap) {
-          p.actions_[0] = spi::idle_clocks(state == State::clocks ? 80 : 8);
+        if (state == State::gap) {
+          p.actions_[0] = spi::idle_clocks(8);
           (void)p.completion_.start(p.bus_.device<0>(),
                                     std::span{p.actions_}.first(1),
                                     kTransferTimeout);
         } else if (state == State::command) {
-          const std::uint32_t argument = p.command_ == 8    ? 0x1aa
-                                         : p.command_ == 41 ? 0x40000000
-                                         : p.command_ == 17 ? p.lba_
-                                                            : 0;
-          p.tx_ = {static_cast<std::uint8_t>(0x40 | p.command_),
-                   static_cast<std::uint8_t>(argument >> 24),
-                   static_cast<std::uint8_t>(argument >> 16),
-                   static_cast<std::uint8_t>(argument >> 8),
-                   static_cast<std::uint8_t>(argument),
-                   static_cast<std::uint8_t>(p.command_ == 0   ? 0x95
-                                             : p.command_ == 8 ? 0x87
-                                                               : 1)};
+          p.tx_ = daveos::storage::sd::command(p.command_,
+                                               p.command_ == 17 ? p.lba_ : 0);
           p.rx_.fill(0xff);
-          p.wait_bytes_ = p.backend_.rate(0) / 80 + 1;
-          const bool data =
-              p.command_ == 9 || p.command_ == 10 || p.command_ == 17;
-          p.receive_size_ = data ? 8 + p.wait_bytes_ +
-                                       (p.command_ == 17 ? kSectorSize : 16) + 2
-                                 : 16;
-          p.actions_ = {spi::write(p.tx_),
-                        spi::read(std::span{p.rx_}.first(p.receive_size_))};
+          p.receive_size_ = (p.command_ == 17 ? kSectorSize : 16) + 4;
+          p.actions_ = daveos::storage::sd::read_actions(
+              p.tx_, std::span{p.rx_}.first(p.receive_size_));
           (void)p.completion_.start(p.bus_.device<0>(), p.actions_,
                                     kTransferTimeout);
         } else if (state == State::done || state == State::failed) {
@@ -340,6 +300,12 @@ namespace app {
            " (read-only probe)",
            backend_.rate(0), ocr_);
       } else {
+        if (const auto init = initializer_.result();
+            init && init->status != hal::Status::ok) {
+          E_("SD initialization failed at CMD%" PRIu32 ": %s", init->command,
+             enum_name(init->status));
+          return;
+        }
         const auto result = completion_.result();
         E_("SD probe failed at CMD%" PRIu32 ": %s (%s); first bytes %02" PRIx32
            " %02" PRIx32 " %02" PRIx32 " %02" PRIx32,
@@ -353,9 +319,8 @@ namespace app {
     }
 
     bool ReadData() {
-      const auto data =
-          sd::data(std::span{rx_}.first(receive_size_),
-                   command_ == 17 ? kSectorSize : 16, wait_bytes_);
+      const auto data = sd::data(std::span{rx_}.first(receive_size_),
+                                 command_ == 17 ? kSectorSize : 16, 1);
       if (!data) {
         error_ = "missing/error data token, truncated data or CRC mismatch";
         return false;
@@ -504,8 +469,7 @@ namespace app {
       gpio.Pin = GPIO_PIN_5;
       HAL_GPIO_Init(GPIOA, &gpio);
       HAL_GPIO_Init(GPIOB, &gpio);
-      gpio.Pin = GPIO_PIN_9;
-      HAL_GPIO_Init(GPIOG, &gpio);
+      board::PrepareSdMiso(gpio);
       return hal::Status::ok;
     }
 
@@ -517,9 +481,12 @@ namespace app {
     }
 
     Clock clock_;
-    h5::BusCritical critical_;
+    board::SdBusCritical critical_;
+    std::uint32_t interrupts_ = 0;
+    board::SdDma dma_;
     SdBus backend_;
     Bus bus_;
+    daveos::storage::sd::Initializer initializer_;
     spi::Completion completion_;
     Machine machine_;
     std::array<std::uint8_t, 6> tx_{};
@@ -527,12 +494,12 @@ namespace app {
     std::array<std::uint8_t, kSectorSize> sector_{};
     std::array<sd::Partition, 4> partitions_{};
     sd::Card card_{};
-    std::size_t receive_size_ = 0, wait_bytes_ = 0, partition_index_ = 0;
+    std::size_t receive_size_ = 0, partition_index_ = 0;
     std::uint32_t lba_ = 0, reads_ = 0;
     const char* error_ = "";
     bool finished_ = false;
-    std::array<spi::Action, 2> actions_{};
-    std::uint32_t command_ = 0, attempts_ = 0, ocr_ = 0;
+    std::array<spi::Action, 6> actions_{};
+    std::uint32_t command_ = 0, ocr_ = 0;
     bool requested_ = false, running_ = false, ready_ = false, leased_ = false;
   };
 

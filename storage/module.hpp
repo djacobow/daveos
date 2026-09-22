@@ -6,6 +6,7 @@
 
 #include "core/schedule/module.hpp"
 #include "core/state_machine/state_machine.hpp"
+#include "read_file.h"
 #include "volume.h"
 
 namespace daveos::storage {
@@ -109,7 +110,63 @@ namespace daveos::storage {
       return Submit(Operation::read, path);
     }
 
+    // Address-only wiring; reservation happens later and excludes queued and
+    // executing filesystem commands, even across cooperative yields.
+    ReadFile read_file() {
+      return {
+          this,
+          [](void* p) {
+            auto& m = *static_cast<Module*>(p);
+            if (m.busy_) {
+              return core::Status::busy;
+            }
+            if (!m.volume_.mounted()) {
+              return core::Status::not_running;
+            }
+            if (!m.volume_.read_only()) {
+              return core::Status::rejected;
+            }
+            m.busy_ = true;
+            return core::Status::ok;
+          },
+          [](void* p) { static_cast<Module*>(p)->busy_ = false; },
+          [](void* p, std::string_view path) {
+            return FileStatus(static_cast<Module*>(p)->volume_.open(path));
+          },
+          [](void* p, std::span<std::byte> bytes, std::uint32_t& count) {
+            return FileStatus(static_cast<Module*>(p)->volume_.read(
+                {reinterpret_cast<std::uint8_t*>(bytes.data()), bytes.size()},
+                count));
+          },
+          [](void* p, std::uint32_t offset) {
+            return FileStatus(static_cast<Module*>(p)->volume_.seek(offset));
+          },
+          [](void* p) {
+            return FileStatus(static_cast<Module*>(p)->volume_.close());
+          }};
+    }
+
    private:
+    static core::Status FileStatus(FRESULT result) {
+      switch (result) {
+        case FR_OK:
+          return core::Status::ok;
+        case FR_LOCKED:
+          return core::Status::busy;
+        case FR_NOT_READY:
+          return core::Status::not_running;
+        case FR_NO_FILE:
+        case FR_NO_PATH:
+          return core::Status::not_found;
+        case FR_INVALID_NAME:
+        case FR_INVALID_PARAMETER:
+          return core::Status::invalid_argument;
+        case FR_TIMEOUT:
+          return core::Status::timeout;
+        default:
+          return core::Status::io_error;
+      }
+    }
     enum class Operation { mount, unmount, list, read, create, remove };
     enum class State {
       idle,

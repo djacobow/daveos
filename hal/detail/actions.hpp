@@ -40,7 +40,8 @@ namespace daveos::hal::detail {
   }
 
   inline bool Reads(const spi::Action& a) {
-    return a.operation == spi::Operation::poll_response ||
+    return a.operation == spi::Operation::read_until ||
+           a.operation == spi::Operation::poll_response ||
            a.operation == spi::Operation::read ||
            a.operation == spi::Operation::exchange;
   }
@@ -59,17 +60,27 @@ namespace daveos::hal::detail {
   }
 
   inline bool Polls(const spi::Action& a) {
-    return a.operation == spi::Operation::poll_response;
+    return a.operation == spi::Operation::poll_response ||
+           a.operation == spi::Operation::read_until;
   }
 
   inline bool Polls(const i2c::Action&) { return false; }
 
   inline bool PollMatched(const spi::Action& a) {
+    if (a.operation == spi::Operation::read_until) {
+      return a.rx.front() != a.fill;
+    }
     return (a.rx.back() & static_cast<std::uint8_t>(a.amount >> 8)) ==
            static_cast<std::uint8_t>(a.amount);
   }
 
   inline bool PollMatched(const i2c::Action&) { return false; }
+
+  inline std::uint64_t PollLimit(const spi::Action& a) {
+    return a.operation == spi::Operation::read_until ? a.amount : 0;
+  }
+
+  inline std::uint64_t PollLimit(const i2c::Action&) { return 0; }
 
   inline spi::Action TransferAction(const spi::Action& a) {
     return Polls(a) ? spi::read(a.rx, a.fill) : a;
@@ -125,6 +136,12 @@ namespace daveos::hal::detail {
           return Status::invalid_argument;
         }
         n = a.tx.size();
+        break;
+      case spi::Operation::read_until:
+        if (a.rx.size() != 1 || !a.tx.empty() || a.amount > UINT32_MAX) {
+          return Status::invalid_argument;
+        }
+        n = 1;
         break;
       case spi::Operation::poll_response:
         if (a.rx.empty() || a.rx.size() > 32 || !a.tx.empty() ||

@@ -4,7 +4,9 @@ namespace daveos::net {
 
 
   void UpdateServer::stop() {
-    engine_.abort();
+    if (!engine_.reserved()) {
+      engine_.abort();
+    }
     server_.stop();
     protocol_.reset();
   }
@@ -17,7 +19,9 @@ namespace daveos::net {
     server_.poll();
     if (server_.session() != session_) {
       session_ = server_.session();
-      engine_.abort();
+      if (!engine_.reserved()) {
+        engine_.abort();
+      }
       protocol_.reset();
     }
     auto bytes = server_.peek();

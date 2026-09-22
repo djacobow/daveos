@@ -38,6 +38,9 @@ namespace daveos::update {
   }
 
   Status Protocol::Dispatch() {
+    if (engine_.reserved()) {
+      return Status::busy;
+    }
     auto data = std::span(payload_).first(length_);
     switch (static_cast<Operation>(opcode_)) {
       case Operation::begin:
@@ -80,7 +83,7 @@ namespace daveos::update {
     wire::write32(reply_, 12, reply_.size() - 16);
     wire::write32(reply_, 16, static_cast<std::uint32_t>(status));
     wire::write32(reply_, 20, static_cast<std::uint32_t>(engine_.state()));
-    wire::write32(reply_, 24, engine_.ready());
+    wire::write32(reply_, 24, !engine_.reserved() && engine_.ready());
     wire::write32(reply_, 28, engine_.next_offset());
     wire::write32(reply_, 32, engine_.total());
     wire::write32(reply_, 36, kBlockSize);

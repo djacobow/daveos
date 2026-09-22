@@ -194,6 +194,18 @@ SECTIONS
   PROVIDE( __arm32_tls_tcb_offset = MAX(8, __tls_align) );
   PROVIDE( __arm64_tls_tcb_offset = MAX(16, __tls_align) );
 
+  /* Fixed lwIP packet pools belong in bulk SRAM, not the small DTCM used
+     by the stack. Match before the general .bss wildcard. Startup explicitly
+     clears this region before constructors, including after warm reset. */
+  .lwip_bss (NOLOAD) :
+  {
+    . = ALIGN(32);
+    _slwip_bss = .;
+    *(.bss.memp_memory_*)
+    . = ALIGN(32);
+    _elwip_bss = .;
+  } >AXIRAM
+
   .bss (NOLOAD) : ALIGN(4)
   {
     /* This is used by the startup in order to initialize the .bss section */

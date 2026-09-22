@@ -58,7 +58,21 @@ namespace daveos::update {
 
     bool enabled() const { return enabled_; }
 
-    Status begin(std::span<const std::byte> header);
+    // Reserve for a local source without enabling network uploads. Network
+    // begin() retains its default null owner and fails busy while reserved.
+    Status reserve(const void* owner);
+    void release(const void* owner);
+
+    bool reserved() const { return owner_ != nullptr; }
+
+    Status inspect(std::span<const std::byte> bytes, Header& header) const {
+      return decode_header(bytes, layout_, destination(), header);
+    }
+
+    std::uint32_t destination() const { return 1 - running_slot_; }
+
+    Status begin(std::span<const std::byte> header,
+                 const void* owner = nullptr);
     Status chunk(std::uint32_t offset, std::span<const std::byte> data,
                  std::uint32_t crc);
     void abort(Status reason = Status::rejected);
@@ -101,6 +115,10 @@ namespace daveos::update {
 
     void Step(State cs, State& ns);
     void Fail(Status status);
+
+    bool Authorized() const { return enabled_ || owner_; }
+
+    const void* owner_ = nullptr;
     boot::Flash flash_;
     boot::Layout layout_;
     std::uint32_t running_slot_;

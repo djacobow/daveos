@@ -44,6 +44,10 @@ namespace daveos::storage {
 
     bool mounted() const { return mounted_; }
 
+    bool read_only() const { return mounted_ && !writable_; }
+
+    FRESULT seek(std::uint32_t offset);
+
    private:
     class Guard {
      public:
