@@ -138,6 +138,14 @@ interleaved callers, and exact hardware/software agreement.
 
 ### Watchdog and application health
 
+`watchdog::HealthModule<Event, Platform, Hardware>` (`watchdog/health.hpp`) is
+the scheduler module applications register: heartbeat and task-progress checks,
+retained failures, trial-image confirmation and the `health` commands. Hardware
+is a policy type with static reliability services (watchdog driver, retained
+fault record, failure recording, CRC backend); `platform/stm32/console/health.hpp`
+supplies the Nucleo one as `stm32::Health<Event>`. Host tests use an in-memory
+policy (`tests/health`).
+
 Provide an optional generic watchdog module with injected hardware support
 (STM32 IWDG). Start explicitly. Named application-provided checks run before
 hardware enable and before every task-driven feed. First check/feed failure

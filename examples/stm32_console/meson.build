@@ -38,7 +38,8 @@ components = {
   'health': {
     'deps': ['util_dep'],
     'sources': board == 'h563' ? ['../../platform/stm32h5/iwdg_handler.S'] : [],
-    'include': ['health.hpp'], 'members': ['Health health{platform};'],
+    'include': ['platform/stm32/console/health.hpp', 'util/version_stamp.h'],
+    'members': ['stm32::Health<Event> health{platform, daveos::build::kApplicationVersion};'],
     'modules': ['health'],
     'early': (get_option('bootloader') ? ['boot.attach(health);'] : [])
              + ['health.early(scheduler);'],

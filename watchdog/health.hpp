@@ -1,63 +1,85 @@
 #pragma once
 
+#include <array>
+#include <chrono>
 #include <cinttypes>
+#include <span>
+#include <string_view>
 
-#include "application.h"
-#include "util/version_stamp.h"
-#include "watchdog/confirmation.h"
-#include "watchdog/watchdog.hpp"
+#include "confirmation.h"
+#include "core/schedule/module.hpp"
+#include "util/crc32.h"
+#include "util/fault.h"
+#include "util/version.h"
+#include "watchdog.hpp"
 
-namespace app {
+namespace daveos::watchdog {
 
 
-  using std::chrono_literals::operator""ms;
-  using std::chrono_literals::operator""s;
-  inline constexpr auto kWatchdogTimeout = 5s;
-  inline constexpr auto kHealthPeriod = 100ms;
-  inline constexpr auto kHeartbeatPeriod = 100ms;
-  inline constexpr auto kHeartbeatMaxAge = 1s;
-  inline constexpr auto kProgressAllowance = 100ms;
-  inline constexpr auto kConfirmationDelay = 5s;
+  // Watchdog supervision as a scheduler module: a heartbeat task and a
+  // task-progress check feed the hardware watchdog through Controller, failures
+  // are retained across reset, and an optional confirmation callback approves
+  // a trial image after it has stayed healthy.
+  //
+  // Hardware supplies the board's reliability services as static members:
+  //   using Watchdog = ...;                      // driver() ->
+  //   watchdog::Driver static bool prepare_health(const util::Version&);  //
+  //   true after IWDG reset
+  //   [[noreturn]] static void initialization_failed();
+  //   static util::fault::Record& retained_fault();
+  //   static void record_failure(util::fault::Data);
+  //   static util::crc32::Backend crc32_backend();
+  //
+  // Construction is passive. early() (from the composition's early hook,
+  // before clock/peripheral setup) binds the scheduler progress source and
+  // starts the watchdog; a start failure is terminal.
+  template <typename Event, typename Platform, typename Hardware>
+  class HealthModule
+      : public core::Module<HealthModule<Event, Platform, Hardware>, Event> {
+    using Self = HealthModule<Event, Platform, Hardware>;
+    static constexpr auto kWatchdogTimeout = std::chrono::seconds{5};
+    static constexpr auto kHealthPeriod = std::chrono::milliseconds{100};
+    static constexpr auto kHeartbeatPeriod = std::chrono::milliseconds{100};
+    static constexpr auto kHeartbeatMaxAge = std::chrono::seconds{1};
+    static constexpr auto kProgressAllowance = std::chrono::milliseconds{100};
+    static constexpr auto kConfirmationDelay = std::chrono::seconds{5};
 
-  namespace wd = daveos::watchdog;
-  namespace fault = daveos::util::fault;
-  namespace hardware = board::reliability;
-
-  // All hardware work waits for explicit early_start()/module initialization.
-  // The scheduler callback is bound after static construction has completed.
-  class Health : public core::Module<Health, Event> {
    public:
-    explicit Health(Platform& platform)
+    // version is recorded with every retained failure; borrowed, so it must
+    // outlive the module (normally the build's version-stamp constant).
+    HealthModule(Platform& platform, const util::Version& version)
         : platform_(platform),
+          version_(version),
           checks_{{{"heartbeat", this,
                     [](void* p) {
-                      return static_cast<Health*>(p)->HeartbeatHealth();
+                      return static_cast<Self*>(p)->HeartbeatHealth();
                     }},
                    {"task_progress", this,
                     [](void* p) {
-                      return static_cast<Health*>(p)->ProgressHealth();
+                      return static_cast<Self*>(p)->ProgressHealth();
                     }}}},
           controller_(hardware_.driver(), checks_,
-                      {this, [](void* p, const wd::Failure& f) {
-                         static_cast<Health*>(p)->Record(f,
-                                                         fault::Kind::watchdog);
+                      {this, [](void* p, const Failure& f) {
+                         static_cast<Self*>(p)->Record(
+                             f, util::fault::Kind::watchdog);
                        }}) {}
 
     static constexpr const char* name() { return "health"; }
 
     static constexpr auto tasks() {
-      return std::array{DAVEOS_PERIODIC(Health, Heartbeat, kHeartbeatPeriod),
-                        DAVEOS_PERIODIC(Health, Check, kHealthPeriod)};
+      return std::array{
+          DAVEOS_PERIODIC(HealthModule, Heartbeat, kHeartbeatPeriod),
+          DAVEOS_PERIODIC(HealthModule, Check, kHealthPeriod)};
     }
 
     static constexpr auto commands() {
-      return std::array{DAVEOS_COMMAND(Health, Status, "status",
+      return std::array{DAVEOS_COMMAND(HealthModule, Status, "status",
                                        "Watchdog and confirmation health"),
-                        DAVEOS_COMMAND(Health, Fault, "fault",
+                        DAVEOS_COMMAND(HealthModule, Fault, "fault",
                                        "Show retained failure diagnostics"),
-                        DAVEOS_COMMAND(Health, Clear, "clear",
+                        DAVEOS_COMMAND(HealthModule, Clear, "clear",
                                        "Clear retained failure diagnostics"),
-                        DAVEOS_COMMAND(Health, Crc, "crc",
+                        DAVEOS_COMMAND(HealthModule, Crc, "crc",
                                        "Compare hardware and software CRC32",
                                        core::arg("text"))};
     }
@@ -66,7 +88,7 @@ namespace app {
     void attach_progress(Scheduler& scheduler) {
       scheduler_ = &scheduler;
       progress_ = [](void* p) {
-        return wd::check_progress(
+        return check_progress(
             static_cast<Scheduler*>(p)->progress(),
             std::chrono::duration_cast<std::chrono::microseconds>(
                 kProgressAllowance)
@@ -80,8 +102,7 @@ namespace app {
     }
 
     core::Status early_start() {
-      watchdog_reset_ =
-          hardware::prepare_health(daveos::build::kApplicationVersion);
+      watchdog_reset_ = Hardware::prepare_health(version_);
       return controller_.start(kWatchdogTimeout);
     }
 
@@ -98,14 +119,15 @@ namespace app {
     // Safe before HAL/clock setup; no timer/logger prerequisite.
     [[noreturn]] void initialization_failed(core::Status status,
                                             const char* module = "core") {
-      Record({status, "initialization", module}, fault::Kind::initialization);
-      hardware::initialization_failed();
+      Record({status, "initialization", module},
+             util::fault::Kind::initialization);
+      Hardware::initialization_failed();
     }
 
     core::Status init(core::InitStage stage) {
       if (stage == core::InitStage::stage1) {
         last_heartbeat_ = platform_.now();
-        if (controller_.state() != wd::Controller::State::running) {
+        if (controller_.state() != Controller::State::running) {
           return core::Status::initialization_failed;
         }
       } else {
@@ -120,7 +142,7 @@ namespace app {
    private:
     void Heartbeat() { last_heartbeat_ = platform_.now(); }
 
-    wd::Failure HeartbeatHealth() {
+    Failure HeartbeatHealth() {
       if (!dispatching_) {
         return {};
       }
@@ -130,16 +152,16 @@ namespace app {
               .count();
       return platform_.now() - last_heartbeat_ >
                      static_cast<core::Time>(maximum)
-                 ? wd::Failure{core::Status::health_failed}
-                 : wd::Failure{};
+                 ? Failure{core::Status::health_failed}
+                 : Failure{};
     }
 
-    wd::Failure ProgressHealth() {
+    Failure ProgressHealth() {
       if (!dispatching_) {
         return {};
       }
       return progress_ ? progress_(scheduler_)
-                       : wd::Failure{core::Status::not_running};
+                       : Failure{core::Status::not_running};
     }
 
     void Check() {
@@ -150,9 +172,8 @@ namespace app {
       controller_.tick();
       const auto previous = confirmation_.state();
       auto confirmed = confirmation_.tick(
-          platform_.now(),
-          controller_.state() == wd::Controller::State::running);
-      if (controller_.state() != wd::Controller::State::running) {
+          platform_.now(), controller_.state() == Controller::State::running);
+      if (controller_.state() != Controller::State::running) {
         if (!reported_) {
           reported_ = true;
           E_("Watchdog latched: %s %s.%s", controller_.failure().check,
@@ -163,8 +184,8 @@ namespace app {
       if (confirmed != core::Status::ok) {
         initialization_failed(confirmed, "boot");
       }
-      if (previous != wd::Confirmation::State::confirmed &&
-          confirmation_.state() == wd::Confirmation::State::confirmed) {
+      if (previous != Confirmation::State::confirmed &&
+          confirmation_.state() == Confirmation::State::confirmed) {
         if (confirms_image_) {
           I_("Healthy for five seconds; image confirmed");
         } else {
@@ -173,33 +194,33 @@ namespace app {
       }
     }
 
-    void Record(const wd::Failure& failure, fault::Kind kind) {
-      fault::Data data;
+    void Record(const Failure& failure, util::fault::Kind kind) {
+      util::fault::Data data;
       data.kind = kind;
-      data.version = daveos::build::kApplicationVersion;
+      data.version = version_;
       data.status = static_cast<std::uint32_t>(failure.status);
-      fault::copy_name(data.check, failure.check);
-      fault::copy_name(data.module, failure.module ? failure.module : "core");
-      fault::copy_name(data.task, failure.task);
+      util::fault::copy_name(data.check, failure.check);
+      util::fault::copy_name(data.module,
+                             failure.module ? failure.module : "core");
+      util::fault::copy_name(data.task, failure.task);
       data.expected = failure.expected;
       data.completed = failure.completed;
-      hardware::record_failure(data);
+      Hardware::record_failure(data);
     }
 
     core::Status Status() {
       I_("Watchdog %s; confirmation %s",
-         controller_.state() == wd::Controller::State::running ? "running"
-                                                               : "latched",
+         controller_.state() == Controller::State::running ? "running"
+                                                           : "latched",
          !confirms_image_ ? "not configured"
-         : confirmation_.state() == wd::Confirmation::State::confirmed
-             ? "confirmed"
-             : "waiting");
+         : confirmation_.state() == Confirmation::State::confirmed ? "confirmed"
+                                                                   : "waiting");
       return core::Status::ok;
     }
 
     core::Status Fault() {
-      fault::Data data;
-      if (fault::read(hardware::retained_fault(), data)) {
+      util::fault::Data data;
+      if (util::fault::read(Hardware::retained_fault(), data)) {
         W_("Retained failure: %s %s.%s status %s", data.check, data.module,
            data.task, enum_name(static_cast<core::Status>(data.status)));
         W_("CFSR=%08" PRIx32 " HFSR=%08" PRIx32 " SP=%08" PRIx32, data.cfsr,
@@ -218,13 +239,12 @@ namespace app {
 
     core::Status Crc(std::string_view text) {
       const auto bytes = std::as_bytes(std::span(text.data(), text.size()));
-      const daveos::util::crc32::Service service(hardware::crc32_backend());
+      const util::crc32::Service service(Hardware::crc32_backend());
       const auto value = service.calculate(bytes);
       const auto split = bytes.size() / 2;
       const auto incremental = service.update(
           service.calculate(bytes.first(split)), bytes.subspan(split));
-      if (value != daveos::util::crc32::calculate(bytes) ||
-          value != incremental) {
+      if (value != util::crc32::calculate(bytes) || value != incremental) {
         return core::Status::checksum_error;
       }
       I_("CRC32 %08" PRIx32 " (hardware/software/incremental agree)", value);
@@ -232,22 +252,23 @@ namespace app {
     }
 
     core::Status Clear() {
-      fault::clear(hardware::retained_fault());
+      util::fault::clear(Hardware::retained_fault());
       I_("Retained failure cleared");
       return core::Status::ok;
     }
 
     Platform& platform_;
-    hardware::Watchdog hardware_;
-    std::array<wd::Check, 2> checks_;
-    wd::Controller controller_;
+    const util::Version& version_;
+    typename Hardware::Watchdog hardware_;
+    std::array<watchdog::Check, 2> checks_;
+    Controller controller_;
     void* scheduler_ = nullptr;
-    wd::Failure (*progress_)(void*) = nullptr;
-    wd::Confirmation confirmation_{kConfirmationDelay};
+    Failure (*progress_)(void*) = nullptr;
+    Confirmation confirmation_{kConfirmationDelay};
     core::Time last_heartbeat_ = 0;
     bool watchdog_reset_ = false;
     bool dispatching_ = false, reported_ = false, confirms_image_ = false;
   };
 
 
-}  // namespace app
+}  // namespace daveos::watchdog
