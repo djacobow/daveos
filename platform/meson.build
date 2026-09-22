@@ -1,9 +1,9 @@
 if platform in ['stm32h5', 'stm32h7']
   subdir('stm32/memory')
-  if (get_option('examples') or get_option('stm32_support')) and get_option('usb_console')
+  if (get_option('examples') or get_option('stm32_support')) and 'usb' in features
     subdir('stm32')
   endif
-  if get_option('networking')
+  if 'net' in features
     subdir('stm32/ethernet')
   endif
   subdir(platform)
@@ -20,7 +20,7 @@ else
   file_otp_lib = static_library('daveos-file-otp', 'host/otp.cpp', dependencies: otp_dep)
   file_otp_dep = declare_dependency(link_with: file_otp_lib, dependencies: otp_dep)
   meson.override_dependency('daveos-file-otp', file_otp_dep)
-  if get_option('fatfs')
+  if 'fatfs' in features
     file_block_lib = static_library('daveos-file-block', 'host/block_device.cpp', dependencies: core_dep)
     file_block_dep = declare_dependency(link_with: file_block_lib, dependencies: core_dep)
     meson.override_dependency('daveos-file-block', file_block_dep)

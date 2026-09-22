@@ -11,7 +11,7 @@ and optional lwIP Ethernet networking.
 Run these commands from the DaveOS repository root. For a guided introduction,
 start with [the learning path](../README.md).
 
-Optional FAT12/16/32 storage is enabled with `-Dfatfs=true`; see
+Optional FAT12/16/32 storage is enabled with the `fatfs` feature; see
 [FAT storage](storage.md) for the injected block-device API and SD commands.
 
 ## Build and run
@@ -126,6 +126,66 @@ remain active. Test and downloaded framework sources are excluded from cppcheck.
 CubeMX-generated `Core/` files and copied `Drivers/` are excluded from both
 formatting and linting; regeneration preserves ST's formatting.
 
+## Build features
+
+One array option selects libraries, board fixtures and console components:
+
+```sh
+meson setup build/h563-storage --cross-file meson/stm32.ini \
+  -Dexamples=true -Dfeatures=uart,usb,health,sd,sd-dma,fatfs
+```
+
+`default` expands to `uart,usb,health` on STM32 and to nothing on host/fake, so
+`-Dfeatures=default,net,tcp` adds to it; `-Dfeatures=` selects nothing. Setup
+stops with a readable error for an unknown name, a missing requirement, an
+unsupported board, or a missing `-Dbootloader=true`, e.g. `Feature tcp requires
+net`. The table lives at the top of the root `meson.build`.
+
+| Feature | Provides | Needs |
+| --- | --- | --- |
+| `uart` | USART3 console | STM32 |
+| `usb` | USB CDC console and USB middleware | STM32 |
+| `net` | lwIP service and library; Ethernet on STM32 | |
+| `tcp` | TCP console on port 1000 | `net` |
+| `health` | Watchdog, health checks and retained faults | STM32 |
+| `sd` | SPI1 SD card session and `sd` diagnostic commands | STM32 |
+| `sd-dma` | DMA for SD payloads | `sd` |
+| `fatfs` | FatFs library; on STM32 the `fs` module on the SD card | `sd` on STM32 |
+| `i2c-adc` | I2C1 PB8/PB9 bus diagnostics and MCP3425 | H563 |
+| `ota` | Firmware updates; over TCP with `net`, from an SD file with `fatfs` | `-Dbootloader=true`, and `net` or `fatfs` |
+| `otp-emulator` | OTP commands on the bank-B flash emulator | H563, `-Dbootloader=true` |
+| `otp-h563` | OTP commands on real H563 OTP (read-only unless `otp_programming`) | H563, `-Dbootloader=true` |
+
+`board` and `bootloader` remain separate options: they change layout and
+linking, not just which components are built. `otp_programming` also stays
+separate, as an explicit switch for permanent writes.
+
+Named profiles in `meson/profiles/` are machine files layered after the board
+cross file; `-Dfeatures=` on the command line still overrides them:
+
+| Profile | Features |
+| --- | --- |
+| `console.ini` | `uart,usb,health` (the STM32 default) |
+| `network.ini` | console plus `net,tcp` |
+| `storage.ini` | console plus `sd,sd-dma,fatfs` |
+| `hil.ini` | A/B, console plus `net,tcp,ota`: what `tests/hil` requires |
+| `full.ini` | A/B, console plus `net,tcp,sd,sd-dma,fatfs,ota` |
+
+```sh
+meson setup build/hil-h563 --cross-file meson/stm32.ini \
+  --cross-file meson/profiles/hil.ini -Dexamples=true
+```
+
+The STM32 console writes `build-config.json` beside its firmware, recording
+board, bootloader, logging and the resolved feature list. The HIL fixtures read
+it, and copy it into `build/hil/manifest.json` with each run.
+
+Build directories set up before `features` existed record the removed options
+(`networking`, `fatfs`, `uart_console`, `usb_console`, `tcp_console`,
+`spi_sd_probe`, `spi_sd_dma`, `i2c_adc_probe`, `otp_backend`) and fail to
+regenerate with `Unknown options`. Set them up again, or delete those lines from
+`meson-private/cmd_line.txt` and run `meson configure <dir> -Dfeatures=...`.
+
 ## ARM compile check
 
 STM32CubeH5 is pinned as a Git submodule at
@@ -211,8 +271,8 @@ H563 also provides the same independent USB CDC command/log transport on
 connected for power/debugging and connect CN13 to a USB host with a data cable.
 The Linux device identifies as `usb-DaveOS_DaveOS_H563_console_*-if00`.
 Open with DTR asserted and terminal local echo disabled; USB baud settings are
-ignored. Both `uart_console` and `usb_console` options apply, allowing either,
-both, or neither transport, independently of logging.
+ignored. The `uart` and `usb` features select either, both, or neither
+transport, independently of logging.
 
 USB uses HSI48 with CRS synchronized to USB SOF, IRQ priority 6, and five
 single-buffer endpoint allocations in packet memory (PMA). Transfers are
@@ -671,14 +731,8 @@ logger subscriber and registers its command source with the shared dispatcher;
 each enabled source polls its line buffer in its own scheduled task. The `board`
 module provides hardware commands and does not forward transport input/output.
 
-Select transports independently (both default to enabled on H563 and H755):
-
-| Configuration | Meson options |
-| --- | --- |
-| UART and USB | `-Duart_console=true -Dusb_console=true` |
-| UART only | `-Duart_console=true -Dusb_console=false` |
-| USB only | `-Duart_console=false -Dusb_console=true` |
-| Neither | `-Duart_console=false -Dusb_console=false` |
+Select transports independently with the `uart`, `usb` and `tcp` features
+(`uart` and `usb` are in the STM32 default); see [Build features](#build-features).
 
 Application wiring registers modules, subscribers, and sources explicitly.
 The shared example generates these lists for the selected components; the
@@ -709,14 +763,10 @@ Registration borrows the dispatcher, which must outlive all submissions. Sources
 submit from scheduled callbacks, never interrupts. An empty `CommandSourceList{}`
 is valid; the existing direct `dispatcher.dispatch(line)` API remains available.
 
-For example, `meson configure build/h755 -Duart_console=false`, then rebuild.
+For example, `meson configure build/h755 -Dfeatures=usb,health`, then rebuild.
 Disabled transports have no console module, input polling, or logger subscription.
-
-Meson selects `uart.cpp`, `usb/component.cpp` (plus USB middleware), and
-`network.cpp`; `tcp_console.hpp` is included only when both networking and TCP
-are enabled. The always-present board commands live in `board.h`. There are no
-`DAVEOS_UART_CONSOLE`, `DAVEOS_USB_CDC`, `DAVEOS_NETWORKING`, or
-`DAVEOS_TCP_CONSOLE` preprocessor branches in the application.
+The always-present board commands live in `platform/stm32/console/board.hpp`.
+There are no feature preprocessor branches in the application.
 
 `examples/stm32_console/meson.build` generates
 `build/<configuration>/examples/stm32_console/composition.hpp` from
@@ -917,7 +967,7 @@ separately (padding the lower half to eight hex digits).
 
 ## Optional Ethernet networking
 
-`-Dnetworking=true` adds a separate lwIP-based network service and the `net`
+The `net` feature adds a separate lwIP-based network service and the `net`
 module to either board selection of the STM32 console. It is off by default
 and independent of logging,
 UART, and USB. No networking methods are added to the scheduler/platform API.
@@ -929,7 +979,7 @@ Initialize the additional pinned submodules and build:
 
 ```sh
 git submodule update --init net/lwip platform/stm32/lan8742
-meson setup build/net-h755 --cross-file meson/stm32.ini -Dboard=h755 -Dexamples=true -Dnetworking=true
+meson setup build/net-h755 --cross-file meson/stm32.ini --cross-file meson/profiles/network.ini -Dboard=h755 -Dexamples=true
 meson compile -C build/net-h755
 # H563: use build/net-h563 and omit -Dboard=h755 (or set -Dboard=h563).
 ```
@@ -981,7 +1031,7 @@ by the example, not a board BSP. H755 RMII TXD1 is PB13; H563's is PB15.
 Host tests use the real lwIP stack with fake Ethernet frames and a fake clock:
 
 ```sh
-meson setup build/net --native-file meson/clang.ini -Dnetworking=true
+meson setup build/net --native-file meson/clang.ini -Dfeatures=net
 meson test -C build/net --print-errorlogs
 ```
 
@@ -1020,7 +1070,7 @@ terminal supplies echo. This is plain TCP, not Telnet or TLS, and has no
 authentication. Peer half-close also ends the session, so keep the connection
 open while waiting for command output.
 
-`-Dtcp_console=false` removes this transport while retaining networking. UART,
+Omitting the `tcp` feature removes this transport while retaining networking. UART,
 USB, and logging remain independently selectable. To change the port, pass it
 to the application's `TcpConsole` constructor. `net/tcp_server.h` exposes the
 DaveOS-independent, nonblocking `TcpServer` used by this adapter. Its service
@@ -1079,7 +1129,7 @@ H755 A/B builds, which include the fixed M4 in one factory HEX file.
 For the full H563 console matching the H755 configuration:
 
 ```sh
-meson setup build/net-h563 --cross-file meson/stm32.ini -Dexamples=true -Dnetworking=true
+meson setup build/net-h563 --cross-file meson/stm32.ini --cross-file meson/profiles/network.ini -Dexamples=true
 meson compile -C build/net-h563
 meson compile -C build/net-h563 flash-openocd
 ```
@@ -1204,5 +1254,5 @@ includes both totals and the `invalid_yields`/`yield_depth_errors` counters.
 
 The optional `daveos-drivers` dependency adds peripheral drivers over the HAL.
 `drivers/mcp3425.h` provides `daveos::drivers::Mcp3425`. H563's optional
-`i2c_adc_probe` fixture supplies `i2c scan`, `i2c stats`, `i2c reset` and
+`i2c-adc` feature supplies `i2c scan`, `i2c stats`, `i2c reset` and
 `adc sample`; see [SPI/I2C](spi-i2c.md) for wiring and recovery semantics.

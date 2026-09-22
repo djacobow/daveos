@@ -28,7 +28,7 @@ if platform == 'host'
   subdir('host')
 endif
 subdir('programming')
-if get_option('networking')
+if 'net' in features
   subdir('network')
 endif
 
@@ -39,6 +39,6 @@ if platform == 'host' and get_option('b_sanitize') == 'none'
   subdir('starter')
 endif
 
-if get_option('fatfs')
+if 'fatfs' in features
   subdir('storage')
 endif

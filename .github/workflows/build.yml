@@ -34,7 +34,7 @@ jobs:
           build/ci-tools/cppcheck/bin/cppcheck --version
           echo "$PWD/build/ci-tools/cppcheck/bin" >> "$GITHUB_PATH"
       - run: git submodule update --init net/lwip storage/fatfs
-      - run: meson setup build/host --native-file meson/clang.ini -Db_sanitize=${{ matrix.sanitizer }} -Db_lundef=false -Dnetworking=true -Dfatfs=true -Dversion_build="$GITHUB_RUN_NUMBER"
+      - run: meson setup build/host --native-file meson/clang.ini -Db_sanitize=${{ matrix.sanitizer }} -Db_lundef=false -Dfeatures=net,fatfs -Dversion_build="$GITHUB_RUN_NUMBER"
       - run: meson compile -C build/host -j 2
       - run: meson test -C build/host --print-errorlogs
       - if: matrix.sanitizer == 'none'
@@ -44,7 +44,7 @@ jobs:
           meson setup build/fake --native-file meson/clang.ini -Dplatform=fake
           meson compile -C build/fake -j 2
           meson test -C build/fake --print-errorlogs
-          meson setup build/no-logging --native-file meson/clang.ini -Dlogging=false -Dfatfs=true
+          meson setup build/no-logging --native-file meson/clang.ini -Dlogging=false -Dfeatures=fatfs
           meson test -C build/no-logging --print-errorlogs
       - uses: actions/upload-artifact@v4
         if: failure()
@@ -68,9 +68,11 @@ jobs:
       - run: meson compile -C build/arm
       - name: Build optional H563 SD filesystem and file updater
         run: |
-          meson configure build/arm -Dspi_sd_probe=true -Dfatfs=true -Dbootloader=true
+          meson configure build/arm -Dbootloader=true -Dfeatures=default,sd,sd-dma,fatfs,ota,i2c-adc
           meson compile -C build/arm
-          meson configure build/arm -Dspi_sd_probe=false -Dfatfs=false -Dbootloader=false
+          meson configure build/arm -Dfeatures=default,sd,fatfs,ota
+          meson compile -C build/arm
+          meson configure build/arm -Dbootloader=false -Dfeatures=default
       - run: |
           git submodule update --init platform/stm32h7/STM32CubeH7
           git -C platform/stm32h7/STM32CubeH7 submodule update --init --recursive Drivers/CMSIS/Device/ST/STM32H7xx Drivers/STM32H7xx_HAL_Driver
@@ -78,9 +80,9 @@ jobs:
       - run: meson compile -C build/h755
       - name: Build optional H755 SD filesystem and file updater
         run: |
-          meson configure build/h755 -Dspi_sd_probe=true -Dfatfs=true -Dbootloader=true
+          meson configure build/h755 -Dbootloader=true -Dfeatures=default,sd,sd-dma,fatfs,ota
           meson compile -C build/h755
-          meson configure build/h755 -Dspi_sd_probe=false -Dfatfs=false -Dbootloader=false
+          meson configure build/h755 -Dbootloader=false -Dfeatures=default
       - name: Switch boards without replacing the cross file
         run: |
           meson configure build/arm -Dboard=h755
@@ -89,10 +91,9 @@ jobs:
           meson compile -C build/arm flash-plan
       - name: Build independent console combinations
         run: |
-          for options in 'true false' 'false true' 'false false'; do
-            set -- $options
+          for features in uart,health usb,health health; do
             for target in arm h755; do
-              meson configure build/$target -Duart_console="$1" -Dusb_console="$2"
+              meson configure build/$target -Dfeatures=$features
               meson compile -C build/$target
             done
           done
@@ -100,19 +101,19 @@ jobs:
         run: |
           git submodule update --init net/lwip platform/stm32/lan8742
           for target in arm h755; do
-            meson configure build/$target -Dnetworking=true -Duart_console=true -Dusb_console=true
+            meson configure build/$target -Dfeatures=default,net,tcp
             meson compile -C build/$target
-            meson configure build/$target -Duart_console=false -Dusb_console=false -Dlogging=false
+            meson configure build/$target -Dfeatures=health,net,tcp -Dlogging=false
             meson compile -C build/$target
-            meson configure build/$target -Duart_console=true -Dusb_console=true -Dlogging=true -Dtcp_console=false
+            meson configure build/$target -Dfeatures=default,net -Dlogging=true
             meson compile -C build/$target
-            meson configure build/$target -Duart_console=false -Dusb_console=false
+            meson configure build/$target -Dfeatures=health,net,tcp
             meson compile -C build/$target
           done
       - name: Build A/B bootloader and verify CI version propagation
         run: |
           for board in h563 h755; do
-            meson setup build/boot-$board --cross-file meson/stm32.ini -Dboard="$board" -Dexamples=true -Dbootloader=true -Dnetworking=true -Dversion_build="$GITHUB_RUN_NUMBER"
+            meson setup build/boot-$board --cross-file meson/stm32.ini --cross-file meson/profiles/hil.ini -Dboard="$board" -Dexamples=true -Dversion_build="$GITHUB_RUN_NUMBER"
             meson compile -C build/boot-$board -j 2
             meson compile -C build/boot-$board flash-plan
             python tools/verify_version.py --build build/boot-$board --number "$GITHUB_RUN_NUMBER"

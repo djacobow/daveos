@@ -1,9 +1,8 @@
 """Bank-B emulator only; never programs physical OTP."""
-import json
-from pathlib import Path
 import socket
 
 import pytest
+import build_config
 import ota
 from flash import tcl_word
 
@@ -12,9 +11,7 @@ pytestmark = pytest.mark.hil
 
 @pytest.fixture
 def otp_board(hil_config, request):
-    options = json.loads((Path(hil_config['build']) / 'meson-info/intro-buildoptions.json').read_text())
-    if not any(o['name'] == 'otp_backend' and o['value'] == 'flash-emulator' for o in options):
-        pytest.skip('requires -Dotp_backend=flash-emulator')
+    build_config.require(hil_config['build'], 'otp-emulator')
     return request.getfixturevalue('board')
 
 

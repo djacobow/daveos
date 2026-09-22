@@ -59,7 +59,7 @@ uv pip install --python build/hil-venv/bin/python --reinstall-package watcher \
   -r requirements-hil.txt
 
 meson setup build/boot-h563 --cross-file meson/stm32.ini \
-  -Dexamples=true -Dbootloader=true -Dnetworking=true -Dusb_console=true -Dtcp_console=true
+  -Dexamples=true --cross-file meson/profiles/hil.ini
 cp tests/hil/h563.toml.example build/hil.toml
 ```
 
@@ -157,7 +157,7 @@ bootloader major/minor to verify they remain independent of application versions
 
 ### OTP emulator selection
 
-`tests/hil/h563/test_otp.py` requires `-Dotp_backend=flash-emulator`; it skips when
+`tests/hil/h563/test_otp.py` requires the `otp-emulator` feature; it skips when
 that backend is absent. It covers all console transports, exact deduplication,
 confirmation rejection, reset retention, exhaustion, factory clearing, torn-lock
 recovery, bidirectional OTA retention and serial writes during OTA. Emulator
@@ -178,8 +178,8 @@ automated real-OTP checks remain read-only. Use emulators for mutation tests.
 The H755 suite covers the M7 console and sleeping M4, with networking, UART and
 USB enabled. It has its own A/B tests and does not run H563 OTP tests. For a
 standalone build, set up
-`build/net-h755` with `board=h755`, `bootloader=false`, `networking=true`,
-`uart_console=true`, `usb_console=true`, and `tcp_console=true`. Set
+`build/net-h755` with `board=h755`, `bootloader=false` and the network profile
+(features `uart,usb,health,net,tcp`). Set
 `probe_serial` to the H755 ST-LINK serial, and copy
 [`h755.toml.example`](../tests/hil/h755.toml.example) to `build/hil-h755.toml`.
 Fill in that board's stable serial paths and toolchain path. The fixture verifies
@@ -243,14 +243,14 @@ of binary inspection and watermark measurements.
 
 ## Optional SPI SD fixture
 
-Build either Nucleo console with `-Dspi_sd_probe=true` to include `sd probe`.
+Build either Nucleo console with the `sd` feature to include `sd probe`.
 `tests/hil/h563/test_spi.py` and `tests/hil/h755/test_sd.py` share the cases
 in `tests/hil/sd_cases.py`, with board-specific HIL configurations. SPI1 uses
 PA5/PG9/PB5 on H563 or PA5/PA6/PB5 on H755 for SCK/MISO/MOSI, with PD14 GPIO CS
 on both. The suite checks five full read-only inspections: startup, CSD/CID, CRC-checked repeated
 sector reads at 250 kHz/1 MHz, and partition/filesystem identification, followed
 by health/fault queries. It expects a card supporting at least 1 MHz.
-With `-Dfatfs=true`, the same HIL file also checks read-only mount, listing,
+With the `fatfs` feature, the same HIL file also checks read-only mount, listing,
 missing-file errors, media reservation, unmount/remount and watchdog health.
 The `storage` host test exercises actual FatFs over a synthetic file image plus
 scripted async SD completion/error paths. See [storage](storage.md).
@@ -262,7 +262,7 @@ new file, refuses overwrite, syncs/closes, remounts and verifies the contents.
 It then removes its newly created file and verifies absence after remounting,
 including read-only/root-directory rejection checks. A used name is an error,
 not permission to replace or remove an existing file. Real OTP remains untouched. See [SPI/I2C](spi-i2c.md) for wiring and scope.
-Both boards default to DMA for payloads; `-Dspi_sd_dma=false` keeps the
+The `sd-dma` feature (in the storage profile) moves payloads by DMA; omitting it keeps the
 interrupt-only path. The inspection case verifies nonzero DMA chunk/byte
 counts when enabled and zero counts when disabled.
 
@@ -290,7 +290,7 @@ requiring a Python-enabled ARM GDB.
 
 `DAVEOS_HIL_SD_FAULT=1` enables
 `tests/hil/h563/test_sd_timeout.py` or `tests/hil/h755/test_sd_timeout.py`
-with the matching board configuration and a `spi_sd_dma=true` build. Both use
+with the matching board configuration and an `sd-dma` build. Both use
 `tests/hil/sd_timeout_cases.py`; only the debugger target, DMA request injection
 and register addresses differ.
 It factory-programs the board and interrupts a read-only sector transfer by

@@ -50,7 +50,7 @@ The H563 example can boot through the small CRC-verifying bootloader. With the
 ARM toolchain on `PATH`, build a factory image with:
 
 ```sh
-meson setup build/boot-h563 --cross-file meson/stm32.ini -Dboard=h563 -Dexamples=true -Dnetworking=true -Dbootloader=true
+meson setup build/boot-h563 --cross-file meson/stm32.ini --cross-file meson/profiles/hil.ini -Dboard=h563 -Dexamples=true
 meson compile -C build/boot-h563
 meson compile -C build/boot-h563 flash-plan
 meson compile -C build/boot-h563 flash
@@ -89,7 +89,7 @@ smoke scripts.
 Use the same options with `-Dboard=h755` and a separate build directory:
 
 ```sh
-meson setup build/boot-h755 --cross-file meson/stm32.ini -Dboard=h755 -Dexamples=true -Dnetworking=true -Dbootloader=true
+meson setup build/boot-h755 --cross-file meson/stm32.ini --cross-file meson/profiles/hil.ini -Dboard=h755 -Dexamples=true
 meson compile -C build/boot-h755
 meson compile -C build/boot-h755 flash-plan
 ```
@@ -119,7 +119,7 @@ See the [STM32 specification](spec/stm32.md) for the persistence rules.
 
 ## TCP firmware updates
 
-With `-Dbootloader=true -Dnetworking=true`, the example includes an independent
+With `-Dbootloader=true` and the `net` and `ota` features, the example includes an independent
 binary OTA listener on **TCP port 1001**. The text console remains on port 1000.
 On any console, run `ota enable`, then upload from the host:
 

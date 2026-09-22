@@ -7,8 +7,7 @@ project('my-device-app', ['c', 'cpp'],
 board = get_option('board')
 nucleo = dependency('daveos-nucleo', fallback: ['daveos', 'stm32_nucleo_dep'],
   default_options: ['platform=stm32', 'board=' + board, 'stm32_support=true',
-                   'examples=false', 'tests=false', 'uart_console=true',
-                   'usb_console=false', 'networking=false'])
+                   'examples=false', 'tests=false', 'features=uart'])
 uart = dependency('daveos-stm32-uart', fallback: ['daveos', 'stm32_uart_console_dep'])
 daveos = subproject('daveos')
 if daveos.get_variable('board') != board

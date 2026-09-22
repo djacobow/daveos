@@ -5,18 +5,18 @@ serial, or that an unfamiliar record is ours. Write/failure tests belong in the
 host/flash emulators. Initial fuse write qualification is deliberate manual work.
 """
 import json
-from pathlib import Path
 
 import pytest
+
+import build_config
 
 pytestmark = pytest.mark.hil
 
 
 @pytest.fixture
 def hardware_otp_board(hil_config, request):
-    options = json.loads((Path(hil_config['build']) / 'meson-info/intro-buildoptions.json').read_text())
-    if not any(o['name'] == 'otp_backend' and o['value'] == 'h563' for o in options):
-        pytest.skip('requires real h563 backend with provisioning disabled')
+    build_config.require(hil_config['build'], 'otp-h563',
+                         reason='real h563 backend with provisioning disabled')
     return request.getfixturevalue('board')
 
 

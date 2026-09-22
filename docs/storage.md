@@ -1,10 +1,10 @@
 # FAT storage
 
-Enable `-Dfatfs=true` and initialize the pinned submodule:
+Select the `fatfs` feature and initialize the pinned submodule:
 
 ```sh
 git submodule update --init storage/fatfs
-meson configure build/host -Dfatfs=true
+meson configure build/host -Dfeatures=fatfs
 meson test -C build/host storage --print-errorlogs
 ```
 
@@ -56,11 +56,11 @@ One request may be active at a time; another returns `busy`.
 
 Use SPI1 with GPIO-controlled CS: H563 uses PA5/PG9/PB5 for SCK/MISO/MOSI;
 H755 uses PA5/PA6/PB5. Both use PD14 for CS. Select `-Dboard=h563` or
-`-Dboard=h755` with `-Dspi_sd_probe=true -Dfatfs=true`.
+`-Dboard=h755` with the `sd` and `fatfs` features (`meson/profiles/storage.ini`).
 See [SPI/I2C](spi-i2c.md) for the bus contract.
 
 ```sh
-meson configure build/spi-h563 -Dspi_sd_probe=true -Dfatfs=true
+meson configure build/spi-h563 -Dfeatures=default,sd,sd-dma,fatfs
 meson compile -C build/spi-h563
 ```
 
@@ -86,7 +86,7 @@ It reads R1 and the data token incrementally, then clocks only the 512-byte
 payload and CRC. The shared `storage/sd/read.h` sequence needs a 516-byte
 buffer, retains CS across all phases, and rejects a bad response before reading
 the payload. A missing token is bounded by the transaction deadline. H755 uses
-DMA for sector payloads by default (`-Dspi_sd_dma=false` selects interrupts);
+DMA for sector payloads with the `sd-dma` feature (without it, interrupts);
 H563 also uses DMA by default, through GPDMA1 channels 1/2 and private SRAM
 staging. Both still use 1 MHz, single-block transfers.
 Multiblock transfers and higher-speed qualification remain future work.
@@ -200,7 +200,7 @@ or power-loss guarantee.
 
 ## Firmware installation from SD
 
-Enable `bootloader=true`, `spi_sd_probe=true`, and `fatfs=true`. Networking is
+Enable `bootloader=true` and the `sd`, `fatfs` and `ota` features. Networking is
 optional. The same `application.ota` package generated for TCP works from a
 file, for either destination slot. Copy it to the SD card with a host reader,
 safely eject the card, then reconnect it to the board.
@@ -437,7 +437,7 @@ With identical incremental reads at the same SPI rates, five probes produced
 DMA (about 91% fewer). The DMA run moved 30,720 bytes in 60 chunks. Probe times
 were essentially unchanged, around 188–189 ms each: wire time and task cadence
 still dominate. Backend polls dropped from 45,665 to 3,853; these counts do not
-measure CPU utilization. `-Dspi_sd_dma=false` reproduced the interrupt-only
+measure CPU utilization. A build without `sd-dma` reproduced the interrupt-only
 results. The default H755 build was restored to DMA afterward.
 
 ASan/UBSan passed 33/33, targeted TSan HAL/storage/SD tests passed 3/3,

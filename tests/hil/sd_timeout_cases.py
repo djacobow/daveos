@@ -7,6 +7,7 @@ import time
 
 import pytest
 
+import build_config
 from sd_cases import spi_board
 
 pytestmark = [
@@ -18,9 +19,7 @@ pytestmark = [
 
 def test_sd_dma_timeout_cleanup(spi_board, hil_config):
     board = spi_board
-    options = json.loads((Path(hil_config['build']) / 'meson-info/intro-buildoptions.json').read_text())
-    if not any(o['name'] == 'spi_sd_dma' and o['value'] for o in options):
-        pytest.skip('requires spi_sd_dma=true')
+    build_config.require(hil_config['build'], 'sd-dma')
     board.query(board.uart, 'sd probe', 'SD ready', timeout=15)
     board.query(board.uart, 'fs mount', 'Filesystem mounted read-only')
     board.query(board.uart, 'sd reset', 'busy')

@@ -786,8 +786,8 @@ on H563, Micro-AB on H755), using a shared pinned ST USB Device Library submodul
 partial lines and echo while sharing command dispatch and log output. Each
 transport is an independent scheduled module, registers a `CommandSource` with
 the dispatcher through `bind_sources(CommandSourceList{...})` during initialization,
-and registers its own logger subscriber. `uart_console` and `usb_console` Meson
-options select either, both, or neither on both boards, independently of logging.
+and registers its own logger subscriber. The `uart` and `usb` build features
+select either, both, or neither on both boards, independently of logging.
 Sources submit complete lines from scheduler callbacks; all registered sources
 share one tokenizer and dispatcher. Unregistered sources return `not_running`.
 The dispatcher must outlive submissions; an empty source list is supported.

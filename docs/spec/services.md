@@ -49,7 +49,7 @@ starts a fresh session. Fixed 4 KiB RX and 8 KiB TX buffers bound storage. RX us
 TCP flow control; output overflow drops a complete record without blocking.
 Disconnected output is not retained. The protocol is plain TCP, without Telnet
 negotiation, authentication, or encryption, and relies on local terminal echo.
-`tcp_console=false` omits the console without disabling networking, UART, or USB.
+Omitting the `tcp` feature removes the console without disabling networking, UART, or USB.
 
 
 Shared transport-agnostic console helpers belong in `console/`, namespace

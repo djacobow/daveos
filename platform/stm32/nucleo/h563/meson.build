@@ -1,12 +1,12 @@
 firmware_deps = [stm32_console_dep, stm32h5_dep, stm32h5_hal_dep, util_dep]
-if get_option('usb_console')
+if 'usb' in features
   subdir('usb')
   firmware_deps += h563_usb_dep
   foreach component : ['pcd', 'pcd_ex', 'll_usb']
     firmware_deps += stm32h5_hal_components[component]
   endforeach
 endif
-if get_option('networking')
+if 'net' in features
   subdir('ethernet')
   firmware_deps += [stm32h5_hal_components['eth'], stm32h5_hal_components['eth_ex']]
 endif

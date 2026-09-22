@@ -85,13 +85,13 @@ and the last error's phase, block and status. An earlier gap is never reused.
 Enable it explicitly on an H563 A/B build:
 
 ```sh
-meson configure build/boot-h563 -Dotp_backend=flash-emulator
+meson configure build/boot-h563 -Dfeatures=default,net,tcp,ota,otp-emulator
 meson compile -C build/boot-h563
 build/hil-venv/bin/python -B -m pytest tests/hil/h563/test_otp.py \
   --hil --hil-config build/hil.toml -v
 ```
 
-The default is `-Dotp_backend=none`. The emulator option rejects builds without
+Neither OTP feature is selected by default. `otp-emulator` rejects builds without
 `-Dbootloader=true` or with another board. Meson includes a separate composition
 file; no conditional feature macros enter the application. HIL always installs
 a factory image first and clears emulated records. Real OTP remains untouched.
@@ -128,7 +128,7 @@ and physical power-cut qualification are outside this validation.
 
 ## Real H563 OTP: read-only first
 
-Select `-Dotp_backend=h563 -Dotp_programming=false` on an H563 boot-layout build.
+Select the `otp-h563` feature, with `-Dotp_programming=false`, on an H563 boot-layout build.
 The default programming setting is false. It prevents both data programming and
 permanent lock changes at the driver boundary. All automated HIL runs reject a
 build with real programming enabled, and the real-OTP test sends only read and

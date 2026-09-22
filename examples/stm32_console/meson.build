@@ -7,6 +7,92 @@ if get_option('bootloader')
   application_linker = boot_layout[2]
   application_link_args = ['-T' + boot_layout_directory / 'slot_a.ld']
 endif
+# One entry per component, in declaration order (later members may refer to
+# earlier ones). Components come from the top-level feature list, plus boot
+# for -Dbootloader=true and ota-net when both ota and net are selected.
+# Fields: deps (dependency variable names, resolved only when selected),
+# sources, include, members, modules, consoles, and one-line calls for the
+# composition's early/failure/stop hooks. Behavior belongs in the C++ types.
+sd_dma = 'sd-dma' in features
+file_ota = 'ota' in features and 'fatfs' in features
+components = {
+  'i2c-adc': {
+    'deps': ['drivers_dep'], 'sources': ['irqs/i2c.cpp'],
+    'include': ['adc_probe.hpp', 'i2c_probe.hpp'],
+    'members': ['I2cBus i2c1{platform};', 'I2cProbe i2c{i2c1};',
+                'AdcProbe adc{platform, i2c1};'],
+    'modules': ['i2c', 'adc'],
+  },
+  'sd': {
+    'deps': ['hal_dep'],
+    'sources': ['irqs/sd.cpp'] + (sd_dma ? ['irqs/sd_dma_' + board + '.cpp'] : []),
+    'include': ['sd_probe.hpp'],
+    'members': ['SdProbe sd{platform, ' + (sd_dma ? 'true' : 'false') + '};'],
+    'modules': ['sd'],
+  },
+  'fatfs': {
+    'deps': ['storage_dep'], 'include': ['storage/module.hpp'],
+    'members': ['daveos::storage::Module<Event> filesystem{sd.block_device()};'],
+    'modules': ['filesystem'],
+  },
+  'health': {
+    'deps': ['util_dep'],
+    'sources': board == 'h563' ? ['../../platform/stm32h5/iwdg_handler.S'] : [],
+    'include': ['health.hpp'], 'members': ['Health health{platform};'],
+    'modules': ['health'],
+    'early': (get_option('bootloader') ? ['boot.attach(health);'] : [])
+             + ['health.early(scheduler);'],
+    'failure': ['health.initialization_failed(status, module);'],
+  },
+  'boot': {
+    'include': ['boot.hpp'], 'members': ['Boot boot{platform};'],
+    'modules': ['boot'],
+  },
+  'otp-emulator': {
+    'deps': ['otp_dep'], 'include': ['otp.hpp'], 'members': ['Otp otp{platform};'],
+    'modules': ['otp.module'],
+  },
+  'otp-h563': {
+    'deps': ['otp_dep'], 'include': ['otp_hardware.hpp'],
+    'members': ['HardwareOtp otp{platform, '
+                + (get_option('otp_programming') ? 'true' : 'false') + '};'],
+    'modules': ['otp.module', 'otp'],
+  },
+  'ota': {
+    'deps': ['update_dep'], 'include': ['ota.hpp'],
+    'members': [file_ota ? 'Ota<true> ota{platform, filesystem.read_file()};'
+                         : 'Ota<> ota{platform};'],
+    'modules': ['ota.module'],
+  },
+  'net': {
+    'include': ['platform/stm32/console/network.hpp'],
+    'members': ['stm32::Network<Event> network{platform};'],
+    'modules': ['network.module'], 'stop': ['network.stop();'],
+  },
+  'ota-net': {
+    'deps': ['network_update_dep'], 'include': ['ota_network.hpp'],
+    'members': ['OtaNetwork ota_network{platform, network.service, ota};'],
+    'stop': ['ota_network.stop();'],
+  },
+  'tcp': {
+    'include': ['console/tcp.hpp'],
+    'members': ['daveos::console::TcpConsole<Event, Platform> tcp{platform, network.service};'],
+    'consoles': ['tcp'],
+  },
+  'uart': {
+    'deps': ['stm32_uart_console_dep'], 'include': ['platform/stm32/console/uart.hpp'],
+    'members': ['stm32::UartConsole<Event> uart{platform};'], 'consoles': ['uart'],
+  },
+  'usb': {
+    'include': ['platform/stm32/console/usb/usb.hpp'],
+    'members': ['stm32::UsbConsole<Event> usb{platform};'], 'consoles': ['usb'],
+  },
+}
+component_order = ['i2c-adc', 'sd', 'fatfs', 'health', 'boot', 'otp-emulator',
+                   'otp-h563', 'ota', 'net', 'ota-net', 'tcp', 'uart', 'usb']
+selected = features + (get_option('bootloader') ? ['boot'] : [])
+selected += 'ota' in features and 'net' in features ? ['ota-net'] : []
+
 component_includes = []
 component_members = []
 component_consoles = []
@@ -15,109 +101,36 @@ component_stop = []
 component_early = []
 component_failure = []
 component_sources = []
-if get_option('i2c_adc_probe')
-  if board != 'h563'
-    error('i2c_adc_probe requires the H563 PB8/PB9 fixture')
+foreach name : component_order
+  if name not in selected
+    continue
   endif
-  component_deps += drivers_dep
-  component_includes += '#include "adc_probe.hpp"'
-  component_includes += '#include "i2c_probe.hpp"'
-  component_members += '    I2cBus i2c1{platform};'
-  component_members += '    I2cProbe i2c{i2c1};'
-  component_members += '    AdcProbe adc{platform, i2c1};'
-  component_modules += ', i2c, adc'
-  component_sources += files('irqs/i2c.cpp')
-endif
-if get_option('spi_sd_probe')
-  component_deps += hal_dep
-  component_includes += '#include "sd_probe.hpp"'
-  sd_dma = get_option('spi_sd_dma')
-  component_members += '    SdProbe sd{platform, ' + (sd_dma ? 'true' : 'false') + '};'
-  component_modules += ', sd'
-  if get_option('fatfs')
-    component_deps += storage_dep
-    component_includes += '#include "storage/module.hpp"'
-    component_members += '    daveos::storage::Module<Event> filesystem{sd.block_device()};'
-    component_modules += ', filesystem'
-  endif
-  component_sources += files('irqs/sd.cpp')
-  if sd_dma
-    component_sources += files('irqs/sd_dma_' + board + '.cpp')
-  endif
-endif
-if board in ['h563', 'h755']
-  component_deps += util_dep
-  if board == 'h563'
-    component_deps += declare_dependency(sources: files('../../platform/stm32h5/iwdg_handler.S'))
-  endif
-  component_includes += '#include "health.hpp"'
-  component_members += '    Health health{platform};'
-  component_modules += ', health'
-  if get_option('bootloader')
-    component_early += '      boot.attach(health);'
-  endif
-  component_early += '      health.early(scheduler);'
-  component_failure += '      health.initialization_failed(status, module);'
-endif
-if get_option('bootloader')
-  component_includes += '#include "boot.hpp"'
-  component_members += '    Boot boot{platform};'
-  component_modules += ', boot'
-endif
-
-if get_option('otp_backend') == 'flash-emulator'
-  component_deps += otp_dep
-  component_includes += '#include "otp.hpp"'
-  component_members += '    Otp otp{platform};'
-  component_modules += ', otp.module'
-endif
-
-if get_option('otp_backend') == 'h563'
-  component_deps += otp_dep
-  component_includes += '#include "otp_hardware.hpp"'
-  component_members += '    HardwareOtp otp{platform, ' + (get_option('otp_programming') ? 'true' : 'false') + '};'
-  component_modules += ', otp.module, otp'
-endif
-
-if get_option('bootloader') and (get_option('networking') or (get_option('spi_sd_probe') and get_option('fatfs')))
-  component_deps += update_dep
-  component_includes += '#include "ota.hpp"'
-  if get_option('spi_sd_probe') and get_option('fatfs')
-    component_members += '    Ota<true> ota{platform, filesystem.read_file()};'
-  else
-    component_members += '    Ota<> ota{platform};'
-  endif
-  component_modules += ', ota.module'
-endif
-
-if get_option('networking')
-  component_includes += '#include "platform/stm32/console/network.hpp"'
-  component_members += '    stm32::Network<Event> network{platform};'
-  component_modules += ', network.module'
-  component_stop += '      network.stop();'
-  if get_option('bootloader')
-    component_deps += network_update_dep
-    component_includes += '#include "ota_network.hpp"'
-    component_members += '    OtaNetwork ota_network{platform, network.service, ota};'
-    component_stop = ['      ota_network.stop();'] + component_stop
-  endif
-  if get_option('tcp_console')
-    component_includes += '#include "console/tcp.hpp"'
-    component_members += '    daveos::console::TcpConsole<Event, Platform> tcp{platform, network.service};'
-    component_consoles += 'tcp'
-  endif
-endif
-if get_option('uart_console')
-  component_deps += stm32_uart_console_dep
-  component_includes += '#include "platform/stm32/console/uart.hpp"'
-  component_members += '    stm32::UartConsole<Event> uart{platform};'
-  component_consoles += 'uart'
-endif
-if get_option('usb_console')
-  component_includes += '#include "platform/stm32/console/usb/usb.hpp"'
-  component_members += '    stm32::UsbConsole<Event> usb{platform};'
-  component_consoles += 'usb'
-endif
+  entry = components[name]
+  foreach dep : entry.get('deps', [])
+    component_deps += get_variable(dep)
+  endforeach
+  component_sources += files(entry.get('sources', []))
+  foreach header : entry.get('include', [])
+    component_includes += '#include "' + header + '"'
+  endforeach
+  foreach member : entry.get('members', [])
+    component_members += '    ' + member
+  endforeach
+  foreach module : entry.get('modules', [])
+    component_modules += ', ' + module
+  endforeach
+  component_consoles += entry.get('consoles', [])
+  foreach call : entry.get('early', [])
+    component_early += '      ' + call
+  endforeach
+  foreach call : entry.get('failure', [])
+    component_failure += '      ' + call
+  endforeach
+  # Stop in reverse declaration order.
+  foreach call : entry.get('stop', [])
+    component_stop = ['      ' + call] + component_stop
+  endforeach
+endforeach
 composition = configuration_data()
 composition.set('INCLUDES', '\n'.join(component_includes))
 composition.set('MEMBERS', '\n'.join(component_members))
@@ -127,6 +140,16 @@ composition.set('STOP', '\n'.join(component_stop))
 composition.set('EARLY', '\n'.join(component_early))
 composition.set('FAILURE', '\n'.join(component_failure))
 configure_file(input: 'composition.hpp.in', output: 'composition.hpp', configuration: composition)
+
+# Record what this firmware contains beside it, for reproducing hardware runs.
+build_config = configuration_data()
+build_config.set('BOARD', board)
+build_config.set('BOOTLOADER', get_option('bootloader') ? 'true' : 'false')
+build_config.set('LOGGING', get_option('logging') ? 'true' : 'false')
+build_config.set('FEATURES',
+  features.length() > 0 ? '"' + '", "'.join(features) + '"' : '')
+configure_file(input: 'build-config.json.in', output: 'build-config.json',
+  configuration: build_config)
 
 firmware = executable('stm32-console', ['appmain.cpp'] + component_sources,
   dependencies: component_deps, name_suffix: 'elf',

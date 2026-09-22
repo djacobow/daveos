@@ -1,10 +1,10 @@
 """Optional read-only SPI A SD fixture; never writes or formats card sectors."""
 import json
 import re
-from pathlib import Path
 
 import pytest
 
+import build_config
 from memory_cases import inspect_memory
 
 pytestmark = pytest.mark.hil
@@ -12,9 +12,7 @@ pytestmark = pytest.mark.hil
 
 @pytest.fixture
 def spi_board(hil_config, request):
-    options = json.loads((Path(hil_config['build']) / 'meson-info/intro-buildoptions.json').read_text())
-    if not any(o['name'] == 'spi_sd_probe' and o['value'] for o in options):
-        pytest.skip('requires -Dspi_sd_probe=true and an SD card on the selected board SPI1 pins')
+    build_config.require(hil_config['build'], 'sd', reason='an SD card on the selected board SPI1 pins')
     return request.getfixturevalue('board')
 
 
@@ -24,9 +22,7 @@ def test_read_only_sd_inspection(spi_board, hil_config):
         board.query(board.uart, 'sd probe', r'SD ready: SPI1 1000000 Hz, OCR 0x[0-9a-f]+', timeout=15)
     counters = board.query(board.uart, 'sd stats',
                            r'SPI1 IRQs=(\d+) polls=(\d+) DMA chunks=(\d+) bytes=(\d+)')
-    options = json.loads((Path(hil_config['build']) / 'meson-info/intro-buildoptions.json').read_text())
-    dma = any(
-        o['name'] == 'spi_sd_dma' and o['value'] for o in options)
+    dma = 'sd-dma' in build_config.features(hil_config['build'])
     assert int(counters[1]) > 0 and int(counters[2]) > 0
     if dma:
         assert int(counters[3]) >= 30 and int(counters[4]) == int(counters[3]) * 512
@@ -46,9 +42,7 @@ def test_read_only_sd_inspection(spi_board, hil_config):
 
 
 def test_read_only_filesystem(spi_board, hil_config):
-    options = json.loads((Path(hil_config['build']) / 'meson-info/intro-buildoptions.json').read_text())
-    if not any(o['name'] == 'fatfs' and o['value'] for o in options):
-        pytest.skip('requires -Dfatfs=true')
+    build_config.require(hil_config['build'], 'fatfs')
     board = spi_board
     board.query(board.uart, 'sd probe', r'SD ready: SPI1 1000000 Hz', timeout=15)
     board.query(board.uart, 'fs mount', 'Filesystem mounted read-only', timeout=15)
@@ -70,9 +64,7 @@ def test_create_file_opt_in(spi_board, hil_config):
     if not name:
         pytest.skip('set DAVEOS_HIL_SD_WRITE_PATH to authorize new-file creation')
     assert re.fullmatch(r'[A-Za-z0-9_-]+\.txt', name), 'use a simple root-level .txt name'
-    options = json.loads((Path(hil_config['build']) / 'meson-info/intro-buildoptions.json').read_text())
-    if not any(o['name'] == 'fatfs' and o['value'] for o in options):
-        pytest.skip('requires -Dfatfs=true')
+    build_config.require(hil_config['build'], 'fatfs')
     board = spi_board
     text = 'DaveOS SD write test: create, sync, close, remount, and verify.'
     board.query(board.uart, 'sd probe', r'SD ready: SPI1 1000000 Hz', timeout=15)

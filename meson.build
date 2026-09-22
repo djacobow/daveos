@@ -28,19 +28,76 @@ if platform == 'stm32'
   add_project_link_arguments(cpu_flags, language: ['c', 'cpp'])
 endif
 
-if get_option('otp_backend') != 'none' and (platform != 'stm32h5' or not get_option('bootloader'))
-  error('OTP console backends require STM32 H563 with bootloader=true')
+# Feature selection. One entry per feature: 'stm32' (needs an STM32 build),
+# 'boards' (supported boards), 'requires' (other features), 'bootloader'
+# (needs -Dbootloader=true). Order here is the resolved order.
+is_stm32 = platform in ['stm32h5', 'stm32h7']
+feature_order = ['uart', 'usb', 'net', 'tcp', 'health', 'sd', 'sd-dma', 'fatfs',
+                 'i2c-adc', 'ota', 'otp-emulator', 'otp-h563']
+feature_rules = {
+  'uart': {'stm32': true},
+  'usb': {'stm32': true},
+  'net': {},
+  'tcp': {'requires': ['net']},
+  'health': {'stm32': true},
+  'sd': {'stm32': true},
+  'sd-dma': {'stm32': true, 'requires': ['sd']},
+  # On STM32 the example mounts the SD card; host builds use file images.
+  'fatfs': {'requires': is_stm32 ? ['sd'] : []},
+  'i2c-adc': {'stm32': true, 'boards': ['h563']},
+  'ota': {'stm32': true, 'bootloader': true},
+  'otp-emulator': {'stm32': true, 'boards': ['h563'], 'bootloader': true},
+  'otp-h563': {'stm32': true, 'boards': ['h563'], 'bootloader': true},
+}
+requested_features = []
+foreach name : get_option('features')
+  if name == 'default'
+    requested_features += is_stm32 ? ['uart', 'usb', 'health'] : []
+  else
+    requested_features += name
+  endif
+endforeach
+features = []
+foreach name : feature_order
+  if name in requested_features
+    features += name
+  endif
+endforeach
+foreach name : features
+  rule = feature_rules[name]
+  if rule.get('stm32', false) and not is_stm32
+    error('Feature ' + name + ' requires an STM32 build (-Dplatform=stm32)')
+  endif
+  supported_boards = rule.get('boards', [])
+  if is_stm32 and supported_boards.length() > 0 and board not in supported_boards
+    error('Feature ' + name + ' is not supported on ' + board
+      + ' (supported: ' + ', '.join(supported_boards) + ')')
+  endif
+  foreach required : rule.get('requires', [])
+    if required not in features
+      error('Feature ' + name + ' requires ' + required)
+    endif
+  endforeach
+  if rule.get('bootloader', false) and not get_option('bootloader')
+    error('Feature ' + name + ' requires -Dbootloader=true')
+  endif
+endforeach
+if 'ota' in features and 'net' not in features and 'fatfs' not in features
+  error('Feature ota needs an upload source: add net (TCP) or fatfs (SD file)')
 endif
-
-if get_option('otp_programming') and get_option('otp_backend') != 'h563'
-  error('otp_programming requires otp_backend=h563')
+if 'otp-emulator' in features and 'otp-h563' in features
+  error('Features otp-emulator and otp-h563 are mutually exclusive')
 endif
+if get_option('otp_programming') and 'otp-h563' not in features
+  error('otp_programming requires the otp-h563 feature')
+endif
+message('Features: ' + (features.length() > 0 ? ', '.join(features) : 'none'))
 
 subdir('tools')
 subdir('core')
 subdir('hal')
 subdir('drivers')
-if get_option('fatfs')
+if 'fatfs' in features
   subdir('storage')
 endif
 subdir('util')
@@ -48,7 +105,7 @@ subdir('boot')
 subdir('update')
 subdir('otp')
 subdir('console')
-if get_option('networking')
+if 'net' in features
   subdir('net')
 endif
 firmware_images = []
@@ -63,7 +120,7 @@ endif
 # Stable dependency names for applications using DaveOS as a Meson subproject.
 meson.override_dependency('daveos-core', core_dep)
 meson.override_dependency('daveos-console', console_dep)
-if get_option('networking')
+if 'net' in features
   meson.override_dependency('daveos-network', network_dep)
 endif
 if platform in ['host', 'fake']

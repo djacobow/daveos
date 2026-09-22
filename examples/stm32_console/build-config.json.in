@@ -1,0 +1,6 @@
+{
+  "board": "@BOARD@",
+  "bootloader": @BOOTLOADER@,
+  "logging": @LOGGING@,
+  "features": [@FEATURES@]
+}

@@ -44,13 +44,13 @@ The user has connected an SD card to the NUCLEO-H563ZI connector marked
 | CS | PD14 |
 
 The CubeMX H563 device database confirms SPI1 with AF5 on these bus pins.
-The optional `spi_sd_probe` module uses HSI/CKPER, starting at 250 kHz and
+The optional `sd` feature's module uses HSI/CKPER, starting at 250 kHz and
 checking sector reads at 1 MHz. Five complete read-only inspections passed,
 including CSD/CID, OCR, and 60 CRC-checked sector reads across both rates.
 The connected 32 GB card has a primary FAT32 partition at LBA 8192, with
 32 KiB clusters. No card sectors were written and the filesystem was not
 mounted. Other SPI modes, higher speeds and filesystem contents remain
-unqualified by that inspection. Optional `fatfs=true` adds
+unqualified by that inspection. The optional `fatfs` feature adds
 [read-only filesystem commands](../storage.md) after `sd probe`.
 The subsequent filesystem HIL run mounted and listed the empty root,
 checked errors and remounting, and retained healthy watchdog/fault status.

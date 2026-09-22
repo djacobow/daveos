@@ -11,18 +11,15 @@ option('boot_version_minor', type: 'integer', min: 0, value: 1)
 option('openocd', type: 'string', value: '', description: 'OpenOCD executable; empty discovers the local install or PATH')
 option('cubeprogrammer', type: 'string', value: '', description: 'STM32_Programmer_CLI executable; empty discovers the local install or PATH')
 option('probe_serial', type: 'string', value: '', description: 'ST-LINK serial number for programming targets')
-option('uart_console', type: 'boolean', value: true, description: 'Enable the STM32 USART3 command/log transport')
-option('usb_console', type: 'boolean', value: true, description: 'Enable the STM32 USB CDC command/log transport')
-option('networking', type: 'boolean', value: false, description: 'Enable optional lwIP IPv4 Ethernet support')
-option('tcp_console', type: 'boolean', value: true, description: 'Enable the single-client TCP console on port 1000 when networking is enabled')
 
-option('otp_backend', type: 'combo', choices: ['none', 'flash-emulator', 'h563'], value: 'none', description: 'Optional OTP console backend; emulator requires H563 boot layout')
+# One list selects libraries, board fixtures and console components. The table
+# in meson.build states what each needs; see docs/reference.md#build-features.
+# 'default' is uart,usb,health on STM32 and nothing on host/fake. Named sets
+# live in meson/profiles/*.ini.
+option('features', type: 'array', value: ['default'],
+  choices: ['default', 'uart', 'usb', 'net', 'tcp', 'health', 'sd', 'sd-dma',
+            'fatfs', 'i2c-adc', 'ota', 'otp-emulator', 'otp-h563'],
+  description: 'Selected features (see meson/profiles/ for named sets)')
 
+# Kept separate from features on purpose: permanent, board-altering writes.
 option('otp_programming', type: 'boolean', value: false, description: 'Explicit real H563 OTP provisioning; never enable for automated HIL')
-
-option('spi_sd_probe', type: 'boolean', value: false, description: 'Read-only SPI1 SD fixture (H563 PA5/PG9/PB5; H755 PA5/PA6/PB5; PD14 CS)')
-option('fatfs', type: 'boolean', value: false, description: 'FatFs storage service (read-only mounts by default)')
-
-option('i2c_adc_probe', type: 'boolean', value: false, description: 'H563 MCP3425 I2C1 fixture (PB8 SCL, PB9 SDA, address 0x68)')
-
-option('spi_sd_dma', type: 'boolean', value: true, description: 'Use SPI1 RX/TX DMA for H563/H755 SD payloads')

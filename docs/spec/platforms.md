@@ -806,7 +806,7 @@ card or display. Full device-protocol models are not required for this phase.
   bounded register operations. GPIO CS becomes inactive before completion.
   No DMA bus master retains caller buffers. I2C line-level checks distinguish
   a usable bus from a reset controller whose slave still holds the bus low.
-- H563 `spi_sd_probe` is an optional, read-only fixture. Five full inspections
+- The H563 `sd` feature is an optional, read-only fixture. Five full inspections
   passed: startup/OCR, CSD/CID and 60 CRC-checked sector reads across 250 kHz
   and 1 MHz, with matching data and healthy watchdog/fault checks. The connected
   card has an MBR FAT32 partition; the probe checks its BPB without mounting.
@@ -890,7 +890,7 @@ See [task yielding](../yield.md).
 
 ### H563 I2C ADC diagnostic fixture
 
-The optional `i2c_adc_probe` example component uses I2C1 on PB8/PB9 and an
+The optional `i2c-adc` example feature uses I2C1 on PB8/PB9 and an
 MCP3425 at seven-bit address 0x68. Its portable reader borrows a HAL device,
 performs nonblocking 16-bit gain-1 one-shot conversions, checks configuration
 readback, and preserves transfer-buffer ownership on timeout. The fixture also

@@ -14,6 +14,6 @@ stm32_nucleo_aux_images = firmware_images
 meson.override_dependency('daveos-nucleo', stm32_nucleo_dep)
 meson.override_dependency('daveos-stm32-console', stm32_console_dep)
 meson.override_dependency('daveos-stm32-uart', stm32_uart_console_dep)
-if get_option('usb_console')
+if 'usb' in features
   meson.override_dependency('daveos-stm32-usb', stm32_usb_console_dep)
 endif

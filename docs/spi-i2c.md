@@ -219,7 +219,7 @@ for the GPDMA suspend/reset sequence.
 
 ## Nucleo SD fixture and validation
 
-Enable `-Dspi_sd_probe=true -Dexamples=true` with `-Dboard=h563` or
+Select the `sd` feature with `-Dexamples=true` and `-Dboard=h563` or
 `-Dboard=h755`. Both use SPI1 on PA5 SCK, PB5 MOSI and PD14 GPIO CS.
 MISO is PG9 on H563 and PA6 on H755, selected by the board's `sd_board.h`.
 The H755 AF5 assignments are listed in the [ST datasheet](https://www.st.com/resource/en/datasheet/stm32h755zi.pdf).
@@ -245,14 +245,14 @@ Unknown or malformed layouts are reported without attempting to mount them.
 
 The `sd probe` command remains a read-only diagnostic. No sector
 writes, formatting, mounting, directory traversal or filesystem consistency
-checks occur within the probe. Optional `-Dfatfs=true` adds a separate
+checks occur within the probe. The optional `fatfs` feature adds a separate
 [filesystem worker](storage.md) with `fs mount/ls/read/unmount`. The fixed SPI action-list API keeps CS asserted for the command
 and data capture. `storage/sd/read.h` builds a shared sequence that reads R1
 (with an eight-byte response bound), waits for the data token, rejects bad
 responses before payload transfer, then reads only the payload and CRC. The
 module's receive buffer is 516 bytes; the transaction deadline still bounds
 an absent response. Both boards default to DMA for sector payloads; set
-`-Dspi_sd_dma=false` to compare the interrupt-only path. The option applies to both boards.
+Omit the `sd-dma` feature to compare the interrupt-only path. It applies to both boards.
 `sd stats` reports SPI/DMA IRQ entries, backend polls, DMA chunks and bytes
 since startup (32-bit counters wrap; compare unsigned deltas). Poll counts are
 not a CPU utilization measurement. A private fixture backend config copy allows speed
@@ -291,7 +291,7 @@ only.
 
 ## H563 MCP3425 fixture
 
-Enable `-Di2c_adc_probe=true` with the H563 example. Connect I2C1 PB8 SCL,
+Select the `i2c-adc` feature with the H563 example. Connect I2C1 PB8 SCL,
 PB9 SDA, common ground and suitable power to the MCP3425; external pull-ups
 must bring both bus lines high. The pins use AF4 open-drain, with no internal
 pull-ups. The fixture selects HSI 64 MHz for I2C1 and conservative Standard-mode

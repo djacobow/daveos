@@ -9,6 +9,7 @@ import tomllib
 
 import pytest
 
+import build_config
 from board import Board, ROOT
 
 
@@ -31,9 +32,16 @@ def hil_config(request):
     board_name = config.get('board', 'h563')
     if board_name not in ('h563', 'h755'):
         pytest.fail('HIL supports h563 or h755')
-    for key, value in dict(board=board_name, bootloader=config.get('bootloader', board_name == 'h563'), networking=True, usb_console=True, tcp_console=True).items():
+    bootloader = config.get('bootloader', board_name == 'h563')
+    for key, value in dict(board=board_name, bootloader=bootloader).items():
         if options.get(key) != value:
             pytest.fail(f'HIL build requires {key}={value}')
+    # meson/profiles/hil.ini selects these (with bootloader=true).
+    required = {'usb', 'net', 'tcp'} | ({'ota'} if bootloader else set())
+    missing = required - build_config.features(build)
+    if missing:
+        pytest.fail(f'HIL build requires features {",".join(sorted(missing))}; '
+                    'configure with --cross-file meson/profiles/hil.ini')
     if options.get('otp_programming', False):
         pytest.fail('Automated HIL forbids real OTP programming; use -Dotp_programming=false')
     if config.get('probe_serial') and options.get('probe_serial') != config['probe_serial']:
@@ -58,7 +66,8 @@ def hil_config(request):
         for image in images.values():
             if not image.is_file():
                 pytest.fail(f'Missing firmware artifact: {image}')
-        manifest = dict(config=config, artifacts={name: hashlib.sha256(image.read_bytes()).hexdigest()
+        manifest = dict(config=config, build=build_config.load(build),
+            artifacts={name: hashlib.sha256(image.read_bytes()).hexdigest()
             for name, image in images.items()})
         (output / 'manifest.json').write_text(json.dumps(manifest, indent=2))
         yield config

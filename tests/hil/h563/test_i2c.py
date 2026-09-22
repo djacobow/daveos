@@ -1,10 +1,9 @@
 """Optional PB8/PB9 MCP3425 fixture: address-only scan and one-shot reads."""
-import json
 import re
-from pathlib import Path
 
 import pytest
 
+import build_config
 from memory_cases import inspect_memory
 
 pytestmark = pytest.mark.hil
@@ -12,9 +11,7 @@ pytestmark = pytest.mark.hil
 
 @pytest.fixture
 def adc_board(hil_config, request):
-    options = json.loads((Path(hil_config['build']) / 'meson-info/intro-buildoptions.json').read_text())
-    if not any(o['name'] == 'i2c_adc_probe' and o['value'] for o in options):
-        pytest.skip('requires -Di2c_adc_probe=true and MCP3425 on PB8/PB9')
+    build_config.require(hil_config['build'], 'i2c-adc', reason='MCP3425 on PB8/PB9')
     return request.getfixturevalue('board')
 
 
