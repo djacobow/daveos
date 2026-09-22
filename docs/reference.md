@@ -163,6 +163,7 @@ net`. The table lives at the top of the root `meson.build`.
 | `sd-dma` | DMA for SD payloads | `sd` |
 | `fatfs` | FatFs library; on STM32 the `fs` module on the SD card | `sd` on STM32 |
 | `file-transfer` | Files and directories on TCP port 1002 | STM32, `net,fatfs` |
+| `ssd1306` | 128×64 I2C display and shared bus diagnostics | STM32 |
 | `i2c-adc` | I2C1 PB8/PB9 bus diagnostics and MCP3425 | H563 |
 | `ota` | Firmware updates; over TCP with `net`, from an SD file with `fatfs` | `-Dbootloader=true`, and `net` or `fatfs` |
 | `otp-emulator` | OTP commands on the bank-B flash emulator | H563, `-Dbootloader=true` |

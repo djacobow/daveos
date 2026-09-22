@@ -508,3 +508,12 @@ timeout or failure closes and removes an incomplete upload before releasing the
 lease; failed cleanup is reported and leaves any remaining file for explicit
 removal. It never overwrites on retry. The protocol, lifetime rules and Python
 client are specified in [TCP file transfers](../file-transfer.md).
+
+### SSD1306 display
+
+The reusable `drivers::Ssd1306` driver takes a HAL I2C device and owns a fixed
+128×64 framebuffer. Requests progress through an asynchronous state machine;
+callers tick it until completion and retain the driver throughout pending I/O.
+Drawing is rejected during updates. The optional STM32 `ssd1306` feature adds
+explicit initialization, text, test-pattern and clear commands, sharing the
+I2C module's lease and diagnostics. See [SSD1306](../ssd1306.md).

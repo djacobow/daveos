@@ -286,8 +286,9 @@ observed stack bytes. A subsequent H755 opt-in create/readback/remove HIL
 cycle passed with 4,064 observed stack bytes and zero heap attempts; see
 [storage validation](storage.md#validation). Other SPI modes, higher rates,
 media removal and write power-loss behavior remain unqualified.
-H563 I2C has the MCP3425 fixture described below; H755 I2C remains build-tested
-only.
+H563 I2C has the MCP3425 fixture described below. H755 I2C1 now has
+[SSD1306 scan and page-write coverage](ssd1306.md); repeated START, clock
+stretching and H755 stuck-bus recovery remain unqualified.
 
 ## H563 MCP3425 fixture
 

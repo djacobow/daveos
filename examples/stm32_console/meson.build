@@ -16,12 +16,21 @@ endif
 sd_dma = 'sd-dma' in features
 file_ota = 'ota' in features and 'fatfs' in features
 components = {
-  'i2c-adc': {
+  'i2c-bus': {
     'deps': ['drivers_dep'], 'sources': ['irqs/i2c.cpp'],
-    'include': ['adc_probe.hpp', 'i2c_probe.hpp'],
-    'members': ['I2cBus i2c1{platform};', 'I2cProbe i2c{i2c1};',
-                'AdcProbe adc{platform, i2c1};'],
-    'modules': ['i2c', 'adc'],
+    'include': ['i2c_probe.hpp'],
+    'members': ['I2cBus i2c1{platform};', 'I2cProbe i2c{i2c1};'],
+    'modules': ['i2c'],
+  },
+  'i2c-adc': {
+    'include': ['adc_probe.hpp'],
+    'members': ['AdcProbe adc{platform, i2c1};'],
+    'modules': ['adc'],
+  },
+  'ssd1306': {
+    'include': ['display.hpp'],
+    'members': ['Display display{i2c1};'],
+    'modules': ['display'],
   },
   'sd': {
     'deps': ['hal_dep'],
@@ -95,9 +104,10 @@ components = {
     'members': ['stm32::UsbConsole<Event> usb{platform};'], 'consoles': ['usb'],
   },
 }
-component_order = ['i2c-adc', 'sd', 'fatfs', 'health', 'boot', 'otp-emulator',
+component_order = ['i2c-bus', 'i2c-adc', 'ssd1306', 'sd', 'fatfs', 'health', 'boot', 'otp-emulator',
                    'otp-h563', 'ota', 'net', 'ota-net', 'file-transfer', 'tcp', 'uart', 'usb']
 selected = features + (get_option('bootloader') ? ['boot'] : [])
+selected += ('i2c-adc' in features or 'ssd1306' in features) ? ['i2c-bus'] : []
 selected += 'ota' in features and 'net' in features ? ['ota-net'] : []
 
 component_includes = []

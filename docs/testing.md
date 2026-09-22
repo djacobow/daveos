@@ -312,3 +312,9 @@ It then attempts card initialization once and records whether it succeeded.
 This deliberately leaves a card mid-block; manual SD power cycling may be
 needed before or after the test. Keep it out of unattended suites. No SD or
 OTP writes are performed.
+
+The H755 SSD1306 fixture uses PB8/PB9 with a 128×64 panel at 0x3c. With
+`ssd1306` selected, run `tests/hil/h755/test_display.py` through the normal
+`--hil --hil-config ...` workflow. It starts from a factory image, scans before
+initialization, and exercises clear/pattern/text over UART and USB. Visual
+confirmation remains a separate manual check.

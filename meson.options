@@ -18,7 +18,7 @@ option('probe_serial', type: 'string', value: '', description: 'ST-LINK serial n
 # live in meson/profiles/*.ini.
 option('features', type: 'array', value: ['default'],
   choices: ['default', 'uart', 'usb', 'net', 'tcp', 'health', 'sd', 'sd-dma',
-            'fatfs', 'file-transfer', 'i2c-adc', 'ota', 'otp-emulator', 'otp-h563'],
+            'fatfs', 'file-transfer', 'i2c-adc', 'ssd1306', 'ota', 'otp-emulator', 'otp-h563'],
   description: 'Selected features (see meson/profiles/ for named sets)')
 
 # Kept separate from features on purpose: permanent, board-altering writes.

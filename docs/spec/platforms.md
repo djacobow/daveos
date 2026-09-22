@@ -813,7 +813,8 @@ card or display. Full device-protocol models are not required for this phase.
   This is not filesystem consistency testing or qualification of every SPI
   mode. H563 I2C1 now has MCP3425 scan/conversion coverage (see below);
   Both boards now have SD/FatFs read/write and RX/TX DMA hardware coverage;
-  H755 I2C remains build-only. See [SD inspection](../spi-i2c.md#nucleo-sd-fixture-and-validation).
+  H755 I2C1 now has SSD1306 scan/write coverage (see [display](../ssd1306.md));
+  repeated START, clock stretching and H755 bus-clear qualification remain open. See [SD inspection](../spi-i2c.md#nucleo-sd-fixture-and-validation).
 - The optional [FatFs worker](../storage.md) uses the initialized card
   through an injected SD transport. Incremental response/token reads use a
   516-byte capture buffer. H755 DMA1 stream 1/2 stage payloads in two aligned

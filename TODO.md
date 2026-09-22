@@ -175,7 +175,8 @@ section supersedes older H755 hardware deferrals; remaining gaps are explicit.
   after remount passed. Only the uniquely named test file was created/removed;
   zero heap attempts, 4,064 observed stack bytes, healthy watchdog/no retained
   fault. No OTP writes; power-loss/media-removal qualification remains open.
-- [ ] Qualify H755 I2C and additional SPI modes/speeds.
+- [ ] Extend H755 I2C qualification beyond SSD1306 writes (repeated START,
+  stretching, bus clear), and qualify additional SPI modes/speeds.
 - [x] Replace fixed-window SD reads with bounded incremental response/token
   handling and exact payload reads; shared probe/transport buffer is 516 bytes.
 - [x] Add optional H755 SPI1 RX/TX DMA for SD payloads without changing the
@@ -256,8 +257,13 @@ section supersedes older H755 hardware deferrals; remaining gaps are explicit.
   The injection verified SDA held low with MCU outputs released. No transaction
   timeouts, retained fault or heap attempts; observed stack use was 2,808 bytes.
 - [ ] Qualify physical I2C clock stretching and repeated START with suitable
-  fixtures; H755 I2C hardware remains unqualified.
-- [ ] Implement a display driver module for ssd1306 devices using DI of the I2C via the layer above
+  fixtures; H755 SSD1306 writes do not exercise these cases.
+- [x] Add an asynchronous SSD1306 128x64 driver with injected I2C, fixed
+  framebuffer, 6x8 text, and an optional display module. H755 PB8/PB9 scan
+  finds 0x3c; initialization/page-write commands exercised on hardware.
+  See [display](docs/ssd1306.md).
+- [ ] Visually confirm H755 SSD1306 text orientation and test-pattern pixels
+  when the user is back at the board (currently remote).
 
 - [x] Add task-only nested `yield()`, one eligible callback per call, bounded depth, context diagnostics and elapsed/self/nested accounting.
 - [x] Integrate FatFs through a serialized filesystem worker and asynchronous SD reader that yields while waiting. Same-volume nested calls and competing requests fail immediately. See [storage](docs/storage.md).
