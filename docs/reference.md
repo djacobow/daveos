@@ -162,6 +162,7 @@ net`. The table lives at the top of the root `meson.build`.
 | `sd` | SPI1 SD card session and `sd` diagnostic commands | STM32 |
 | `sd-dma` | DMA for SD payloads | `sd` |
 | `fatfs` | FatFs library; on STM32 the `fs` module on the SD card | `sd` on STM32 |
+| `file-transfer` | Files and directories on TCP port 1002 | STM32, `net,fatfs` |
 | `i2c-adc` | I2C1 PB8/PB9 bus diagnostics and MCP3425 | H563 |
 | `ota` | Firmware updates; over TCP with `net`, from an SD file with `fatfs` | `-Dbootloader=true`, and `net` or `fatfs` |
 | `otp-emulator` | OTP commands on the bank-B flash emulator | H563, `-Dbootloader=true` |
@@ -180,7 +181,7 @@ cross file; `-Dfeatures=` on the command line still overrides them:
 | `network.ini` | console plus `net,tcp` |
 | `storage.ini` | console plus `sd,sd-dma,fatfs` |
 | `hil.ini` | A/B, console plus `net,tcp,ota`: what `tests/hil` requires |
-| `full.ini` | A/B, console plus `net,tcp,sd,sd-dma,fatfs,ota` |
+| `full.ini` | A/B, console plus `net,tcp,sd,sd-dma,fatfs,file-transfer,ota` |
 
 ```sh
 meson setup build/hil-h563 --cross-file meson/stm32.ini \

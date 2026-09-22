@@ -2,3 +2,5 @@ storage_test = executable('test-storage', ['storage.cpp', 'sd_reader.cpp', packa
   cpp_args: ['-DREFERENCE_PACKAGE="' + meson.project_build_root() / 'tests/reliability/reference.ota' + '"'],
   dependencies: [test_support_dep, storage_dep, file_block_dep, update_dep, file_flash_dep])
 test('storage', storage_test, suite: 'unit', timeout: 30)
+test('file-transfer-client', python,
+  args: ['-B', '-m', 'pytest', '-q', files('test_files.py')], suite: 'unit')

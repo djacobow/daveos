@@ -37,6 +37,15 @@ lives under `build/pytest-cache/`.
 
 ## H563 HIL prerequisites
 
+The opt-in [TCP file-transfer test](file-transfer.md) is available for either
+board with an SD card and the `file-transfer` feature. Set
+`DAVEOS_HIL_FILE_TRANSFER=1` and select `tests/hil/h563/test_files.py` (or the
+H755 equivalent). It factory-provisions firmware, creates uniquely named
+temporary files, verifies binary upload/download on rw/ro mounts, validates the
+uploaded OTA package without installing it, and checks disconnect/checksum
+cleanup. It removes its successful test file and unmounts afterward; a failing
+test may leave its uniquely named file for inspection. Real OTP is never written.
+
 - NUCLEO-H563ZI connected through ST-LINK (SWD and its UART).
 - CN13 USB-C data connection to the host.
 - CN14 Ethernet connected to a DHCP LAN reachable from the host.

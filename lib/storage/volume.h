@@ -35,12 +35,19 @@ namespace daveos::storage {
     // Read-write mounts only. Reject directories and open handles; sync
     // metadata.
     FRESULT remove(std::string_view path);
+    FRESULT mkdir(std::string_view path);
+    FRESULT rmdir(std::string_view path);  // Empty directories only.
     FRESULT unmount();
     FRESULT open(std::string_view path, std::uint32_t offset = 0);
     FRESULT read(std::span<std::uint8_t> bytes, std::uint32_t& count);
     FRESULT open_directory(std::string_view path);
     FRESULT next(FILINFO& entry);  // Empty fname marks end, not an error.
     FRESULT close();
+
+    // Size of the currently open file; the caller must own its file lease.
+    std::uint32_t size() const {
+      return file_open_ ? static_cast<std::uint32_t>(f_size(&file_)) : 0;
+    }
 
     bool mounted() const { return mounted_; }
 
@@ -77,6 +84,7 @@ namespace daveos::storage {
     FRESULT Path(std::string_view path,
                  std::array<char, kPathCapacity + 4>& output) const;
     FRESULT Close();
+    FRESULT Mutate(std::string_view path, bool directory, bool create);
     BlockDevice device_;
     FATFS fs_{};
     FIL file_{};

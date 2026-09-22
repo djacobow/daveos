@@ -7,6 +7,7 @@
 #include "core/schedule/module.hpp"
 #include "core/state_machine/state_machine.hpp"
 #include "read_file.h"
+#include "transfer.h"
 #include "volume.h"
 
 namespace daveos::storage {
@@ -159,6 +160,27 @@ namespace daveos::storage {
           [](void* p) {
             return FileStatus(static_cast<Module*>(p)->volume_.close());
           }};
+    }
+
+    // Generic transfer access: downloads permit ro/rw; uploads require rw.
+    // Constructing this descriptor does not touch the module or hardware.
+    FileAccess file_access() {
+      return {&volume_, this,
+              [](void* p, bool write) {
+                auto& m = *static_cast<Module*>(p);
+                if (m.busy_) {
+                  return FR_LOCKED;
+                }
+                if (!m.volume_.mounted()) {
+                  return FR_NOT_READY;
+                }
+                if (write && m.volume_.read_only()) {
+                  return FR_WRITE_PROTECTED;
+                }
+                m.busy_ = true;
+                return FR_OK;
+              },
+              [](void* p) { static_cast<Module*>(p)->busy_ = false; }};
     }
 
    private:

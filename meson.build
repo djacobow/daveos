@@ -32,7 +32,7 @@ endif
 # 'boards' (supported boards), 'requires' (other features), 'bootloader'
 # (needs -Dbootloader=true). Order here is the resolved order.
 is_stm32 = platform in ['stm32h5', 'stm32h7']
-feature_order = ['uart', 'usb', 'net', 'tcp', 'health', 'sd', 'sd-dma', 'fatfs',
+feature_order = ['uart', 'usb', 'net', 'tcp', 'health', 'sd', 'sd-dma', 'fatfs', 'file-transfer',
                  'i2c-adc', 'ota', 'otp-emulator', 'otp-h563']
 feature_rules = {
   'uart': {'stm32': true},
@@ -44,6 +44,7 @@ feature_rules = {
   'sd-dma': {'stm32': true, 'requires': ['sd']},
   # On STM32 the example mounts the SD card; host builds use file images.
   'fatfs': {'requires': is_stm32 ? ['sd'] : []},
+  'file-transfer': {'stm32': true, 'requires': ['net', 'fatfs']},
   'i2c-adc': {'stm32': true, 'boards': ['h563']},
   'ota': {'stm32': true, 'bootloader': true},
   'otp-emulator': {'stm32': true, 'boards': ['h563'], 'bootloader': true},

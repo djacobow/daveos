@@ -213,6 +213,20 @@ section supersedes older H755 hardware deferrals; remaining gaps are explicit.
 
 ## For STM32
 
+- [x] Add optional TCP file upload/download on port 1002, with a Python client,
+  create-only rw uploads, ro/rw downloads, filesystem reservation, bounded
+  chunks, size/CRC validation, timeout and partial-file cleanup. H563 HIL
+  uploaded a 290,114-byte OTA package, downloaded matching bytes on both mount
+  modes, validated it through `ota init` without installing it, and checked
+  existing-file protection, competing-client/lease rejection, disconnect,
+  checksum and idle-timeout cleanup. Basic ls/rm/mkdir/rmdir also passed,
+  including ro and nonempty-directory rejection. Temporary files/directories
+  were removed. Observed
+  stack watermark 4,360/473,776 bytes; zero heap attempts. ASan/UBSan 43/43,
+  fake/no-logging 37/37 and both A/B ARM builds passed. H755 file transfers are
+  build-tested only; physical power-cut/card-removal qualification is deferred.
+  See [TCP file transfers](docs/file-transfer.md).
+
 - [ ] Audit H755 data placement: keep the stack and frequently accessed control
   state in DTCM; move bulk queues, logging/console buffers, SD capture buffers
   and filesystem working storage to AXI SRAM where appropriate. Separate

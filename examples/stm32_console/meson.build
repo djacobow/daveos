@@ -75,6 +75,12 @@ components = {
     'members': ['OtaNetwork ota_network{platform, network.service, ota};'],
     'stop': ['ota_network.stop();'],
   },
+  'file-transfer': {
+    'deps': ['storage_dep', 'network_dep'],
+    'include': ['net/file_transfer.hpp'],
+    'members': ['daveos::net::FileTransferModule<Platform, Event> files{platform, network.service, filesystem.file_access()};'],
+    'modules': ['files'],
+  },
   'tcp': {
     'include': ['console/tcp.hpp'],
     'members': ['daveos::console::TcpConsole<Event, Platform> tcp{platform, network.service};'],
@@ -90,7 +96,7 @@ components = {
   },
 }
 component_order = ['i2c-adc', 'sd', 'fatfs', 'health', 'boot', 'otp-emulator',
-                   'otp-h563', 'ota', 'net', 'ota-net', 'tcp', 'uart', 'usb']
+                   'otp-h563', 'ota', 'net', 'ota-net', 'file-transfer', 'tcp', 'uart', 'usb']
 selected = features + (get_option('bootloader') ? ['boot'] : [])
 selected += 'ota' in features and 'net' in features ? ['ota-net'] : []
 

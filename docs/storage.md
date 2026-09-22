@@ -1,5 +1,11 @@
 # FAT storage
 
+The optional [TCP file service](file-transfer.md) uploads new binary files on
+read-write mounts and downloads files on either mount mode. It shares the
+filesystem module's reservation with console commands and SD OTA. It also lists
+directories on either mount mode and supports file removal, directory creation,
+and empty-directory removal on rw mounts.
+
 Select the `fatfs` feature and initialize the pinned submodule:
 
 ```sh

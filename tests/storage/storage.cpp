@@ -10,6 +10,7 @@
 #include "storage/module.hpp"
 #include "support.hpp"
 #include "update/module.hpp"
+#include "util/wire.h"
 
 namespace {
   namespace storage = daveos::storage;
@@ -713,4 +714,404 @@ TEST_CASE(
                std::string_view::npos;
       }));
 #endif
+}
+
+namespace {
+  namespace wire = daveos::util::wire;
+  using Transfer = storage::FileTransfer;
+  using TS = storage::TransferStatus;
+
+  std::vector<std::byte> Frame(Transfer::Op op,
+                               std::span<const std::byte> data = {},
+                               std::uint32_t arg0 = 0, std::uint32_t arg1 = 0) {
+    std::vector<std::byte> frame(Transfer::kHeaderBytes + data.size());
+    wire::write32(frame, 0, Transfer::kMagic);
+    wire::write32(frame, 4, Transfer::kVersion);
+    wire::write32(frame, 8, static_cast<std::uint32_t>(op));
+    wire::write32(frame, 12, static_cast<std::uint32_t>(data.size()));
+    wire::write32(frame, 16, arg0);
+    wire::write32(frame, 20, arg1);
+    std::copy(data.begin(), data.end(), frame.begin() + Transfer::kHeaderBytes);
+    return frame;
+  }
+
+  std::span<const std::byte> Bytes(std::string_view text) {
+    return std::as_bytes(std::span{text});
+  }
+
+  struct Transfers {
+    Image image;
+    storage::BlockDevice backing{};
+    bool fail_write = false;
+    storage::Module<> fs;
+    Transfer protocol;
+    core::Time now = 0;
+
+    Transfers() : fs(Writable()), protocol(fs.file_access()) {
+      REQUIRE(fs.init(core::InitStage::stage1) == core::Status::ok);
+      REQUIRE(fs.file_access().volume->mount(true) == FR_OK);
+    }
+
+    storage::BlockDevice Writable() {
+      REQUIRE(image.device.close());
+      REQUIRE(image.device.open(image.path.c_str(), true));
+      backing = image.device.device();
+      return {
+          this,
+          [](void* p) {
+            auto& f = *static_cast<Transfers*>(p);
+            return f.backing.ready(f.backing.context);
+          },
+          [](void* p) {
+            auto& f = *static_cast<Transfers*>(p);
+            return f.backing.sectors(f.backing.context);
+          },
+          [](void* p, std::uint32_t at, std::span<std::uint8_t> bytes) {
+            auto& f = *static_cast<Transfers*>(p);
+            return f.backing.read(f.backing.context, at, bytes);
+          },
+          [](void* p) {
+            auto& f = *static_cast<Transfers*>(p);
+            return f.backing.acquire(f.backing.context);
+          },
+          [](void* p) {
+            auto& f = *static_cast<Transfers*>(p);
+            f.backing.release(f.backing.context);
+          },
+          [](void* p, std::uint32_t at, std::span<const std::uint8_t> bytes) {
+            auto& f = *static_cast<Transfers*>(p);
+            return f.fail_write ? core::Status::io_error
+                                : f.backing.write(f.backing.context, at, bytes);
+          },
+          [](void* p) {
+            auto& f = *static_cast<Transfers*>(p);
+            return f.fail_write ? core::Status::io_error
+                                : f.backing.sync(f.backing.context);
+          }};
+    }
+
+    void Tick() {
+      protocol.tick(++now);
+      protocol.completed_at(now);
+    }
+
+    std::vector<std::byte> Send(std::vector<std::byte> frame,
+                                TS expected = TS::ok) {
+      // One-byte fragmentation exercises every header and payload boundary.
+      for (auto byte : frame) {
+        REQUIRE(protocol.feed({&byte, 1}, ++now) == 1);
+        Tick();
+      }
+      for (int i = 0; i < 4 && protocol.reply().empty(); ++i) {
+        Tick();
+      }
+      REQUIRE_FALSE(protocol.reply().empty());
+      auto reply = protocol.reply();
+      CHECK(wire::read32(reply, 8) == static_cast<std::uint32_t>(expected));
+      std::vector<std::byte> copy(reply.begin(), reply.end());
+      protocol.sent(++now);
+      return copy;
+    }
+
+    void Disconnect() {
+      protocol.disconnect();
+      for (int i = 0; i < 4; ++i) {
+        Tick();
+      }
+      CHECK_FALSE(protocol.busy());
+      CHECK(protocol.reply().empty());
+    }
+
+    bool Exists(const char* path) {
+      auto& volume = *fs.file_access().volume;
+      const auto result = volume.open(path);
+      if (result == FR_OK) {
+        REQUIRE(volume.close() == FR_OK);
+      }
+      return result == FR_OK;
+    }
+  };
+}  // namespace
+
+TEST_CASE(
+    "file transfers round trip binary chunks, reserve the volume and close "
+    "before success") {
+  Transfers fixture;
+  std::vector<std::byte> contents(2501);
+  for (std::size_t i = 0; i < contents.size(); ++i) {
+    contents[i] = std::byte(i & 255);
+  }
+  const auto crc = daveos::util::crc32::calculate(contents);
+  fixture.Send(
+      Frame(Transfer::Op::upload, Bytes("transfer.bin"), contents.size(), crc));
+  CHECK(fixture.fs.Unmount() == core::Status::busy);
+  CHECK(fixture.fs.read_file().reserve(&fixture.fs) == core::Status::busy);
+  for (std::size_t at = 0; at < contents.size(); at += Transfer::kChunkBytes) {
+    const auto chunk = std::span{contents}.subspan(
+        at, std::min(Transfer::kChunkBytes, contents.size() - at));
+    auto reply = fixture.Send(Frame(Transfer::Op::write, chunk, at));
+    CHECK(wire::read32(reply, 16) == at + chunk.size());
+  }
+  auto reply = fixture.Send(Frame(Transfer::Op::finish));
+  CHECK(wire::read32(reply, 16) == contents.size());
+  CHECK(wire::read32(reply, 20) == crc);
+  CHECK_FALSE(fixture.protocol.busy());
+  REQUIRE(fixture.Exists("transfer.bin"));
+  // Mount ro: download is allowed, upload is rejected and cannot overwrite.
+  auto& volume = *fixture.fs.file_access().volume;
+  REQUIRE(volume.unmount() == FR_OK);
+  REQUIRE(volume.mount() == FR_OK);
+  fixture.Send(Frame(Transfer::Op::upload, Bytes("new.bin")), TS::read_only);
+  reply = fixture.Send(Frame(Transfer::Op::download, Bytes("transfer.bin")));
+  REQUIRE(wire::read32(reply, 16) == contents.size());
+  std::vector<std::byte> downloaded;
+  do {
+    reply = fixture.Send(Frame(Transfer::Op::read));
+    downloaded.insert(downloaded.end(), reply.begin() + Transfer::kHeaderBytes,
+                      reply.end());
+  } while (reply.size() > Transfer::kHeaderBytes);
+  CHECK(downloaded == contents);
+  CHECK(wire::read32(reply, 20) == crc);
+  CHECK_FALSE(fixture.protocol.busy());
+  REQUIRE(volume.unmount() == FR_OK);
+  REQUIRE(volume.mount(true) == FR_OK);
+  fixture.Send(Frame(Transfer::Op::upload, Bytes("transfer.bin")), TS::exists);
+  CHECK(fixture.Exists("transfer.bin"));
+  CHECK(fixture.Exists("HELLO.TXT"));
+}
+
+TEST_CASE(
+    "file transfers clean up interrupted or invalid uploads without deleting "
+    "existing files") {
+  Transfers fixture;
+  SECTION("disconnect") {
+    fixture.Send(Frame(Transfer::Op::upload, Bytes("partial.bin"), 200));
+    fixture.Send(Frame(Transfer::Op::write, Bytes("short")));
+    fixture.Disconnect();
+  }
+  SECTION("partial header timeout") {
+    auto frame = Frame(Transfer::Op::upload, Bytes("partial.bin"));
+    REQUIRE(fixture.protocol.feed(std::span{frame}.first(5), 0) == 5);
+    fixture.now = Transfer::kIdleTimeout;
+    fixture.Tick();
+    fixture.Tick();
+    REQUIRE_FALSE(fixture.protocol.reply().empty());
+    CHECK(fixture.protocol.status() == TS::timeout);
+    fixture.protocol.sent(++fixture.now);
+  }
+  SECTION("lease timeout") {
+    fixture.Send(Frame(Transfer::Op::upload, Bytes("partial.bin"), 200));
+    fixture.now += Transfer::kIdleTimeout;
+    fixture.Tick();
+    fixture.Tick();
+    CHECK(fixture.protocol.status() == TS::timeout);
+    fixture.protocol.sent(++fixture.now);
+  }
+  SECTION("checksum mismatch") {
+    fixture.Send(Frame(Transfer::Op::upload, Bytes("partial.bin"), 3, 123));
+    fixture.Send(Frame(Transfer::Op::write, Bytes("abc")));
+    fixture.Send(Frame(Transfer::Op::finish), TS::checksum_error);
+  }
+  SECTION("offset mismatch") {
+    fixture.Send(Frame(Transfer::Op::upload, Bytes("partial.bin"), 200));
+    fixture.Send(Frame(Transfer::Op::write, Bytes("abc"), 1), TS::invalid);
+  }
+  SECTION("excess size") {
+    fixture.Send(Frame(Transfer::Op::upload, Bytes("partial.bin"), 1));
+    fixture.Send(Frame(Transfer::Op::write, Bytes("abc")), TS::invalid);
+  }
+  SECTION("incomplete finish") {
+    fixture.Send(Frame(Transfer::Op::upload, Bytes("partial.bin"), 200));
+    fixture.Send(Frame(Transfer::Op::finish), TS::invalid);
+  }
+  SECTION("existing path and missing download") {
+    fixture.Send(Frame(Transfer::Op::upload, Bytes("HELLO.TXT")), TS::exists);
+    fixture.Send(Frame(Transfer::Op::download, Bytes("missing.txt")),
+                 TS::not_found);
+  }
+  CHECK_FALSE(fixture.Exists("partial.bin"));
+  CHECK(fixture.Exists("HELLO.TXT"));
+  CHECK_FALSE(fixture.protocol.busy());
+  // Reservation is released after all outcomes.
+  auto access = fixture.fs.file_access();
+  REQUIRE(access.reserve(access.context, false) == FR_OK);
+  access.release(access.context);
+}
+
+TEST_CASE(
+    "file transfer validation handles empty files, malformed requests and "
+    "bounded storage") {
+  Transfers fixture;
+  SECTION("empty round trip") {
+    fixture.Send(Frame(Transfer::Op::upload, Bytes("empty.bin")));
+    fixture.Send(Frame(Transfer::Op::finish));
+    fixture.Send(Frame(Transfer::Op::download, Bytes("empty.bin")));
+    auto reply = fixture.Send(Frame(Transfer::Op::read));
+    CHECK(reply.size() == Transfer::kHeaderBytes);
+    CHECK(wire::read32(reply, 16) == 0);
+    CHECK(wire::read32(reply, 20) == 0);
+  }
+  SECTION("oversize declared payload") {
+    auto frame = Frame(Transfer::Op::upload);
+    wire::write32(frame, 12, 1025);
+    fixture.Send(frame, TS::invalid);
+  }
+  SECTION("bad magic") {
+    auto frame = Frame(Transfer::Op::download);
+    wire::write32(frame, 0, 123);
+    fixture.Send(frame, TS::invalid);
+  }
+  SECTION("bad version") {
+    auto frame = Frame(Transfer::Op::download);
+    wire::write32(frame, 4, 2);
+    fixture.Send(frame, TS::invalid);
+  }
+  SECTION("overlong path") {
+    std::array<std::byte, 256> path;
+    path.fill(std::byte{'x'});
+    fixture.Send(Frame(Transfer::Op::upload, path), TS::invalid);
+  }
+  SECTION("disconnect during download preserves source") {
+    fixture.Send(Frame(Transfer::Op::download, Bytes("HELLO.TXT")));
+    fixture.Send(Frame(Transfer::Op::read));
+    fixture.Disconnect();
+    CHECK(fixture.Exists("HELLO.TXT"));
+  }
+  SECTION("NUL in path") {
+    const std::array bytes{std::byte{'x'}, std::byte{0}, std::byte{'y'}};
+    fixture.Send(Frame(Transfer::Op::upload, bytes), TS::invalid);
+  }
+  SECTION("no mount") {
+    REQUIRE(fixture.fs.file_access().volume->unmount() == FR_OK);
+    fixture.Send(Frame(Transfer::Op::download, Bytes("HELLO.TXT")),
+                 TS::not_ready);
+  }
+  SECTION("competing lease") {
+    auto access = fixture.fs.file_access();
+    REQUIRE(access.reserve(access.context, false) == FR_OK);
+    fixture.Send(Frame(Transfer::Op::download, Bytes("HELLO.TXT")), TS::busy);
+    CHECK(access.reserve(access.context, false) == FR_LOCKED);
+    access.release(access.context);
+  }
+}
+
+TEST_CASE("failed upload cleanup reports the orphan and releases its lease") {
+  Transfers fixture;
+  const auto data = Bytes("not durable");
+  fixture.Send(Frame(Transfer::Op::upload, Bytes("orphan.bin"), data.size(),
+                     daveos::util::crc32::calculate(data)));
+  fixture.Send(Frame(Transfer::Op::write, data));
+  fixture.fail_write = true;
+  fixture.Send(Frame(Transfer::Op::finish), TS::cleanup_failed);
+  CHECK_FALSE(fixture.protocol.busy());
+  CHECK(fixture.protocol.failures() == 1);
+  fixture.fail_write = false;
+  // The failed file is never silently overwritten; remove it explicitly.
+  fixture.Send(Frame(Transfer::Op::upload, Bytes("orphan.bin")), TS::exists);
+  CHECK(fixture.fs.file_access().volume->remove("orphan.bin") == FR_OK);
+  CHECK(fixture.Exists("HELLO.TXT"));
+}
+
+TEST_CASE(
+    "file transfers copy request bytes and backpressure pipelined frames") {
+  Transfers fixture;
+  auto frame = Frame(Transfer::Op::upload, Bytes("copy.bin"));
+  const auto second = Frame(Transfer::Op::finish);
+  frame.insert(frame.end(), second.begin(), second.end());
+  auto input = std::span<const std::byte>{frame};
+  auto count = fixture.protocol.feed(input, ++fixture.now);
+  REQUIRE(count == Transfer::kHeaderBytes);
+  input = input.subspan(count);
+  count = fixture.protocol.feed(input, ++fixture.now);
+  REQUIRE(count == 8);
+  input = input.subspan(count);
+  CHECK(fixture.protocol.feed(input, ++fixture.now) == 0);
+  // Borrowed transport bytes may disappear before any filesystem call.
+  frame.assign(frame.size(), std::byte{0});
+  fixture.Tick();
+  fixture.Tick();
+  REQUIRE_FALSE(fixture.protocol.reply().empty());
+  CHECK(fixture.protocol.feed(second, ++fixture.now) == 0);
+  fixture.protocol.sent(++fixture.now);
+  fixture.Send(second);
+  CHECK(fixture.Exists("copy.bin"));
+}
+
+TEST_CASE("remote directory operations are bounded, leased and type safe") {
+  Transfers f;
+  using Op = Transfer::Op;
+  f.Send(Frame(Op::mkdir, Bytes("folder")));
+  f.Send(Frame(Op::mkdir, Bytes("folder")), TS::exists);
+  f.Send(Frame(Op::mkdir, Bytes("missing/child")), TS::not_found);
+  f.Send(Frame(Op::upload, Bytes("folder/a long name.txt")));
+  f.Send(Frame(Op::finish));
+  f.Send(Frame(Op::rmdir, Bytes("folder")), TS::denied);
+  f.Send(Frame(Op::remove, Bytes("folder")), TS::denied);
+  f.Send(Frame(Op::rmdir, Bytes("folder/a long name.txt")), TS::denied);
+  f.Send(Frame(Op::list, Bytes("folder")));
+  CHECK(f.fs.Unmount() == core::Status::busy);
+  auto reply = f.Send(Frame(Op::next));
+  CHECK(wire::read32(reply, 24) == 0);
+  CHECK(wire::read32(reply, 28) == 0);
+  CHECK(std::string_view(reinterpret_cast<const char*>(reply.data() + 32),
+                         reply.size() - 32) == "a long name.txt");
+  CHECK(f.Send(Frame(Op::next)).size() == Transfer::kHeaderBytes);
+  CHECK_FALSE(f.protocol.busy());
+  f.Send(Frame(Op::list, Bytes("folder")));
+  f.Disconnect();
+  f.Send(Frame(Op::remove, Bytes("folder/a long name.txt")));
+  f.Send(Frame(Op::list, Bytes("folder")));
+  CHECK(f.Send(Frame(Op::next)).size() == Transfer::kHeaderBytes);
+  f.Send(Frame(Op::rmdir, Bytes("folder")));
+  f.Send(Frame(Op::list, Bytes("folder")), TS::not_found);
+  CHECK(f.Exists("HELLO.TXT"));
+}
+
+TEST_CASE(
+    "directory requests respect read-only mounts and reject mixed sessions") {
+  Transfers f;
+  using Op = Transfer::Op;
+  auto& volume = *f.fs.file_access().volume;
+  REQUIRE(volume.unmount() == FR_OK);
+  REQUIRE(volume.mount() == FR_OK);
+  for (auto op : {Op::remove, Op::mkdir, Op::rmdir}) {
+    f.Send(Frame(op, Bytes("HELLO.TXT")), TS::read_only);
+  }
+  f.Send(Frame(Op::list, Bytes("/")));
+  f.Send(Frame(Op::read), TS::invalid);
+  CHECK_FALSE(f.protocol.busy());
+  f.Send(Frame(Op::list, Bytes("/")));
+  f.now += Transfer::kIdleTimeout;
+  f.Tick();
+  f.Tick();
+  CHECK(f.protocol.status() == TS::timeout);
+  f.protocol.sent(++f.now);
+  CHECK_FALSE(f.protocol.busy());
+  f.Send(Frame(Op::next), TS::invalid);
+  CHECK(f.Exists("HELLO.TXT"));
+}
+
+TEST_CASE("directory listing streams many entries and marks subdirectories") {
+  Transfers f;
+  using Op = Transfer::Op;
+  f.Send(Frame(Op::mkdir, Bytes("many")));
+  f.Send(Frame(Op::mkdir, Bytes("many/sub")));
+  for (int i = 0; i < 40; ++i) {
+    const auto path = std::string("many/file") + std::to_string(i);
+    f.Send(Frame(Op::upload, Bytes(path)));
+    f.Send(Frame(Op::finish));
+  }
+  f.Send(Frame(Op::list, Bytes("many")));
+  int count = 0, directories = 0;
+  for (;;) {
+    const auto reply = f.Send(Frame(Op::next));
+    if (reply.size() == Transfer::kHeaderBytes) {
+      break;
+    }
+    REQUIRE(++count <= 41);
+    directories += wire::read32(reply, 24) == 1;
+  }
+  CHECK(count == 41);
+  CHECK(directories == 1);
+  CHECK_FALSE(f.protocol.busy());
 }

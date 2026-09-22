@@ -494,3 +494,17 @@ The optional module serializes requests in a one-shot worker and returns between
 output records. Paths are copied before command dispatch returns. The initial
 commands mount, unmount, list, preview, create and remove files; FAT12/16/32 and 512-byte sectors
 are supported. See [storage](../storage.md) for limits, configuration and tests.
+
+### TCP file transfers
+
+An optional, independent service on port 1002 supports directory listing, file removal,
+mkdir, empty-directory removal, and create-only uploads to
+read-write mounts and downloads from read-only or read-write mounts. Listing
+also permits either mount mode; all mutations require rw. Listings stream one
+entry per request, retaining the lease until end or cleanup. It reserves
+the filesystem for one transfer, uses bounded 1024-byte stop-and-wait chunks,
+and reports size and CRC32. Upload success requires sync and close. Disconnect,
+timeout or failure closes and removes an incomplete upload before releasing the
+lease; failed cleanup is reported and leaves any remaining file for explicit
+removal. It never overwrites on retry. The protocol, lifetime rules and Python
+client are specified in [TCP file transfers](../file-transfer.md).

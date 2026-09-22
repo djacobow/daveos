@@ -284,6 +284,18 @@ namespace daveos::storage {
   }
 
   FRESULT Volume::remove(std::string_view path) {
+    return Mutate(path, false, false);
+  }
+
+  FRESULT Volume::mkdir(std::string_view path) {
+    return Mutate(path, true, true);
+  }
+
+  FRESULT Volume::rmdir(std::string_view path) {
+    return Mutate(path, true, false);
+  }
+
+  FRESULT Volume::Mutate(std::string_view path, bool directory, bool create) {
     Guard guard(*this);
     if (!guard || file_open_ || directory_open_) {
       return FR_LOCKED;
@@ -299,12 +311,15 @@ namespace daveos::storage {
     if (result != FR_OK) {
       return result;
     }
+    if (create) {
+      return f_mkdir(name.data());
+    }
     FILINFO entry{};
     result = f_stat(name.data(), &entry);
     if (result != FR_OK) {
       return result;
     }
-    if (entry.fattrib & AM_DIR) {
+    if (bool(entry.fattrib & AM_DIR) != directory) {
       return FR_DENIED;
     }
     // f_unlink includes sync_fs/CTRL_SYNC. Keep the guard across both calls:

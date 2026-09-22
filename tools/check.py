@@ -58,7 +58,8 @@ def main():
             "platform/stm32/bus/spi_dma.h", "platform/stm32h7/spi_dma.h",
             "platform/stm32h5/spi_dma.h",
             "lib/storage/module.hpp", "lib/storage/read_file.h", "lib/update/file.h", "lib/storage/sd/initializer.h", "lib/storage/sd/read.h", "lib/storage/sd/transport.h",
-            "lib/storage/sd/session.h", "lib/watchdog/health.hpp")]
+            "lib/storage/sd/session.h", "lib/watchdog/health.hpp",
+            "lib/net/file_transfer.hpp")]
         subprocess.run(command + ["--language=c++", *hal_headers], cwd=ROOT, check=True)
 
 
