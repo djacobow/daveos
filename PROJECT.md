@@ -106,7 +106,8 @@ any tasks. The default task and command descriptor arrays are empty.
 
 A module also has:
 
-* A nonempty `static constexpr const char* name()` accessor.
+* A nonempty `static constexpr const char* name()` accessor: the default name for
+  the type's instances. An instance may be given its own name at construction.
 * A `can_sleep()` callback that indicates whether the module permits system sleep.
 * Optional typed event handlers declared by `events()`, or a custom
   `on_event(const Event&)` visitor.
@@ -728,12 +729,18 @@ string views last until the handler returns.
 Default task and command arrays are empty; command-only modules need no dummy
 task. Modules without commands do not appear in routing or help.
 
-Module names are static constexpr metadata exposed by `name()`, replacing the
-base constructor's name argument. Distinct names for instances require distinct
-template instantiations. Command prefixes default to module names and may be
-overridden. Compile-time validation rejects empty or duplicate module names,
-duplicate command prefixes, duplicate commands within a module, invalid callback
-metadata, and reserved `help` collisions. Comparisons are ASCII case-insensitive.
+Each module type exposes a default name through static constexpr `name()`. A type
+that can be registered more than once forwards an instance name to the protected
+base constructor; module identity is the instance, not the type. Instance names
+are read only from `init()` onward, because file-scope modules may not yet be
+constructed when the scheduler is. Distinct types must have distinct default names
+(compile time); instance names must be unique (scheduler `init()`, before any
+hook, `duplicate_name`). Command routes default to the instance name; a static
+`command_prefix()` override fixes one route for every instance of a type. Route
+validity and uniqueness are checked when sources are bound, and by `Application`
+before module initialization. Compile-time validation still rejects duplicate
+commands within a module, invalid callback metadata, and a fixed route of `help`.
+Comparisons are ASCII case-insensitive.
 Command names and prefixes contain only ASCII letters, digits, underscores, and
 hyphens; display names may contain spaces if the command prefix is overridden.
 

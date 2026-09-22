@@ -456,10 +456,14 @@ class Motor : public core::Module<Motor, Event> {
 
 `DAVEOS_COMMAND` captures `SetSpeed` as both the member-function pointer and its
 logging name. Logs from this handler identify `motor.SetSpeed`. Task and command
-arrays default to empty; command-only modules need no task. Module names are now
-static constexpr accessors, not constructor arguments. Modules with different
-instance names must use different template instantiations. Names must be nonempty
-and unique ignoring ASCII case; registration checks this at compile time.
+arrays default to empty; command-only modules need no task. `static constexpr
+name()` is the default name for a type's instances. A type that can be registered
+more than once forwards an instance name to the protected `core::Module(const
+char*)` constructor, e.g. `Sensor left{"left"}, right{"right"}`; logs, statistics,
+initialization failures and command routes then use `left`/`right`. Distinct
+module types must have distinct default names (checked at compile time). Instance
+names must be nonempty and unique ignoring ASCII case; the scheduler checks this
+at `init()`, before any hook runs, and returns `duplicate_name`.
 
 Construct `CommandDispatcher dispatcher(modules, scheduler)` using the same
 `ModuleList` supplied to the scheduler. Call `dispatcher.dispatch(line)` from a
@@ -468,10 +472,14 @@ collects complete lines and serializes inputs. Interrupt-time dispatch is reject
 and dispatch before `run()` or after shutdown returns `not_running`.
 
 `motor speed 100` calls `SetSpeed` with just `100`. Matching ignores ASCII case:
-an exact name wins, otherwise a unique prefix is accepted. Override
-`static constexpr const char* command_prefix()` to route using another name.
-Prefixes and command names allow ASCII letters, digits, `_`, and `-`; duplicates,
-invalid names/callback metadata, and reserved `help` collisions fail compilation.
+an exact name wins, otherwise a unique prefix is accepted. Commands route by
+instance name; override `static constexpr const char* command_prefix()` to give
+every instance of a type one fixed route. Routes and command names allow ASCII
+letters, digits, `_`, and `-`. Duplicate commands within a module, invalid callback
+metadata and a fixed route of `help` fail compilation. Instance routes are checked
+when sources are bound (`bind_sources()` or `validate()`): an invalid route returns
+`invalid_argument`, a duplicate returns `duplicate_name`, and no source is bound.
+`Application` performs that check before any module's `init()`.
 
 Double quotes group whole arguments, including empty arguments; mixed forms such
 as `ab"cd"` are invalid. Backslash escapes quotes and backslashes; other sequences

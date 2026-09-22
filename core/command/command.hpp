@@ -30,8 +30,10 @@ namespace daveos::core {
       if (commands.empty()) {
         return true;
       }
-      if (!ValidCommandName(M::command_prefix()) ||
-          EqualName(M::command_prefix(), "help")) {
+      // A fixed type-level route is checked here; instance routes are checked
+      // when sources are bound.
+      if (M::command_prefix() && (!ValidCommandName(M::command_prefix()) ||
+                                  EqualName(M::command_prefix(), "help"))) {
         return false;
       }
       for (std::size_t i = 0; i < commands.size(); ++i) {
@@ -50,21 +52,17 @@ namespace daveos::core {
     }
 
     static_assert((ValidModule<Modules>() && ...), "invalid command metadata");
-    static_assert(UniqueNames(std::array<const char*, sizeof...(Modules)>{(
-                                  Modules::commands().empty()
-                                      ? nullptr
-                                      : Modules::command_prefix())...},
-                              true),
-                  "command prefixes must be unique (case-insensitive)");
 
     struct Entry {
-      const char* prefix;
       void* module;
+      const char* (*route)(const void*);
       Status (*dispatch)(CommandDispatcher&, void*, CommandArguments, bool&);
-      void (*help)(CommandDispatcher&);
+      void (*help)(CommandDispatcher&, void*);
     };
 
    public:
+    // Stores module addresses only; routes are read from the instances once
+    // they have been constructed (see validate()).
     CommandDispatcher(ModuleList<Modules...> modules,
                       SchedulerInterface<Event>& scheduler)
         : scheduler_(scheduler) {
@@ -72,13 +70,39 @@ namespace daveos::core {
                  modules.items);
     }
 
+    // Check instance command routes: valid names, not "help", and unique
+    // (case-insensitive). Call after every module has been constructed.
+    [[nodiscard]] Status validate() const {
+      if (!valid_) {
+        return Status::invalid_argument;
+      }
+      for (std::size_t i = 0; i < count_; ++i) {
+        const char* route = Route(i);
+        if (!ValidCommandName(route) || EqualName(route, "help")) {
+          return Status::invalid_argument;
+        }
+        for (std::size_t j = 0; j < i; ++j) {
+          if (EqualName(route, Route(j))) {
+            return Status::duplicate_name;
+          }
+        }
+      }
+      return Status::ok;
+    }
+
     // Bind sources during application initialization (normally stage2), after
     // all endpoints have been constructed. No polling or allocation is added.
+    // Invalid or duplicate routes leave every source unbound.
     template <std::size_t Sources>
-    void bind_sources(CommandSourceList<Sources> sources) {
+    Status bind_sources(CommandSourceList<Sources> sources) {
+      const auto status = validate();
+      if (status != Status::ok) {
+        return status;
+      }
       for (auto* source : sources.items) {
         source->Bind(*this);
       }
+      return Status::ok;
     }
 
     CommandDispatcher(const CommandDispatcher&) = delete;
@@ -122,13 +146,22 @@ namespace daveos::core {
       }
       if constexpr (!M::commands().empty()) {
         entries_[count_++] = {
-            M::command_prefix(), module,
+            module,
+            [](const void* object) {
+              return static_cast<const M*>(object)->command_route();
+            },
             [](CommandDispatcher& self, void* object, CommandArguments args,
                bool& diagnosed) {
               return self.Handle(*static_cast<M*>(object), args, diagnosed);
             },
-            [](CommandDispatcher& self) { self.template Help<M>(); }};
+            [](CommandDispatcher& self, void* object) {
+              self.Help(*static_cast<M*>(object));
+            }};
       }
+    }
+
+    const char* Route(std::size_t index) const {
+      return entries_[index].route(entries_[index].module);
     }
 
     Status Parse(std::string_view line) {
@@ -211,7 +244,7 @@ namespace daveos::core {
         return status;
       }
       auto match = lazy_match(arguments_[0], count_ + 1, [&](std::size_t i) {
-        return std::string_view(i == count_ ? "help" : entries_[i].prefix);
+        return std::string_view(i == count_ ? "help" : Route(i));
       });
       if (match.status != Status::ok) {
         return match.status;
@@ -222,7 +255,7 @@ namespace daveos::core {
         }
         DAVEOS_LOG(scheduler_, Level::info, "help - list all commands");
         for (std::size_t i = 0; i < count_; ++i) {
-          entries_[i].help(*this);
+          entries_[i].help(*this, entries_[i].module);
         }
         return Status::ok;
       }
@@ -233,9 +266,9 @@ namespace daveos::core {
     }
 
     template <typename M>
-    void Help() {
+    void Help([[maybe_unused]] const M& module) {
 #if DAVEOS_LOGGING
-      scheduler_.log(Level::info, "%s:", M::command_prefix());
+      scheduler_.log(Level::info, "%s:", module.command_route());
       scheduler_.log(Level::info, "  help - list module commands");
       static constexpr const auto& commands =
           detail::CommandTable<M>::descriptors;
@@ -262,7 +295,7 @@ namespace daveos::core {
       static constexpr const auto& commands =
           detail::CommandTable<M>::descriptors;
       if (args.empty()) {
-        Help<M>();
+        Help(module);
         return Status::ok;
       }
       auto match = lazy_match(args[0], commands.size() + 1, [&](std::size_t i) {
@@ -276,7 +309,7 @@ namespace daveos::core {
         if (args.size() != 1) {
           return Status::invalid_argument;
         }
-        Help<M>();
+        Help(module);
         return Status::ok;
       }
 
@@ -288,7 +321,7 @@ namespace daveos::core {
       } call{module, commands[match.index], {}, args.subspan(1)};
 
       auto status = scheduler_.Invoke(
-          {M::name(), commands[match.index].handler},
+          {module.module_name(), commands[match.index].handler},
           [](void* argument) {
             auto& c = *static_cast<Call*>(argument);
             return c.descriptor.callback(c.module, c.args, c.descriptor,
@@ -302,14 +335,14 @@ namespace daveos::core {
           if (std::holds_alternative<detail::ChoicePolicy>(
                   call.error.argument->policy)) {
             scheduler_.log(Level::error, "%s %s: argument '%s': %s (status %s)",
-                           M::command_prefix(), call.descriptor.name,
+                           module.command_route(), call.descriptor.name,
                            call.error.argument->name, call.error.reason,
                            enum_name(status));
           } else {
             scheduler_.log(Level::error,
                            "%s %s: argument '%s' must be %s and within its "
                            "bounds (status %s)",
-                           M::command_prefix(), call.descriptor.name,
+                           module.command_route(), call.descriptor.name,
                            call.error.argument->name, call.error.argument->type,
                            enum_name(status));
           }
@@ -317,7 +350,7 @@ namespace daveos::core {
           scheduler_.log(Level::error,
                          "%s %s: expected %" PRIu32 " to %" PRIu32
                          " arguments, received %" PRIu32 " (status %s)",
-                         M::command_prefix(), call.descriptor.name,
+                         module.command_route(), call.descriptor.name,
                          static_cast<std::uint32_t>(call.descriptor.required),
                          static_cast<std::uint32_t>(call.descriptor.count),
                          static_cast<std::uint32_t>(call.args.size()),

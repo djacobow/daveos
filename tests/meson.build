@@ -4,6 +4,7 @@ test_support_dep = declare_dependency(include_directories: include_directories('
   dependencies: [fake_dep, catch_dep])
 subdir('core')
 subdir('consumers')
+subdir('instances')
 subdir('yield')
 subdir('hal')
 subdir('mcp3425')

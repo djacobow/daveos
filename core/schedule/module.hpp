@@ -278,11 +278,13 @@ namespace daveos::core {
     const Operations* operations_ = nullptr;
   };
 
-  // CRTP module defaults. Derived provides static constexpr name(); tasks(),
-  // commands(), command_prefix(), lifecycle, event and sleep hooks are
-  // optional. Callbacks run to completion on the scheduler thread; asynchronous
-  // work must schedule a task or maintain its own state. Do not move a
-  // registered module. Its name and object must outlive the scheduler.
+  // CRTP module defaults. Derived provides static constexpr name(), the default
+  // name for its instances; tasks(), commands(), command_prefix(), lifecycle,
+  // event and sleep hooks are optional. A type that can be registered more
+  // than once passes a distinct instance name to the protected constructor.
+  // Callbacks run to completion on the scheduler thread; asynchronous work
+  // must schedule a task or maintain its own state. Do not move a registered
+  // module. Its name and object must outlive the scheduler.
   template <typename Derived, typename Event = NoEvent>
   class Module {
     static_assert(core::EventType<Event>,
@@ -300,7 +302,18 @@ namespace daveos::core {
       return std::array<CommandDescriptor<Derived>, 0>{};
     }
 
-    static constexpr const char* command_prefix() { return Derived::name(); }
+    // Optional fixed command route for every instance of a type. The default
+    // (null) routes commands by instance name.
+    static constexpr const char* command_prefix() { return nullptr; }
+
+    // Instance identity for logs, statistics, diagnostics and command routing.
+    // Read only from init() onward, never during static construction.
+    const char* module_name() const { return name_ ? name_ : Derived::name(); }
+
+    const char* command_route() const {
+      return Derived::command_prefix() ? Derived::command_prefix()
+                                       : module_name();
+    }
 
     // stage1 is independent setup; stage2 may use other modules' stage1
     // results.
@@ -397,6 +410,12 @@ namespace daveos::core {
     }
 
    protected:
+    Module() = default;
+
+    // Borrowed instance name; must outlive the scheduler. Null keeps the
+    // type's default name.
+    explicit Module(const char* name) : name_(name) {}
+
     ~Module() = default;
 
    private:
@@ -409,7 +428,7 @@ namespace daveos::core {
         } call{*static_cast<Derived*>(this), payload};
 
         scheduler_->Invoke(
-            {Derived::name(), handler.name},
+            {module_name(), handler.name},
             [](void* argument) {
               auto& call = *static_cast<Call*>(argument);
               (call.owner.*Handler::callback)(call.payload);
@@ -420,10 +439,23 @@ namespace daveos::core {
     }
 
     SchedulerInterface<Event>* scheduler_ = nullptr;
+    const char* name_ = nullptr;
   };
 
+  namespace detail {
+    // True if a different module type shares A's default name. Repeated
+    // instances of one type are checked by name at scheduler init() instead.
+    template <typename A, typename... Modules>
+    consteval bool DefaultNameClash() {
+      return ((!std::is_same_v<A, Modules> &&
+               EqualName(A::name(), Modules::name())) ||
+              ...);
+    }
+  }  // namespace detail
+
   // Non-owning module pointers whose concrete types determine compile-time
-  // storage.
+  // storage. A type may appear more than once when its instances have
+  // distinct names.
   template <typename... Modules>
   struct ModuleList {
     static_assert((requires {
@@ -431,10 +463,10 @@ namespace daveos::core {
                      typename std::bool_constant<(Modules::name() != nullptr)>;
                    } && ...),
                   "modules must provide static constexpr const char* name()");
-    static_assert(
-        UniqueNames(std::array<const char*, sizeof...(Modules)>{
-            Modules::name()...}),
-        "module names must be nonempty and unique (case-insensitive)");
+    static_assert(((*Modules::name() != '\0') && ...) &&
+                      !(detail::DefaultNameClash<Modules, Modules...>() || ...),
+                  "module default names must be nonempty and differ between "
+                  "module types (case-insensitive)");
     std::tuple<Modules*...> items;
 
     explicit ModuleList(Modules*... modules) : items(modules...) {}

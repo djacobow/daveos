@@ -138,7 +138,9 @@ namespace daveos::core {
 
     struct Registration {
       void* object = nullptr;
+      // Type default until init() reads the instance name.
       const char* name = "";
+      const char* (*instance_name)(const void*) = nullptr;
       void (*bind)(void*, SchedulerInterface<Event>&) = nullptr;
       Status (*init)(void*, InitStage) = nullptr;
       void (*event)(void*, const Event&) = nullptr;
@@ -722,6 +724,9 @@ namespace daveos::core {
       modules_[module_count_++] = {
           module,
           M::name(),
+          [](const void* self) {
+            return static_cast<const M*>(self)->module_name();
+          },
           [](void* self, SchedulerInterface<Event>& scheduler) {
             static_cast<M*>(self)->bind(scheduler);
           },
@@ -766,6 +771,28 @@ namespace daveos::core {
       }
       if (registration_error_) {
         return Status::invalid_argument;
+      }
+      // All modules are constructed by init(); only now read instance names.
+      Guard guard(platform_);
+      for (std::size_t index = 0; index < module_count_; ++index) {
+        auto& module = modules_[index];
+        module.name = module.instance_name(module.object);
+        if (!module.name || !*module.name) {
+          return Status::invalid_argument;
+        }
+        for (std::size_t previous = 0; previous < index; ++previous) {
+          if (EqualName(module.name, modules_[previous].name)) {
+            return Status::duplicate_name;
+          }
+        }
+      }
+      for (std::size_t index = 0; index < kTasks; ++index) {
+        for (const auto& module : modules_) {
+          if (module.object == tasks_[index].module) {
+            tasks_[index].module_name = module.name;
+            statistics_.tasks[index].module = module.name;
+          }
+        }
       }
       for (std::size_t index = 0; index < kTasks; ++index) {
         if (!tasks_[index].name || !*tasks_[index].name) {

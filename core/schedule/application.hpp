@@ -30,7 +30,9 @@ namespace daveos::core {
                           Sources sources)
           : dispatcher_(modules, scheduler), sources_(sources) {}
 
-      void bind() { dispatcher_.bind_sources(sources_); }
+      Status validate() const { return dispatcher_.validate(); }
+
+      Status bind() { return dispatcher_.bind_sources(sources_); }
 
      private:
       CommandDispatcher<Event, Modules, LineCapacity, ArgumentCapacity>
@@ -46,7 +48,9 @@ namespace daveos::core {
       ApplicationCommands(Modules, SchedulerInterface<Event>&,
                           NoCommandSources) {}
 
-      void bind() {}
+      Status validate() const { return Status::ok; }
+
+      Status bind() { return Status::ok; }
     };
   }  // namespace detail
 
@@ -71,11 +75,22 @@ namespace daveos::core {
     Application(const Application&) = delete;
     Application& operator=(const Application&) = delete;
 
+    // Command routes are checked before any module init() runs, so a
+    // duplicate instance route starts no hardware. That failure is reported
+    // like registration validation (null module).
     [[nodiscard]] Status init() {
-      auto status = scheduler_.init();
+      if (commands_failure_.status != Status::ok) {
+        return commands_failure_.status;
+      }
+      auto status = commands_.validate();
+      if (status != Status::ok) {
+        commands_failure_ = {status, nullptr, InitStage::stage1};
+        return status;
+      }
+      status = scheduler_.init();
       if (status == Status::ok) {
-        commands_.bind();
-        initialized_ = true;
+        status = commands_.bind();
+        initialized_ = status == Status::ok;
       }
       return status;
     }
@@ -97,7 +112,9 @@ namespace daveos::core {
     auto& scheduler() { return scheduler_; }
 
     [[nodiscard]] InitializationFailure initialization_failure() {
-      return scheduler_.initialization_failure();
+      return commands_failure_.status != Status::ok
+                 ? commands_failure_
+                 : scheduler_.initialization_failure();
     }
 
    private:
@@ -105,6 +122,7 @@ namespace daveos::core {
     [[no_unique_address]] detail::ApplicationCommands<
         Event, Modules, Sources, LineCapacity, ArgumentCapacity>
         commands_;
+    InitializationFailure commands_failure_;
     bool initialized_ = false;
     bool used_ = false;
   };
