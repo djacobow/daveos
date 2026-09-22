@@ -321,7 +321,7 @@ TEST_CASE("cooperative wait retains failures until buffers are released") {
     core::Time now = 0;
     bool released = false;
     std::uint32_t pumps = 0;
-    const auto result = core::wait_until(
+    const auto result = core::wait_for_release(
         [&] { return released; },
         [&] {
           ++pumps;
@@ -345,22 +345,23 @@ TEST_CASE(
        {std::chrono::microseconds{-1}, std::chrono::microseconds{0},
         std::chrono::microseconds{10}}) {
     core::Time now = 0;
-    const auto result = core::wait_until([&] { return now == 3; },
-                                         [&] {
-                                           ++now;
-                                           return core::Status::ok;
-                                         },
-                                         [&] { return now; }, budget);
+    const auto result = core::wait_for_release([&] { return now == 3; },
+                                               [&] {
+                                                 ++now;
+                                                 return core::Status::ok;
+                                               },
+                                               [&] { return now; }, budget);
     CHECK(now == 3);
     CHECK(result == (budget.count() < 0    ? core::Status::invalid_argument
                      : budget.count() == 0 ? core::Status::timeout
                                            : core::Status::ok));
   }
-  CHECK(core::wait_until([] { return true; },
-                         [] {
-                           FAIL("must not pump completed work");
-                           return core::Status::ok;
-                         },
-                         [] { return core::Time{0}; },
-                         std::chrono::microseconds{0}) == core::Status::ok);
+  CHECK(core::wait_for_release([] { return true; },
+                               [] {
+                                 FAIL("must not pump completed work");
+                                 return core::Status::ok;
+                               },
+                               [] { return core::Time{0}; },
+                               std::chrono::microseconds{0}) ==
+        core::Status::ok);
 }

@@ -1,16 +1,15 @@
 #pragma once
 
-#include <functional>
-
 #include "duration.hpp"
 
 namespace daveos::core {
 
 
-  // Wait for completion/ownership release, NOT merely a deadline. ready() must
-  // only become true once borrowed buffers are safe to reuse. pump() normally
-  // calls scheduler.yield(); tests can also advance their injected clock there.
-  // now() is monotonic microseconds. No allocation, sleep or cancellation.
+  // Wait until borrowed buffers are released, NOT merely until a deadline.
+  // ready() must only become true once those buffers are safe to reuse. pump()
+  // normally calls scheduler.yield(); tests can also advance their injected
+  // clock there. now() is monotonic microseconds. No allocation, sleep or
+  // cancellation.
   //
   // The first deadline/argument/pump failure is retained, but pumping continues
   // until ready(). ok, empty and depth_limit are normal yield outcomes. Even
@@ -21,16 +20,16 @@ namespace daveos::core {
   // separately: this return value describes waiting, not peripheral success.
   template <typename Ready, typename Pump, typename Clock, DurationRep Rep,
             typename Period>
-  Status wait_until(Ready&& ready, Pump&& pump, Clock&& now,
-                    std::chrono::duration<Rep, Period> timeout) {
+  Status wait_for_release(Ready&& ready, Pump&& pump, Clock&& now,
+                          std::chrono::duration<Rep, Period> timeout) {
     Time budget = 0;
     Status result = to_microseconds(timeout, budget);
-    const Time started = std::invoke(now);
-    while (!std::invoke(ready)) {
-      if (result == Status::ok && std::invoke(now) - started >= budget) {
+    const Time started = now();
+    while (!ready()) {
+      if (result == Status::ok && now() - started >= budget) {
         result = Status::timeout;
       }
-      const auto status = std::invoke(pump);
+      const auto status = pump();
       if (result == Status::ok && status != Status::ok &&
           status != Status::empty && status != Status::depth_limit) {
         result = status;

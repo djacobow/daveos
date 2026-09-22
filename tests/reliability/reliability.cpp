@@ -796,13 +796,14 @@ TEST_CASE("watchdog grace covers a suspended yielding task until it returns") {
   };
   module.first_action = [&] {
     const auto started = platform.now();
-    CHECK(core::wait_until([&] { return platform.now() - started >= 20; },
-                           [&] {
-                             platform.advance(1);
-                             return scheduler.yield();
-                           },
-                           [&] { return platform.now(); },
-                           std::chrono::microseconds{25}) == core::Status::ok);
+    CHECK(core::wait_for_release([&] { return platform.now() - started >= 20; },
+                                 [&] {
+                                   platform.advance(1);
+                                   return scheduler.yield();
+                                 },
+                                 [&] { return platform.now(); },
+                                 std::chrono::microseconds{25}) ==
+          core::Status::ok);
     CHECK(checked);
     CHECK(scheduler.progress().tasks[0].completed == 0);
     scheduler.stop();
