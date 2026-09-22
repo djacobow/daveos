@@ -4,6 +4,7 @@
 #include "boot/control.h"
 #include "boot/journal.h"
 #include "core/schedule/application.hpp"
+#include "core/schedule/wait.hpp"
 #include "flash.hpp"
 #include "support.hpp"
 #include "update/engine.h"
@@ -777,4 +778,39 @@ TEST_CASE(
       }
     }
   }
+}
+
+TEST_CASE("watchdog grace covers a suspended yielding task until it returns") {
+  testing::Fake platform;
+  testing::TestModule module;
+  auto scheduler =
+      core::make_scheduler<testing::Event>(platform, core::ModuleList{&module});
+  bool checked = false;
+  module.second_action = [&] {
+    const auto progress = scheduler.progress();
+    CHECK(progress.tasks[0].completed == 0);
+    CHECK(wd::check_progress(progress, 0).status ==
+          core::Status::health_failed);
+    CHECK(wd::check_progress(progress, 30).status == core::Status::ok);
+    checked = true;
+  };
+  module.first_action = [&] {
+    const auto started = platform.now();
+    CHECK(core::wait_until([&] { return platform.now() - started >= 20; },
+                           [&] {
+                             platform.advance(1);
+                             return scheduler.yield();
+                           },
+                           [&] { return platform.now(); },
+                           std::chrono::microseconds{25}) == core::Status::ok);
+    CHECK(checked);
+    CHECK(scheduler.progress().tasks[0].completed == 0);
+    scheduler.stop();
+  };
+  REQUIRE(scheduler.schedule(module, &testing::TestModule::first, 10,
+                             core::Mode::repeat) == core::Status::ok);
+  REQUIRE(scheduler.schedule(module, &testing::TestModule::second, 15) ==
+          core::Status::ok);
+  REQUIRE(scheduler.run() == core::Status::ok);
+  CHECK(scheduler.progress().tasks[0].completed == 1);
 }

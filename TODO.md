@@ -261,5 +261,7 @@ section supersedes older H755 hardware deferrals; remaining gaps are explicit.
   completion and diagnostics. Keep board configuration and read-only
   inspection in the example. ASan/UBSan 33/33, H563 A/B build, format/lint and
   read-only H563 SD/filesystem HIL 2/2 passed; no card or OTP writes.
-- [ ] Design a cooperative wait helper that distinguishes timeout from released
-  peripheral-buffer ownership; add explicit watchdog/yield integration coverage.
+- [x] Add a cooperative wait helper that retains timeout/stop errors while
+  pumping until peripheral-buffer ownership returns; add scheduler/watchdog
+  integration coverage for suspended-task counters and progress grace.
+  See [cooperative waiting](docs/yield.md#waiting-for-buffer-release).

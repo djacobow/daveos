@@ -78,3 +78,40 @@ A pending wait repeatedly yielding with no eligible work still spins: yield
 does not invoke idle callbacks, enter WFI, or sleep. Bounded protocol polling
 can shorten this period, but battery-powered applications need a separate
 idle/wait design rather than assuming yield reduces power consumption.
+
+## Waiting for buffer release
+
+`core/schedule/wait.hpp` provides `core::wait_until(ready, pump, now, timeout)`.
+The callables are borrowed and allocation-free; `now()` returns monotonic
+microseconds and the timeout is an exactly representable chrono duration.
+For example, after an asynchronous operation has accepted borrowed buffers:
+
+```cpp
+auto waited = core::wait_until(
+    [&] { return completion.ready(); },
+    [&] { return scheduler().yield(); },
+    [&] { return platform.now(); }, 250ms);
+// Buffers are now released, even if waited reports timeout or not_running.
+// Inspect completion.result() separately for the actual operation outcome.
+```
+
+`ready()` must mean ownership has returned, not merely that a deadline passed.
+The first observed timeout or pump error is retained. `ok`, `empty`, and
+`depth_limit` are normal pump results. A stop request or invalid context does
+not permit an early return with live buffers. Invalid timeout conversion also
+records `invalid_argument` and drains to completion. Readiness is checked before
+the deadline on each iteration, so already-completed work wins; this is an
+observed wait deadline, not a measurement of the interrupt completion instant.
+
+The helper does not start, cancel, retry or reset anything. Its deadline is
+**not an upper bound on return time**: the HAL must independently bound its
+transfer and cleanup. A broken backend that never releases buffers can block
+forever. Completion must not depend on a task which cannot run after scheduler
+stop or at the nesting limit. Fake tests can advance time in `pump`; real
+interrupt-driven backends continue independently. No sleeping is added.
+
+The watchdog integration test runs a real nested callback during such a wait:
+the suspended repeating task has zero completed iterations until it returns.
+An insufficient progress allowance reports `health_failed`; an allowance that
+covers the whole operation passes. Configure that allowance deliberately;
+yielding alone is not evidence that the waiting task has made progress.

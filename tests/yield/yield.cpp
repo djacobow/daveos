@@ -1,6 +1,7 @@
 #include <thread>
 
 #include "core/schedule/application.hpp"
+#include "core/schedule/wait.hpp"
 #include "support.hpp"
 
 namespace core = daveos::core;
@@ -312,4 +313,54 @@ TEST_CASE(
   first.schedule(a, &test::TestModule::first, 0);
   CHECK(first.run() == core::Status::ok);
   CHECK(second.snapshot().invalid_yields == 1);
+}
+
+TEST_CASE("cooperative wait retains failures until buffers are released") {
+  for (auto failure : {core::Status::timeout, core::Status::not_running,
+                       core::Status::invalid_context}) {
+    core::Time now = 0;
+    bool released = false;
+    std::uint32_t pumps = 0;
+    const auto result = core::wait_until(
+        [&] { return released; },
+        [&] {
+          ++pumps;
+          ++now;
+          released = pumps == 6;
+          if (pumps == 1 && failure != core::Status::timeout) {
+            return failure;
+          }
+          return pumps % 2 ? core::Status::empty : core::Status::depth_limit;
+        },
+        [&] { return now; }, std::chrono::microseconds{2});
+    CHECK(result == failure);
+    CHECK(released);
+    CHECK(pumps == 6);
+  }
+}
+
+TEST_CASE(
+    "cooperative wait handles ready, normal completion and invalid budgets") {
+  for (auto budget :
+       {std::chrono::microseconds{-1}, std::chrono::microseconds{0},
+        std::chrono::microseconds{10}}) {
+    core::Time now = 0;
+    const auto result = core::wait_until([&] { return now == 3; },
+                                         [&] {
+                                           ++now;
+                                           return core::Status::ok;
+                                         },
+                                         [&] { return now; }, budget);
+    CHECK(now == 3);
+    CHECK(result == (budget.count() < 0    ? core::Status::invalid_argument
+                     : budget.count() == 0 ? core::Status::timeout
+                                           : core::Status::ok));
+  }
+  CHECK(core::wait_until([] { return true; },
+                         [] {
+                           FAIL("must not pump completed work");
+                           return core::Status::ok;
+                         },
+                         [] { return core::Time{0}; },
+                         std::chrono::microseconds{0}) == core::Status::ok);
 }
