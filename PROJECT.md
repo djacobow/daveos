@@ -120,9 +120,10 @@ Each task descriptor pairs a human-readable string name with its schedulable mem
 function. The array defines the task callbacks and their names; its size provides
 the task count without a separate count accessor. Statistics tables identify tasks
 by module name and task name.
-Module names are nonempty static constexpr metadata and must be unique ignoring
-ASCII case within a scheduler, checked at compile time. Task names must be unique
-within their module; different modules may use the same task names.
+Module instance names must be nonempty and unique ignoring ASCII case within a
+scheduler, checked at `init()` (see [Command System](#command-system) for default
+and instance names). Task names must be unique within their module; different
+modules may use the same task names.
 
 ### Module initialization
 
