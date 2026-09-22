@@ -44,7 +44,7 @@ target remote :{hil_config.get('gdb_port', 3333)}
 hbreak {header}:{line}
 commands
 silent
-if app::components.sd.backend_.total_ < 512
+if app::components.sd.hardware_.backend_.total_ < 512
  quit 1
 end
 # Change TX to the inactive SPI2 request before enabling it. RX and SPI wait
