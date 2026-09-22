@@ -1,6 +1,6 @@
 #pragma once
 
-#include "core/platform/platform.hpp"
+#include "core/foundation/types.hpp"
 #include "record.h"
 
 namespace daveos::otp {

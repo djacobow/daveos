@@ -5,7 +5,7 @@
 #include <cstdarg>
 #include <string_view>
 
-#include "core/platform/platform.hpp"
+#include "core/foundation/types.hpp"
 
 // Non-Meson consumers default to logging enabled. This setting must agree
 // across every translation unit in an application.

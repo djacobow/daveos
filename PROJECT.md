@@ -315,7 +315,10 @@ Use explicit status returns rather than exceptions, with a success value for
 operations that complete normally. Distinguish error conditions such as repeated
 initialization, module initialization failure, invalid repeat interval, event
 queue overflow, timer overflow, and `not_running`. The shared type is
-`daveos::core::Status`, declared in `core/platform/platform.hpp`; commands use it too.
+`daveos::core::Status`, declared with `Time` in `core/foundation/types.hpp`;
+commands use it too. Foundation headers (`types.hpp`, `duration.hpp`) depend on no
+platform, scheduler or logging code, so state machines and injected drivers can use
+them alone. `tests/consumers/` checks that boundary.
 For scheduler operations, `not_running` reports unavailable execution, including
 pre-run `stop()` and valid timer requests during init, or work submitted after
 shutdown or terminal initialization failure.

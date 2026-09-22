@@ -8,7 +8,7 @@
 #include <optional>
 #include <span>
 
-#include "core/schedule/duration.hpp"
+#include "core/foundation/duration.hpp"
 #include "hal/status.h"
 
 namespace daveos::hal {

@@ -3,7 +3,7 @@
 #include <array>
 #include <span>
 
-#include "core/platform/platform.hpp"
+#include "core/foundation/types.hpp"
 
 namespace daveos::boot {
 

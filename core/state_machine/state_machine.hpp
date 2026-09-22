@@ -7,7 +7,7 @@
 #include <limits>
 #include <type_traits>
 
-#include "core/platform/platform.hpp"
+#include "core/foundation/types.hpp"
 
 namespace daveos::core {
 

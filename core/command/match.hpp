@@ -4,7 +4,7 @@
 #include <span>
 #include <string_view>
 
-#include "core/platform/platform.hpp"
+#include "core/foundation/types.hpp"
 
 namespace daveos::core {
 

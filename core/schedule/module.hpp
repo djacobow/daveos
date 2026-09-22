@@ -11,8 +11,9 @@
 
 #include "core/command/arguments.hpp"
 #include "core/event/event.hpp"
+#include "core/foundation/duration.hpp"
 #include "core/logging/log.hpp"
-#include "duration.hpp"
+#include "core/platform/platform.hpp"
 
 namespace daveos::core {
 

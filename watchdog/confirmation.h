@@ -2,7 +2,7 @@
 
 #include <chrono>
 
-#include "core/platform/platform.hpp"
+#include "core/foundation/types.hpp"
 #include "core/state_machine/state_machine.hpp"
 
 namespace daveos::watchdog {

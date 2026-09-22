@@ -1,6 +1,6 @@
 #pragma once
 
-#include "duration.hpp"
+#include "core/foundation/duration.hpp"
 
 namespace daveos::core {
 

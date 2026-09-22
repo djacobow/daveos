@@ -4,7 +4,7 @@
 #include <concepts>
 #include <numeric>
 
-#include "core/platform/platform.hpp"
+#include "types.hpp"
 
 namespace daveos::core {
 
