@@ -35,6 +35,14 @@ class Board:
         self.uart = None
         self.ip = None
 
+    @property
+    def health_heartbeat(self):
+        """GDB location of the health module's heartbeat task on this board."""
+        family = 'stm32h5' if self.config.get('board', 'h563') == 'h563' else 'stm32h7'
+        return ("'daveos::watchdog::HealthModule<std::variant<std::monostate>, "
+                f"daveos::platform::{family}::Platform, "
+                "daveos::platform::stm32::HealthHardware>::Heartbeat()'")
+
     def control(self, command):
         script = f'if {{[catch {{{command}}} result]}} {{return "FAILED: $result"}}; return "OK: $result"'
         with socket.create_connection(('localhost', self.config.get('tcl_port', 6666)), timeout=60) as sock:
@@ -177,7 +185,7 @@ set var app::application.scheduler_.tasks_._M_elems[$progress_match].completed =
         commands.write_text(f'''set pagination off
 set confirm off
 target remote :{self.config.get('gdb_port', 3333)}
-hbreak app::Health::Heartbeat
+hbreak {self.health_heartbeat}
 continue
 delete breakpoints
 {script}

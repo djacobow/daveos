@@ -10,7 +10,7 @@ def test_fault_capture(board, floating):
     # Execute a fault from ITCM. Avoid flash mutation and cacheable test code.
     fp = 'set {unsigned int}0x00000400 = 0x0a10ee00\nset {unsigned short}0x00000404 = 0xde00' if floating else 'set {unsigned short}0x00000400 = 0xde00'
     pc = 0x404 if floating else 0x400
-    data = board.fault_experiment(f"""hbreak app::Health::Heartbeat
+    data = board.fault_experiment(f"""hbreak {board.health_heartbeat}
 continue
 delete breakpoints
 set {{unsigned int}}0xe000ed24 = 0x70000
@@ -62,7 +62,7 @@ set $pc = Default_Handler''')
     (0, 'hard_fault', 0xde00, 0, 0x30000, 0x400, 1 << 16),
 ])
 def test_other_faults(board, kind, name, instruction, r0, enables, pc, cfsr):
-    data = board.fault_experiment(f"""hbreak app::Health::Heartbeat
+    data = board.fault_experiment(f"""hbreak {board.health_heartbeat}
 continue
 delete breakpoints
 set {{unsigned int}}0xe000ed24 = {enables}

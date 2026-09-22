@@ -9,7 +9,7 @@ pytestmark = pytest.mark.hil
 
 def test_latched_task_failure(board):
     board.uart.drain()
-    data = board.fault_experiment(f'''hbreak app::Health::Heartbeat
+    data = board.fault_experiment(f'''hbreak {board.health_heartbeat}
 continue
 delete breakpoints
 {board.task_progress_fault('health', 'Heartbeat')}

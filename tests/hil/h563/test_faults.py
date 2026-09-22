@@ -12,7 +12,7 @@ pytestmark = pytest.mark.hil
 ], ids=['usage', 'bus', 'memory', 'hard'])
 def test_exception_capture(board, kind, name, instruction, r0, enables, pc, cfsr_bit):
     board.uart.drain()
-    data = board.fault_experiment(f'''hbreak app::Health::Heartbeat
+    data = board.fault_experiment(f'''hbreak {board.health_heartbeat}
 continue
 delete breakpoints
 if $primask != 0
@@ -51,7 +51,7 @@ isb
 fault: udf #0
 ''')
     board.uart.drain()
-    data = board.fault_experiment(f'''hbreak app::Health::Heartbeat
+    data = board.fault_experiment(f'''hbreak {board.health_heartbeat}
 continue
 delete breakpoints
 set {{unsigned int}}0xe000ed24 = 0x70000
