@@ -42,7 +42,7 @@ namespace daveos::storage {
     static constexpr auto commands() {
       return std::array{
           DAVEOS_COMMAND(Module, Mount, "mount",
-                         "Mount media (default ro); run sd probe first",
+                         "Mount media (default ro); the media must be ready",
                          core::arg("mode")),
           DAVEOS_COMMAND(
               Module, Create, "create",

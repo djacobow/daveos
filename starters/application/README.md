@@ -34,7 +34,7 @@ this starter intentionally supplies only host/fake build targets.
 
 ## Updating the dependency pin
 
-For a release, commit the framework changes first, then set `revision` in both starter `subprojects/daveos.wrap` files to that
+For a release, commit the framework changes first, then set `revision` in every starter `subprojects/daveos.wrap` file to that
 full commit hash (`git rev-parse HEAD`). Commit the pin updates separately and
-publish both commits. Rebuild both starters against the selected revision; keep
+publish both commits. Rebuild the starters against the selected revision; keep
 pins fixed to commits rather than moving branches.

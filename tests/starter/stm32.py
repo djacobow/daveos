@@ -8,8 +8,11 @@ import sys
 
 root, work = map(Path, sys.argv[1:3])
 board = sys.argv[3]
+# Optional starter directory under starters/ and its firmware name.
+starter = sys.argv[4] if len(sys.argv) > 4 else 'stm32'
+name = {'stm32': 'my-device', 'stm32_storage': 'my-storage'}[starter]
 source = work / 'application'
-shutil.copytree(root / 'starters/stm32', source, dirs_exist_ok=True)
+shutil.copytree(root / 'starters' / starter, source, dirs_exist_ok=True)
 checkout = source / 'subprojects/daveos'
 if not checkout.exists():
     checkout.symlink_to(root, target_is_directory=True)
@@ -25,13 +28,13 @@ for command in (setup, ['meson', 'compile', '-C', str(build), '-j', '2']):
 plan = subprocess.run(['meson', 'compile', '-C', str(build), 'flash-plan'],
                       check=True, env=env, capture_output=True, text=True)
 print(plan.stdout)
-assert 'my-device.elf' in plan.stdout
+assert f'{name}.elf' in plan.stdout
 assert ('stm32h755-sleep-m4.elf' in plan.stdout) == (board == 'h755')
-assert (build / 'my-device.elf').is_file()
-assert (build / 'my-device.bin').stat().st_size > 0
+assert (build / f'{name}.elf').is_file()
+assert (build / f'{name}.bin').stat().st_size > 0
 subprocess.run([sys.executable, '-B', str(root / 'tools/memory_report.py'),
-                '--elf', str(build / 'my-device.elf'),
-                '--output', str(build / 'my-device-memory.json')], check=True, env=env)
-memory = json.loads((build / 'my-device-memory.json').read_text())
+                '--elf', str(build / f'{name}.elf'),
+                '--output', str(build / f'{name}-memory.json')], check=True, env=env)
+memory = json.loads((build / f'{name}-memory.json').read_text())
 assert memory['reserved_heap_bytes'] == 0
 assert memory['stack_bytes'] >= memory['minimum_stack_bytes']
