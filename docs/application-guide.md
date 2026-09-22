@@ -134,6 +134,15 @@ error summary before flushing. A failed output transport cannot be relied on to
 print it. The STM32 example retains `app::last_status` and
 `app::initialization_failure` for inspection in GDB before halting.
 
+Cleanup after a failure, or after `run()` returns, is application code: modules
+have no stop hook. Modules after a failed one never initialize, and command
+sources stay unbound. Stop transports and services in reverse registration order,
+including those that never initialized, so their `stop()` must be safe either way
+(`stm32::Console::stop()` does this for a console group). A failed initialization
+does not cancel hardware work already accepted: let each pending transfer finish
+or time out before deinitializing or destroying its controller and buffers.
+`tests/lifecycle` demonstrates both a stage1 and a stage2 failure.
+
 ## Meson consumption
 
 DaveOS exports `daveos-core`, `daveos-console`, selected platform dependencies, and
