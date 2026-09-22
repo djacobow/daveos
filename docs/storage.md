@@ -46,6 +46,12 @@ before borrowed buffers can be released, even when the scheduler is stopping.
 A fake adapter must advance time in its pump; yield itself does not advance time.
 See [the yield contract](yield.md).
 
+Block-device `read`, `write`, `sync` and `acquire` return a `core::Status` cause
+rather than a flag: `not_running` (not ready or not acquired), `busy` (already
+acquired), `invalid_argument` (bad range or size), or a device failure such as
+`timeout` or `io_error`. The FatFs bridge maps these once to FatFs results; direct
+consumers see the cause. The SD session maps HAL transfer failures the same way.
+
 The command module copies arguments and schedules a one-shot worker. It returns
 between directory entries and 16-byte preview records so logging/events can
 drain. Slow filesystem work is not registered as a periodic watchdog heartbeat.

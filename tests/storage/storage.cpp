@@ -112,6 +112,24 @@ namespace {
   };
 }  // namespace
 
+TEST_CASE("file block device reports the cause of each failure") {
+  Image image;
+  auto device = image.device.device();
+  std::array<std::uint8_t, 512> sector{};
+  CHECK(device.read(device.context, 0, sector) == core::Status::not_running);
+  REQUIRE(device.acquire(device.context) == core::Status::ok);
+  CHECK(device.acquire(device.context) == core::Status::busy);
+  CHECK(device.read(device.context, 0, sector) == core::Status::ok);
+  CHECK(device.read(device.context, 8192, sector) ==
+        core::Status::invalid_argument);
+  CHECK(device.read(device.context, 0, std::span{sector}.first(100)) ==
+        core::Status::invalid_argument);
+  CHECK(device.write == nullptr);  // Opened read-only.
+  device.release(device.context);
+  REQUIRE(image.device.close());
+  CHECK(device.acquire(device.context) == core::Status::not_running);
+}
+
 TEST_CASE(
     "FatFs mounts a file image and reads fragmented long-named files without "
     "modifying it") {
@@ -230,7 +248,7 @@ TEST_CASE(
   REQUIRE(image.device.open(image.path.c_str()));
   auto device = image.device.device();
   device.read = [](void*, std::uint32_t, std::span<std::uint8_t>) {
-    return false;
+    return core::Status::io_error;
   };
   storage::Volume failing(device);
   REQUIRE(failing.attach() == FR_OK);
@@ -406,7 +424,7 @@ TEST_CASE(
   REQUIRE(image.device.open(image.path.c_str(), true));
   auto device = image.device.device();
   device.write = [](void*, std::uint32_t, std::span<const std::uint8_t>) {
-    return false;
+    return core::Status::io_error;
   };
   {
     storage::Volume volume(device);
@@ -420,7 +438,7 @@ TEST_CASE(
     }
   }
   device = image.device.device();
-  device.sync = [](void*) { return false; };
+  device.sync = [](void*) { return core::Status::io_error; };
   storage::Volume volume(device);
   REQUIRE(volume.attach() == FR_OK);
   REQUIRE(volume.mount(true) == FR_OK);
@@ -549,7 +567,7 @@ TEST_CASE("file removal propagates sync errors") {
   REQUIRE(image.device.close());
   REQUIRE(image.device.open(image.path.c_str(), true));
   auto device = image.device.device();
-  device.sync = [](void*) { return false; };
+  device.sync = [](void*) { return core::Status::io_error; };
   storage::Volume volume(device);
   REQUIRE(volume.attach() == FR_OK);
   REQUIRE(volume.mount(true) == FR_OK);

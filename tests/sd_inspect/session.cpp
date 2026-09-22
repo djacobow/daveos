@@ -8,6 +8,7 @@ namespace {
   namespace hal = daveos::hal;
   namespace spi = hal::spi;
   namespace sd = daveos::storage::sd;
+  namespace core = daveos::core;
 
   // CSD v2: 25 MHz maximum, (0x1dff + 1) * 1024 sectors.
   constexpr std::array<std::uint8_t, 16> kCsd{0x40, 0, 0, 0x32, 0,
@@ -151,7 +152,7 @@ TEST_CASE("SD session initializes, reads the CSD and serves a block lease") {
   auto& session = *f.session;
   auto device = session.block_device();
   CHECK_FALSE(device.ready(device.context));
-  CHECK_FALSE(device.acquire(device.context));
+  CHECK(device.acquire(device.context) == core::Status::not_running);
   REQUIRE(session.request() == hal::Status::ok);
   CHECK(session.request() == hal::Status::busy);
   f.Run();
@@ -164,8 +165,8 @@ TEST_CASE("SD session initializes, reads the CSD and serves a block lease") {
   CHECK(f.speeds == std::vector<std::uint32_t>{400000, 1000000});
   CHECK(f.card.commands.back() == 9);
   CHECK(device.sectors(device.context) == session.card().sectors);
-  REQUIRE(device.acquire(device.context));
-  CHECK_FALSE(device.acquire(device.context));
+  REQUIRE(device.acquire(device.context) == core::Status::ok);
+  CHECK(device.acquire(device.context) == core::Status::busy);
   CHECK(session.request() == hal::Status::busy);
   CHECK(session.reset() == hal::Status::busy);
   device.release(device.context);

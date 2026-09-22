@@ -20,8 +20,9 @@ namespace daveos::platform::host {
     storage::BlockDevice device();
 
    private:
-    bool Read(std::uint32_t sector, std::span<std::uint8_t> bytes);
-    bool Write(std::uint32_t sector, std::span<const std::uint8_t> bytes);
+    core::Status Read(std::uint32_t sector, std::span<std::uint8_t> bytes);
+    core::Status Write(std::uint32_t sector,
+                       std::span<const std::uint8_t> bytes);
     bool writable_ = false;
     int descriptor_ = -1;  // POSIX descriptor, not a wire/storage integer.
     std::uint64_t sectors_ = 0;

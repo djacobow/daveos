@@ -50,13 +50,15 @@ namespace daveos::platform::host {
     return true;
   }
 
-  bool FileBlockDevice::Read(std::uint32_t sector,
-                             std::span<std::uint8_t> bytes) {
-    if (!leased_ || descriptor_ < 0 || bytes.empty() ||
-        bytes.size() % storage::kSectorBytes ||
+  core::Status FileBlockDevice::Read(std::uint32_t sector,
+                                     std::span<std::uint8_t> bytes) {
+    if (!leased_ || descriptor_ < 0) {
+      return core::Status::not_running;
+    }
+    if (bytes.empty() || bytes.size() % storage::kSectorBytes ||
         std::uint64_t{sector} + bytes.size() / storage::kSectorBytes >
             sectors_) {
-      return false;
+      return core::Status::invalid_argument;
     }
     const auto offset = std::uint64_t{sector} * storage::kSectorBytes;
     std::size_t done = 0;
@@ -68,20 +70,22 @@ namespace daveos::platform::host {
         continue;
       }
       if (received <= 0) {
-        return false;
+        return core::Status::io_error;
       }
       done += static_cast<std::size_t>(received);
     }
-    return true;
+    return core::Status::ok;
   }
 
-  bool FileBlockDevice::Write(std::uint32_t sector,
-                              std::span<const std::uint8_t> bytes) {
-    if (!writable_ || !leased_ || descriptor_ < 0 || bytes.empty() ||
-        bytes.size() % storage::kSectorBytes ||
+  core::Status FileBlockDevice::Write(std::uint32_t sector,
+                                      std::span<const std::uint8_t> bytes) {
+    if (!writable_ || !leased_ || descriptor_ < 0) {
+      return core::Status::not_running;
+    }
+    if (bytes.empty() || bytes.size() % storage::kSectorBytes ||
         std::uint64_t{sector} + bytes.size() / storage::kSectorBytes >
             sectors_) {
-      return false;
+      return core::Status::invalid_argument;
     }
     const auto offset = std::uint64_t{sector} * storage::kSectorBytes;
     std::size_t done = 0;
@@ -93,11 +97,11 @@ namespace daveos::platform::host {
         continue;
       }
       if (written <= 0) {
-        return false;
+        return core::Status::io_error;
       }
       done += static_cast<std::size_t>(written);
     }
-    return true;
+    return core::Status::ok;
   }
 
   storage::BlockDevice FileBlockDevice::device() {
@@ -112,11 +116,14 @@ namespace daveos::platform::host {
         },
         [](void* p) {
           auto& self = *static_cast<FileBlockDevice*>(p);
-          if (self.leased_ || self.descriptor_ < 0) {
-            return false;
+          if (self.descriptor_ < 0) {
+            return core::Status::not_running;
+          }
+          if (self.leased_) {
+            return core::Status::busy;
           }
           self.leased_ = true;
-          return true;
+          return core::Status::ok;
         },
         [](void* p) { static_cast<FileBlockDevice*>(p)->leased_ = false; }};
     if (writable_) {
@@ -126,8 +133,11 @@ namespace daveos::platform::host {
       };
       result.sync = [](void* p) {
         auto& self = *static_cast<FileBlockDevice*>(p);
-        return self.leased_ && self.writable_ && self.descriptor_ >= 0 &&
-               ::fsync(self.descriptor_) == 0;
+        if (!self.leased_ || !self.writable_ || self.descriptor_ < 0) {
+          return core::Status::not_running;
+        }
+        return ::fsync(self.descriptor_) == 0 ? core::Status::ok
+                                              : core::Status::io_error;
       };
     }
     return result;

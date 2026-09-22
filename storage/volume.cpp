@@ -16,6 +16,20 @@ namespace {
   const daveos::storage::BlockDevice* Device(BYTE index) {
     return index < drives.size() ? drives[index] : nullptr;
   }
+
+  // The one place device causes become FatFs results; FatFs has no finer code.
+  DRESULT Result(daveos::core::Status status) {
+    switch (status) {
+      case daveos::core::Status::ok:
+        return RES_OK;
+      case daveos::core::Status::not_running:
+        return RES_NOTRDY;
+      case daveos::core::Status::invalid_argument:
+        return RES_PARERR;
+      default:
+        return RES_ERROR;
+    }
+  }
 }  // namespace
 
 extern "C" DSTATUS disk_status(BYTE index) {
@@ -39,11 +53,9 @@ extern "C" DRESULT disk_read(BYTE index, BYTE* destination, LBA_t sector,
           std::numeric_limits<std::size_t>::max()) {
     return RES_PARERR;
   }
-  return device->read(
-             device->context, sector,
-             {destination, std::size_t{count} * daveos::storage::kSectorBytes})
-             ? RES_OK
-             : RES_ERROR;
+  return Result(device->read(
+      device->context, sector,
+      {destination, std::size_t{count} * daveos::storage::kSectorBytes}));
 }
 
 extern "C" DRESULT disk_write(BYTE index, const BYTE* source, LBA_t sector,
@@ -61,11 +73,9 @@ extern "C" DRESULT disk_write(BYTE index, const BYTE* source, LBA_t sector,
           std::numeric_limits<std::size_t>::max()) {
     return RES_PARERR;
   }
-  return device->write(
-             device->context, sector,
-             {source, std::size_t{count} * daveos::storage::kSectorBytes})
-             ? RES_OK
-             : RES_ERROR;
+  return Result(device->write(
+      device->context, sector,
+      {source, std::size_t{count} * daveos::storage::kSectorBytes}));
 }
 
 extern "C" DRESULT disk_ioctl(BYTE index, BYTE command, void* output) {
@@ -74,9 +84,10 @@ extern "C" DRESULT disk_ioctl(BYTE index, BYTE command, void* output) {
     return RES_NOTRDY;
   }
   if (command == CTRL_SYNC) {
-    return !writable[index] || (device->sync && device->sync(device->context))
-               ? RES_OK
-               : RES_ERROR;
+    if (!writable[index]) {
+      return RES_OK;
+    }
+    return device->sync ? Result(device->sync(device->context)) : RES_ERROR;
   }
   if (!output) {
     return RES_PARERR;
@@ -138,8 +149,15 @@ namespace daveos::storage {
     if (write_access && (!device_.write || !device_.sync)) {
       return FR_WRITE_PROTECTED;
     }
-    if (!device_.acquire(device_.context)) {
-      return FR_LOCKED;
+    switch (device_.acquire(device_.context)) {
+      case core::Status::ok:
+        break;
+      case core::Status::not_running:
+        return FR_NOT_READY;
+      case core::Status::busy:
+        return FR_LOCKED;
+      default:
+        return FR_DISK_ERR;
     }
     auto& access = writable[static_cast<std::size_t>(drive_[0] - '0')];
     access = write_access;

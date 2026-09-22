@@ -157,7 +157,7 @@ namespace daveos::storage::sd {
               [](void* p, std::uint32_t sector, std::span<std::uint8_t> bytes) {
                 auto& self = *static_cast<Session*>(p);
                 if (!self.ready_ || !self.leased_) {
-                  return false;
+                  return core::Status::not_running;
                 }
                 auto reader = self.Transfer();
                 if (!reader.read(sector, bytes)) {
@@ -166,25 +166,27 @@ namespace daveos::storage::sd {
                   if (self.observer_.read_failed) {
                     self.observer_.read_failed(self.observer_.context, sector);
                   }
-                  return false;
+                  return Cause(reader.status());
                 }
-                return true;
+                return core::Status::ok;
               },
               [](void* p) {
                 auto& self = *static_cast<Session*>(p);
-                if (!self.ready_ || self.leased_ || self.running_ ||
-                    self.requested_) {
-                  return false;
+                if (!self.ready_) {
+                  return core::Status::not_running;
+                }
+                if (self.leased_ || self.running_ || self.requested_) {
+                  return core::Status::busy;
                 }
                 self.leased_ = true;
-                return true;
+                return core::Status::ok;
               },
               [](void* p) { static_cast<Session*>(p)->leased_ = false; },
               [](void* p, std::uint32_t sector,
                  std::span<const std::uint8_t> bytes) {
                 auto& self = *static_cast<Session*>(p);
                 if (!self.ready_ || !self.leased_) {
-                  return false;
+                  return core::Status::not_running;
                 }
                 auto transport = self.Transfer();
                 if (!transport.write(sector, bytes)) {
@@ -194,18 +196,38 @@ namespace daveos::storage::sd {
                     self.observer_.write_failed(self.observer_.context, sector,
                                                 transport.write_diagnostics());
                   }
-                  return false;
+                  return Cause(transport.status());
                 }
-                return true;
+                return core::Status::ok;
               },
               [](void* p) {
                 const auto& self = *static_cast<Session*>(p);
                 // Every successful sector write waits for ready and CMD13.
-                return self.ready_ && self.leased_;
+                return self.ready_ && self.leased_ ? core::Status::ok
+                                                   : core::Status::not_running;
               }};
     }
 
    private:
+    // The one mapping from a transport failure to a block-device cause. A
+    // transfer rejected before reaching the bus (hal ok) was a bad request.
+    static core::Status Cause(hal::Status status) {
+      switch (status) {
+        case hal::Status::ok:
+        case hal::Status::invalid_argument:
+        case hal::Status::unsupported_buffer:
+          return core::Status::invalid_argument;
+        case hal::Status::busy:
+          return core::Status::busy;
+        case hal::Status::timeout:
+          return core::Status::timeout;
+        case hal::Status::not_initialized:
+          return core::Status::not_running;
+        default:
+          return core::Status::io_error;
+      }
+    }
+
     enum class State {
       idle,
       resetting,
