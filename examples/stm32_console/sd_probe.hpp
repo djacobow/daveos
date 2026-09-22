@@ -1,17 +1,14 @@
 #pragma once
 
 #include <algorithm>
-#include <atomic>
 #include <cinttypes>
 
 #include "application.h"
-#include "core/state_machine/state_machine.hpp"
 #include "hal/adapters/daveos.hpp"
 #include "hal/controller.hpp"
 #include "sd_board.h"
 #include "sd_inspect.h"
-#include "storage/sd/initializer.h"
-#include "storage/sd/transport.h"
+#include "storage/sd/session.h"
 
 namespace app {
 
@@ -19,17 +16,20 @@ namespace app {
   namespace hal = daveos::hal;
   namespace spi = hal::spi;
 
-  // Read-only SPI fixture: identify the card, verify reads and inspect its BPB.
-  // No block writes or filesystem changes in the probe. The periodic task owns
-  // all protocol state; interrupt callbacks only publish the HAL completion
-  // result.
+  // Nucleo SPI1 wiring for a storage::sd::Session, plus the read-only `sd`
+  // diagnostics: after the CSD, report the CID, compare repeated CRC-checked
+  // reads at 250 kHz and 1 MHz, and describe the partition layout. The
+  // session owns the card protocol and block device; this module owns pins,
+  // clocks, DMA and console output. Interrupt callbacks only publish HAL
+  // completions.
   class SdProbe : public core::Module<SdProbe, Event> {
     using Clock = hal::DaveOsClock<core::SchedulerInterface<Event>, Platform>;
+    using Session = daveos::storage::sd::Session;
 
     // Dedicated fixture backend: keep a private config copy so startup can
     // use <=400 kHz and completed transactions can switch to a conservative
-    // data rate. Only this module owns the bus; speed changes occur in Tick
-    // after completion, never while a HAL operation owns the peripheral.
+    // data rate. Only this module owns the bus; the session changes speed
+    // between transactions, never while a HAL operation owns the peripheral.
     class SdBus : public board::SdSpiBus {
      public:
       explicit SdBus(const daveos::platform::stm32::detail::SpiDma& dma)
@@ -38,7 +38,7 @@ namespace app {
 
       hal::Status init(std::span<const Config> devices) {
         configs_[0] = devices[0];
-        configs_[0].maximum_hz = kStartupHz;
+        configs_[0].maximum_hz = Session::kStartupHz;
         return board::SdSpiBus::init(configs_);
       }
 
@@ -49,14 +49,11 @@ namespace app {
     };
 
     using Bus = hal::Controller<SdBus, Clock, board::SdBusCritical, 1>;
-    static constexpr std::uint32_t kStartupHz = 400000;
-    static constexpr std::uint32_t kReadHz = 1000000;
+    static constexpr std::uint32_t kStartupHz = Session::kStartupHz;
+    static constexpr std::uint32_t kReadHz = Session::kDataHz;
     static constexpr std::uint32_t kReadRepeats = 3;
     static constexpr std::size_t kSectorSize = 512;
-    // R1, data token, one sector and its CRC; no fixed token-wait window.
-    static constexpr std::size_t kReceiveCapacity = kSectorSize + 4;
     static constexpr auto kPeriod = std::chrono::milliseconds{1};
-    static constexpr auto kTransferTimeout = std::chrono::milliseconds{250};
 
    public:
     explicit SdProbe(Platform& platform, bool dma = false)
@@ -65,7 +62,8 @@ namespace app {
           backend_(dma_.operations()),
           bus_(backend_, clock_, critical_,
                {{{{GPIOD, GPIO_PIN_14, false}, kReadHz, 0, false}}}),
-          initializer_(bus_.device<0>()) {}
+          session_(bus_.device<0>(), SpeedHooks(), ResetHooks(), PumpHook(),
+                   Diagnostics()) {}
 
     static constexpr const char* name() { return "sd"; }
 
@@ -100,21 +98,13 @@ namespace app {
     }
 
     core::Status Probe() {
-      if (running_ || requested_ || reset_requested_ || leased_) {
-        return core::Status::busy;
-      }
-      ready_ = false;
-      requested_ = true;
-      return core::Status::ok;
+      return session_.request() == hal::Status::ok ? core::Status::ok
+                                                   : core::Status::busy;
     }
 
     core::Status ResetBus() {
-      if (running_ || requested_ || reset_requested_ || leased_) {
-        return core::Status::busy;
-      }
-      ready_ = false;
-      reset_requested_ = true;
-      return core::Status::ok;
+      return session_.reset() == hal::Status::ok ? core::Status::ok
+                                                 : core::Status::busy;
     }
 
     core::Status Stats() {
@@ -126,67 +116,69 @@ namespace app {
          " bytes=%" PRIu32,
          interrupts, counters.polls, counters.dma_chunks, counters.dma_bytes);
       I_("SPI1 faulted=%s; SD ready=%s; last error=%s",
-         bus_.faulted() ? "yes" : "no", ready_ ? "yes" : "no", error_);
+         bus_.faulted() ? "yes" : "no", session_.ready() ? "yes" : "no",
+         session_.error());
       return core::Status::ok;
     }
 
-    // File-scope wiring only takes our address. No hardware or card access.
+    // File-scope wiring only takes the session's address; no card access.
     daveos::storage::BlockDevice block_device() {
-      return {this,
-              [](void* p) { return static_cast<SdProbe*>(p)->ready_; },
-              [](void* p) { return static_cast<SdProbe*>(p)->card_.sectors; },
-              [](void* p, std::uint32_t sector, std::span<std::uint8_t> bytes) {
-                auto& self = *static_cast<SdProbe*>(p);
-                if (!self.ready_ || !self.leased_) {
-                  return false;
-                }
-                auto reader = self.Transport();
-                if (!reader.read(sector, bytes)) {
-                  self.error_ = enum_name(reader.status());
-                  self.ReadFailure(sector);
-                  self.ready_ = false;
-                  return false;
-                }
-                return true;
-              },
-              [](void* p) {
-                auto& self = *static_cast<SdProbe*>(p);
-                if (!self.ready_ || self.leased_ || self.running_ ||
-                    self.requested_) {
-                  return false;
-                }
-                self.leased_ = true;
-                return true;
-              },
-              [](void* p) { static_cast<SdProbe*>(p)->leased_ = false; },
-              [](void* p, std::uint32_t sector,
-                 std::span<const std::uint8_t> bytes) {
-                auto& self = *static_cast<SdProbe*>(p);
-                if (!self.ready_ || !self.leased_) {
-                  return false;
-                }
-                auto transport = self.Transport();
-                if (!transport.write(sector, bytes)) {
-                  self.error_ = enum_name(transport.status());
-                  self.WriteFailure(sector, transport.write_diagnostics());
-                  self.ready_ = false;
-                  return false;
-                }
-                return true;
-              },
-              [](void* p) {
-                const auto& self = *static_cast<SdProbe*>(p);
-                // Every successful sector write waits for ready and CMD13.
-                return self.ready_ && self.leased_;
+      return session_.block_device();
+    }
+
+    void Tick() { session_.tick(); }
+
+   private:
+    Session::Speed SpeedHooks() {
+      return {
+          this,
+          [](void* p, std::uint32_t hz) {
+            static_cast<SdProbe*>(p)->backend_.speed(hz);
+          },
+          [](void* p) { return static_cast<SdProbe*>(p)->backend_.rate(0); }};
+    }
+
+    Session::Reset ResetHooks() {
+      return {this, [](void* p, hal::Callback<hal::ResetResult> done) {
+                return static_cast<SdProbe*>(p)->bus_.reset(done);
               }};
     }
 
-    void Tick() { machine_.tick(*this); }
+    daveos::storage::sd::Transport::Pump PumpHook() {
+      return {this, [](void* context) {
+                const auto status =
+                    static_cast<SdProbe*>(context)->scheduler().yield();
+                return status == core::Status::ok ||
+                       status == core::Status::empty ||
+                       status == core::Status::depth_limit;
+              }};
+    }
 
-   private:
+    Session::Observer Diagnostics() {
+      return {this,
+              [](void* p) { static_cast<SdProbe*>(p)->Started(); },
+              [](void* p, std::uint32_t command,
+                 std::span<const std::uint8_t> data) {
+                return static_cast<SdProbe*>(p)->Next(command, data);
+              },
+              [](void* p, bool success) {
+                static_cast<SdProbe*>(p)->Report(success);
+              },
+              [](void* p, hal::Status status) {
+                static_cast<SdProbe*>(p)->ResetReport(status);
+              },
+              [](void* p, std::uint32_t sector) {
+                static_cast<SdProbe*>(p)->ReadFailure(sector);
+              },
+              [](void* p, std::uint32_t sector,
+                 const daveos::storage::sd::Transport::WriteDiagnostics& d) {
+                static_cast<SdProbe*>(p)->WriteFailure(sector, d);
+              }};
+    }
+
     void ReadFailure(std::uint32_t sector) {
       E_("SD read LBA %" PRIu32 ": %s; reinitialization required", sector,
-         error_);
+         session_.error());
     }
 
     void WriteFailure(
@@ -205,153 +197,10 @@ namespace app {
          static_cast<std::uint32_t>(d.card_status[1]));
     }
 
-    daveos::storage::sd::Transport Transport() {
-      return {bus_.device<0>(),
-              rx_,
-              backend_.rate(0),
-              card_.sectors,
-              {this, [](void* context) {
-                 const auto status =
-                     static_cast<SdProbe*>(context)->scheduler().yield();
-                 return status == core::Status::ok ||
-                        status == core::Status::empty ||
-                        status == core::Status::depth_limit;
-               }}};
-    }
-
-    enum class State {
-      idle,
-      resetting,
-      initializing,
-      command,
-      gap,
-      done,
-      failed,
-      count
-    };
-
-    struct Machine
-        : core::StateMachine<Machine, State, State::idle,
-                             static_cast<std::size_t>(State::count)> {
-      void Step(State cs, State& ns, SdProbe& p) {
-        switch (cs) {
-          case State::idle:
-          case State::done:
-          case State::failed:
-            if (p.reset_requested_) {
-              p.reset_requested_ = false;
-              p.running_ = true;
-              ns = State::resetting;
-            } else if (p.requested_) {
-              p.requested_ = false;
-              p.running_ = true;
-              p.backend_.speed(kStartupHz);
-              p.command_ = 0;
-              p.reads_ = 0;
-              p.finished_ = false;
-              p.partition_index_ = 0;
-              p.lba_ = 0;
-              p.error_ = "invalid command response";
-              (void)p.initializer_.request();
-              ns = State::initializing;
-            }
-            break;
-          case State::resetting:
-            if (p.reset_ready_.load(std::memory_order_acquire)) {
-              if (p.reset_status_ != hal::Status::ok) {
-                p.error_ = enum_name(p.reset_status_);
-              }
-              p.running_ = false;
-              p.ResetReport(p.reset_status_);
-              // Reset only repairs SPI; card readiness remains false.
-              ns = State::idle;
-            }
-            break;
-          case State::initializing:
-            p.initializer_.tick();
-            if (const auto result = p.initializer_.result()) {
-              p.ocr_ = result->ocr;
-              p.command_ = result->command;
-              if (result->status == hal::Status::ok) {
-                p.command_ = 9;
-                ns = State::gap;
-              } else {
-                p.error_ = enum_name(result->status);
-                ns = State::failed;
-              }
-            }
-            break;
-          case State::gap:
-            if (auto result = p.completion_.result()) {
-              if (result->status == hal::Status::ok) {
-                ns = State::command;
-              } else {
-                p.error_ = enum_name(result->status);
-                ns = State::failed;
-              }
-            }
-            break;
-          case State::command:
-            if (auto result = p.completion_.result()) {
-              if (result->status != hal::Status::ok) {
-                p.error_ = enum_name(result->status);
-                ns = State::failed;
-                break;
-              }
-              ns = State::gap;
-              switch (p.command_) {
-                case 9:
-                case 10:
-                case 17:
-                  if (!p.ReadData()) {
-                    ns = State::failed;
-                  } else if (p.finished_) {
-                    ns = State::done;
-                  }
-                  break;
-                default:
-                  ns = State::failed;
-                  break;
-              }
-            }
-            break;
-          case State::count:
-            break;
-        }
-      }
-
-      void OnEnter(State state, SdProbe& p) {
-        if (state == State::resetting) {
-          p.reset_ready_.store(false, std::memory_order_release);
-          const auto status = p.bus_.reset(
-              hal::Callback<hal::ResetResult>::bind<&SdProbe::ResetDone>(p));
-          if (status != hal::Status::ok) {
-            p.ResetDone({status});
-          }
-        } else if (state == State::gap) {
-          p.actions_[0] = spi::idle_clocks(8);
-          (void)p.completion_.start(p.bus_.device<0>(),
-                                    std::span{p.actions_}.first(1),
-                                    kTransferTimeout);
-        } else if (state == State::command) {
-          p.tx_ = daveos::storage::sd::command(p.command_,
-                                               p.command_ == 17 ? p.lba_ : 0);
-          p.rx_.fill(0xff);
-          p.receive_size_ = (p.command_ == 17 ? kSectorSize : 16) + 4;
-          p.actions_ = daveos::storage::sd::read_actions(
-              p.tx_, std::span{p.rx_}.first(p.receive_size_));
-          (void)p.completion_.start(p.bus_.device<0>(), p.actions_,
-                                    kTransferTimeout);
-        } else if (state == State::done || state == State::failed) {
-          p.running_ = false;
-          p.Report(state == State::done);
-        }
-      }
-    };
-
-    void ResetDone(const hal::ResetResult& result) {
-      reset_status_ = result.status;
-      reset_ready_.store(true, std::memory_order_release);
+    void Started() {
+      reads_ = 0;
+      partition_index_ = 0;
+      lba_ = 0;
     }
 
     void ResetReport(hal::Status status) {
@@ -359,55 +208,47 @@ namespace app {
     }
 
     void Report(bool success) {
-      ready_ = success;
       if (success) {
-        error_ = "ok";
         I_("SD inspection complete: CRC verified, repeated reads match "
            "(read-only)");
         I_("SD ready: SPI1 %" PRIu32 " Hz, OCR 0x%08" PRIx32
            " (read-only probe)",
-           backend_.rate(0), ocr_);
+           backend_.rate(0), session_.ocr());
       } else {
-        if (const auto init = initializer_.result();
+        if (const auto init = session_.initialization();
             init && init->status != hal::Status::ok) {
           E_("SD initialization failed at CMD%" PRIu32 ": %s", init->command,
              enum_name(init->status));
           return;
         }
-        const auto result = completion_.result();
+        const auto result = session_.last_transfer();
+        const auto rx = session_.wire();
         E_("SD probe failed at CMD%" PRIu32 ": %s (%s); first bytes %02" PRIx32
            " %02" PRIx32 " %02" PRIx32 " %02" PRIx32,
-           command_, error_,
+           session_.command(), session_.error(),
            result ? enum_name(result->status) : "no completion",
-           static_cast<std::uint32_t>(rx_[0]),
-           static_cast<std::uint32_t>(rx_[1]),
-           static_cast<std::uint32_t>(rx_[2]),
-           static_cast<std::uint32_t>(rx_[3]));
+           static_cast<std::uint32_t>(rx[0]), static_cast<std::uint32_t>(rx[1]),
+           static_cast<std::uint32_t>(rx[2]),
+           static_cast<std::uint32_t>(rx[3]));
       }
     }
 
-    bool ReadData() {
-      const auto data = sd::data(std::span{rx_}.first(receive_size_),
-                                 command_ == 17 ? kSectorSize : 16, 1);
-      if (!data) {
-        error_ = "missing/error data token, truncated data or CRC mismatch";
-        return false;
-      }
-      if (command_ == 9) {
-        auto card = sd::card(*data);
-        if (!card) {
-          error_ = "unsupported or invalid CSD";
-          return false;
-        }
-        card_ = *card;
+    // After the CSD (9), report the CID (10), then run repeated sector reads
+    // (17) and the partition walk.
+    Session::Step Next(std::uint32_t command,
+                       std::span<const std::uint8_t> data) {
+      using Kind = Session::Step::Kind;
+      if (command == 9) {
+        card_ = session_.card();
         I_("SD capacity: %" PRIu32 " MiB, sectors 0x%08" PRIx32 "%08" PRIx32
            ", maximum clock %" PRIu32 " Hz",
            static_cast<std::uint32_t>(card_.sectors / 2048),
            static_cast<std::uint32_t>(card_.sectors >> 32),
            static_cast<std::uint32_t>(card_.sectors), card_.maximum_hz);
-        command_ = 10;
-      } else if (command_ == 10) {
-        const auto cid = *data;
+        return {Kind::read, 10};
+      }
+      if (command == 10) {
+        const auto cid = data;
         // Sanitize untrusted card text before placing it on the console.
         std::array<char, 6> product{};
         std::array<char, 3> oem{};
@@ -427,28 +268,28 @@ namespace app {
            static_cast<std::uint32_t>(cid[8] & 15), serial,
            2000u + ((std::uint32_t{cid[13] & 15u} << 4) | (cid[14] >> 4)),
            static_cast<std::uint32_t>(cid[14] & 15));
-        command_ = 17;
-      } else {
-        if (reads_ == 0) {
-          std::copy(data->begin(), data->end(), sector_.begin());
-        } else if (!std::equal(data->begin(), data->end(), sector_.begin())) {
-          error_ = "sector changed between repeated reads";
-          return false;
-        }
-        ++reads_;
-        if (reads_ == kReadRepeats) {
-          I_("SD LBA %" PRIu32 ": %" PRIu32 " CRC-checked reads at %" PRIu32
-             " Hz match",
-             lba_, kReadRepeats, backend_.rate(0));
-          backend_.speed(std::min(kReadHz, card_.maximum_hz));
-        } else if (reads_ == 2 * kReadRepeats) {
-          I_("SD LBA %" PRIu32 ": %" PRIu32 " CRC-checked reads at %" PRIu32
-             " Hz match slow baseline",
-             lba_, kReadRepeats, backend_.rate(0));
-          Inspect();
+        return {Kind::read, 17, lba_};
+      }
+      if (reads_ == 0) {
+        std::copy(data.begin(), data.end(), sector_.begin());
+      } else if (!std::equal(data.begin(), data.end(), sector_.begin())) {
+        return {Kind::fail, 0, 0, "sector changed between repeated reads"};
+      }
+      ++reads_;
+      if (reads_ == kReadRepeats) {
+        I_("SD LBA %" PRIu32 ": %" PRIu32 " CRC-checked reads at %" PRIu32
+           " Hz match",
+           lba_, kReadRepeats, backend_.rate(0));
+        backend_.speed(std::min(kReadHz, card_.maximum_hz));
+      } else if (reads_ == 2 * kReadRepeats) {
+        I_("SD LBA %" PRIu32 ": %" PRIu32 " CRC-checked reads at %" PRIu32
+           " Hz match slow baseline",
+           lba_, kReadRepeats, backend_.rate(0));
+        if (Inspect()) {
+          return {Kind::finish};
         }
       }
-      return true;
+      return {Kind::read, 17, lba_};
     }
 
     static char Printable(std::uint8_t c) {
@@ -469,20 +310,20 @@ namespace app {
       }
     }
 
-    void Inspect() {
+    // Returns true when the walk is finished; otherwise lba_ names the next
+    // partition to read at the startup rate.
+    bool Inspect() {
       if (lba_ == 0) {
         if (sd::fat(sector_, card_.sectors) || sd::exfat(sector_)) {
           I_("SD layout: filesystem directly in sector 0 (no partition table)");
           ReportVolume(card_.sectors);
-          finished_ = true;
-          return;
+          return true;
         }
         auto partitions = sd::partitions(sector_, card_.sectors);
         if (!partitions) {
           I_("SD layout: no valid primary MBR or recognized filesystem boot "
              "sector");
-          finished_ = true;
-          return;
+          return true;
         }
         partitions_ = *partitions;
         for (std::size_t i = 0; i < partitions_.size(); ++i) {
@@ -510,9 +351,9 @@ namespace app {
         lba_ = part.start;
         reads_ = 0;
         backend_.speed(kStartupHz);
-        return;
+        return false;
       }
-      finished_ = true;
+      return true;
     }
 
     static hal::Status Prepare(void*) {
@@ -554,24 +395,12 @@ namespace app {
     board::SdDma dma_;
     SdBus backend_;
     Bus bus_;
-    daveos::storage::sd::Initializer initializer_;
-    spi::Completion completion_;
-    std::atomic<bool> reset_ready_{false};
-    hal::Status reset_status_ = hal::Status::ok;
-    Machine machine_;
-    std::array<std::uint8_t, 6> tx_{};
-    std::array<std::uint8_t, kReceiveCapacity> rx_{};
+    Session session_;
     std::array<std::uint8_t, kSectorSize> sector_{};
     std::array<sd::Partition, 4> partitions_{};
     sd::Card card_{};
-    std::size_t receive_size_ = 0, partition_index_ = 0;
+    std::size_t partition_index_ = 0;
     std::uint32_t lba_ = 0, reads_ = 0;
-    const char* error_ = "";
-    bool finished_ = false;
-    std::array<spi::Action, 6> actions_{};
-    std::uint32_t command_ = 0, ocr_ = 0;
-    bool requested_ = false, running_ = false, ready_ = false, leased_ = false;
-    bool reset_requested_ = false;
   };
 
 

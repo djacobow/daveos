@@ -137,6 +137,36 @@ filesystem mount/list/missing-file handling and remount. Watchdog and retained
 fault checks passed, with zero heap attempts and 3,576 observed stack bytes
 (not a worst-case bound). No card or OTP writes; H755 was not flashed.
 
+### SD session
+
+`storage/sd/session.h` provides `daveos::storage::sd::Session`: the whole card
+lifecycle over an injected SPI device, with no logging and no board code. It
+initializes the card, reads the CSD, switches to its 1 MHz data rate and then
+exposes the card through `block_device()` for FatFs. `request()` and `reset()`
+return `busy` while a probe or reset runs or while the block device is leased;
+a failed probe, read or write clears readiness until the next `request()`.
+
+```cpp
+namespace sd = daveos::storage::sd;
+sd::Session session{spi_device,
+                    {&board, SetRate, ActualRate},      // Speed hooks
+                    {&controller, StartControllerReset}, // Reset hook
+                    {&module, YieldToScheduler}};        // Transport pump
+(void)session.request();
+// From a periodic task:
+session.tick();
+if (session.ready()) {
+  storage::Module<Event> fs(session.block_device());  // or Volume directly
+}
+```
+
+An optional `Session::Observer` receives progress and failures, and may run
+further reads after the CSD. The Nucleo example's `sd` module is exactly that:
+it supplies SPI1 pins, clocks and DMA, and its observer reports the CID,
+compares repeated CRC-checked reads at 250 kHz and 1 MHz, and walks the
+partition table. Host tests drive the session against a model card
+(`tests/sd_inspect/session.cpp`).
+
 ## Opt-in file creation
 
 ```text
