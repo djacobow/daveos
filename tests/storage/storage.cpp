@@ -238,6 +238,69 @@ TEST_CASE(
   CHECK(image.device.close());
 }
 
+TEST_CASE("two named filesystem modules mount separate volumes by route") {
+  Image card, flash;
+  testing::Fake platform;
+  storage::Module<testing::Event> sd_fs(card.device.device(), "sd");
+  storage::Module<testing::Event> flash_fs(flash.device.device(), "flash");
+  testing::TestModule control;
+  testing::Sink sink;
+  auto modules = core::ModuleList{&sd_fs, &flash_fs, &control};
+  auto logger =
+      core::make_logger(platform, core::SubscriberList{sink.subscriber()});
+  auto scheduler =
+      core::make_scheduler<testing::Event>(platform, modules, logger);
+  core::CommandDispatcher<testing::Event, decltype(modules)> dispatcher{
+      modules, scheduler};
+  REQUIRE(dispatcher.bind_sources(core::CommandSourceList{}) ==
+          core::Status::ok);
+  control.first_action = [&] {
+    // Each instance serializes only its own requests.
+    CHECK(dispatcher.dispatch("sd mount") == core::Status::ok);
+    CHECK(dispatcher.dispatch("flash mount") == core::Status::ok);
+    CHECK(dispatcher.dispatch("fs mount") == core::Status::not_found);
+  };
+  control.second_action = [&] {
+    CHECK(dispatcher.dispatch("sd ls /") == core::Status::ok);
+    CHECK(dispatcher.dispatch("flash ls /") == core::Status::ok);
+  };
+  control.third_action = [&] {
+    CHECK(dispatcher.dispatch("sd unmount") == core::Status::ok);
+    CHECK(dispatcher.dispatch("flash unmount") == core::Status::ok);
+    CHECK(scheduler.timer(
+              std::chrono::microseconds{10000},
+              +[] { testing::timer_action(); }) == core::Status::ok);
+  };
+  testing::timer_action = [&] { scheduler.stop(); };
+  CHECK(scheduler.schedule<&testing::TestModule::first>(
+            control, std::chrono::microseconds{0}) == core::Status::ok);
+  CHECK(scheduler.schedule<&testing::TestModule::second>(
+            control, std::chrono::microseconds{10000}) == core::Status::ok);
+  CHECK(scheduler.schedule<&testing::TestModule::third>(
+            control, std::chrono::microseconds{100000}) == core::Status::ok);
+  REQUIRE(scheduler.run() == core::Status::ok);
+#if DAVEOS_LOGGING
+  // The only error is the deliberately unknown "fs" route.
+  CHECK(std::count_if(sink.records.begin(), sink.records.end(),
+                      [](const auto& r) {
+                        return r.severity == core::Level::error;
+                      }) == 1);
+  for (const std::string name : {"sd", "flash"}) {
+    auto logged = [&](std::string_view message) {
+      return std::any_of(sink.records.begin(), sink.records.end(),
+                         [&](const auto& r) {
+                           return r.module == name && r.message == message;
+                         });
+    };
+    CHECK(logged("Filesystem mounted read-only"));
+    CHECK(logged("f 700 Long name.txt"));
+    CHECK(logged("Filesystem unmounted"));
+  }
+#endif
+  CHECK(card.device.close());
+  CHECK(flash.device.close());
+}
+
 TEST_CASE(
     "filesystem module copies command arguments and returns between output "
     "chunks") {

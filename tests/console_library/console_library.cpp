@@ -16,15 +16,15 @@ namespace {
     int id;
   };
 
-  template <test::TestName Name>
+  // One transport type; the two console instances are told apart by name.
   struct Transport {
     State& state;
 
     explicit Transport(State& value) : state(value) {}
 
-    static constexpr const char* name() { return Name.value; }
+    static constexpr const char* name() { return "serial"; }
 
-    static constexpr const char* statistics_label() { return Name.value; }
+    static constexpr const char* statistics_label() { return "serial"; }
 
     bool init() {
       state.initialized = true;
@@ -49,8 +49,8 @@ TEST_CASE(
   test::Fake platform;
   std::vector<int> stops;
   State first{false, 0, stops, 1}, second{false, 0, stops, 2};
-  console::TransportModule<test::Event, Transport<"first">> one(first);
-  console::TransportModule<test::Event, Transport<"second">> two(second);
+  console::TransportModule<test::Event, Transport> one(first, "first");
+  console::TransportModule<test::Event, Transport> two(second, "second");
   stm32::Console group{one, two};
   CHECK_FALSE(first.initialized);
   CHECK_FALSE(second.initialized);

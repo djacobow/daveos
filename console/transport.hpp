@@ -12,12 +12,15 @@ namespace daveos::console {
   // Own a serial transport and expose it as an independent command/log module.
   // Transport construction is passive; init/stop own peripheral setup/teardown.
   // The platform and any transport-owned external DMA storage must outlive us.
+  // Give each instance its own name when one transport type is used twice.
   template <typename Event, typename Transport>
   class TransportModule final
       : public Module<TransportModule<Event, Transport>, Event> {
    public:
     template <typename Platform>
-    explicit TransportModule(Platform& platform) : transport_(platform) {}
+    explicit TransportModule(Platform& platform, const char* name = nullptr)
+        : Module<TransportModule<Event, Transport>, Event>(name),
+          transport_(platform) {}
 
     static constexpr const char* name() { return Transport::name(); }
 

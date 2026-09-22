@@ -10,7 +10,10 @@ meson test -C build/host storage --print-errorlogs
 
 `daveos-storage` provides an application-owned `storage::Volume` and optional
 `storage::Module<Event>` command worker. Both receive a borrowed
-`storage::BlockDevice`; neither depends on STM32 or a particular bus.
+`storage::BlockDevice`; neither depends on STM32 or a particular bus. The module's
+commands route as `fs`. For more than one volume, name each instance, e.g.
+`storage::Module<Event> card(sd, "sd"), internal(flash, "flash");`, and use
+`sd mount`, `flash ls /` and so on. Each instance serializes only its own requests.
 `daveos-file-block` supplies a host file backend opened read-only by default (`open(path, true)` opts into writes).
 The source is FatFs R0.16 patch 2 from the Zephyr mirror, pinned as a submodule.
 Only its generic filesystem and Unicode sources are compiled; no Zephyr runtime

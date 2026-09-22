@@ -31,6 +31,12 @@ namespace daveos::console {
               }};
     }
 
+   protected:
+    Module() = default;
+
+    // Optional borrowed instance name; see core::Module.
+    explicit Module(const char* name) : core::Module<Derived, Event>(name) {}
+
    private:
     void Poll() {
       auto& transport = static_cast<Derived&>(*this);

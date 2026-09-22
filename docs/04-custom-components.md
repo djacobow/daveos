@@ -14,7 +14,9 @@ Incoming bytes still belong to your transport; `console::Input` and
 `console::BufferedOutput` are reusable fixed-storage helpers.
 
 For a serial transport object, `console::TransportModule<Event, Transport>` owns
-that object and adds the module interface. Its transport contract is:
+that object and adds the module interface. `Transport::name()` is the default
+module name; pass a second constructor argument to name an instance when one
+transport type is used twice. Its transport contract is:
 
 - Passive construction from a borrowed platform/context reference.
 - `static name()` and `static statistics_label()` returning stable strings.

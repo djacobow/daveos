@@ -20,7 +20,8 @@ namespace daveos::storage {
   // the one-shot worker: FatFs calls can yield from that worker, never from a
   // command handler. Returning between entries/chunks lets logs and events
   // drain. The worker is not periodic, so a slow card is not a missed
-  // heartbeat.
+  // heartbeat. Name each instance when mounting more than one volume; its
+  // commands then route by that name (e.g. "sd ls", "flash ls").
   template <typename Event = core::NoEvent>
   class Module : public core::Module<Module<Event>, Event> {
     static constexpr auto kContinueDelay = std::chrono::milliseconds{1};
@@ -29,7 +30,8 @@ namespace daveos::storage {
     static constexpr std::uint32_t kMaximumEntries = 256;
 
    public:
-    explicit Module(const BlockDevice& device) : volume_(device) {}
+    explicit Module(const BlockDevice& device, const char* name = nullptr)
+        : core::Module<Module<Event>, Event>(name), volume_(device) {}
 
     static constexpr const char* name() { return "fs"; }
 
