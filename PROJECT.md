@@ -65,7 +65,8 @@ network listeners beyond the current single-client TCP console.
 | `daveos::platform::stm32h7` | STM32H7 platform implementation (H755 M7). |
 | `daveos::platform::fake` | Fake clock, timer, and sleep implementation. |
 | `daveos::console` | Shared line collection, display, buffered output, and CRTP console module. |
-| `daveos::storage` / `daveos::storage::sd` | Optional FatFs volume (read-only by default), filesystem module, and injected SD reader; see [storage](docs/storage.md). |
+| `daveos::storage` / `daveos::storage::sd` | Optional FatFs volume (read-only by default), filesystem module, and the SPI SD initializer, transport and card session; see [storage](docs/storage.md). |
+| `daveos::watchdog` | Watchdog controller, trial-image confirmation and the `HealthModule` scheduler module; see [services](docs/spec/services.md#watchdog-and-application-health). |
 | `daveos::net` | Optional standalone lwIP service, TCP server, and thin module adapter. |
 | `daveos::net::stm32` | Shared H5/H7 Ethernet driver and board network configuration. |
 
@@ -873,7 +874,7 @@ can disable framework examples/tests and pin the wrap revision independently.
 ## Application composition and periodic tasks
 
 The convenience layer keeps explicit scheduler/logger/dispatcher APIs available
-for custom composition. Prefer chrono durations in new examples/conveniences.
+for custom composition. Scheduling and timer delays are chrono durations.
 
 ### Application composition
 

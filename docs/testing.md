@@ -58,14 +58,17 @@ uv venv build/hil-venv
 uv pip install --python build/hil-venv/bin/python --reinstall-package watcher \
   -r requirements-hil.txt
 
+export PATH="$PWD/tools/external/arm-gnu-toolchain-15.2.rel1-x86_64-arm-none-eabi/bin:$PATH"
 meson setup build/boot-h563 --cross-file meson/stm32.ini \
-  -Dexamples=true --cross-file meson/profiles/hil.ini
+  --cross-file meson/profiles/hil.ini -Dexamples=true
 cp tests/hil/h563.toml.example build/hil.toml
 ```
 
 Edit `build/hil.toml` with the ST-LINK UART and DaveOS USB paths from
 `/dev/serial/by-id/`, the build directory, and GDB path. Keep the ARM toolchain's
-`bin/` directory on `PATH` for Meson. The suite recompiles the selected build
+`bin/` directory on `PATH` for Meson. The HIL fixtures require the features the
+`hil` profile selects (they read the build's `build-config.json`); add others,
+such as `sd` for the SD cases, with `-Dfeatures=`. The suite recompiles the selected build
 before programming, so the factory HEX, both slot ELFs and OTA package match.
 
 Start a dedicated OpenOCD server for this board if one is not already running:
@@ -125,8 +128,8 @@ and preserve fault records before resuming reset. Teardown releases connections
 and resets the board, including after a failed assertion. A subsequent test
 always reprograms factory state.
 
-Artifacts live under `build/hil/`: a build log, configuration and SHA-256 artifact
-manifest, per-test raw transport transcripts, OpenOCD/GDB logs, retained records,
+Artifacts live under `build/hil/`: a build log, a manifest with the HIL
+configuration, the build's resolved features and SHA-256 artifact hashes, per-test raw transport transcripts, OpenOCD/GDB logs, retained records,
 and the requested JUnit report. Fixed artifact paths describe the latest run;
 archive that directory before another run if its evidence needs preserving.
 The unattended fault test disables core debugging while leaving ST-LINK physically

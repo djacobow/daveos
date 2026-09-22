@@ -116,13 +116,20 @@ This form defaults to `core::NoEvent`; the Event-first form remains available.
 Logger arguments must satisfy `core::LoggerFor<Logger, Platform>`;
 logging and command sources remain independent.
 
+A module type can be registered more than once when each instance has its own
+name, passed to the protected `core::Module(const char*)` constructor, for
+example `storage::Module<Event> card(sd, "sd"), internal(flash, "flash");`.
+Logs, statistics and command routes use the instance name; duplicates fail
+initialization with `duplicate_name` before any module's `init()` runs. See the
+[reference](reference.md) for the full rules.
+
 Custom applications can still assemble `make_scheduler`, `CommandDispatcher`,
 and `bind_sources` directly. The existing CommandBinding helper provides stage2
 binding when using those explicit pieces.
 
 ## Failures
 
-Check the status from scheduling and lifecycle operations. Lifecycle and new
+Check the status from scheduling and lifecycle operations. Lifecycle,
 scheduling and timer calls are `[[nodiscard]]`; an explicit `(void)` documents
 deliberate ignoring.
 
@@ -150,7 +157,8 @@ DaveOS exports `daveos-core`, `daveos-console`, selected platform dependencies, 
 platform. The starter's `dependency(..., fallback: ...)` calls show how to consume
 them. Disable DaveOS's own examples/tests for a small consumer build; your own
 application tests can use the fake platform without Catch2. Starter wrap revisions
-pin the tested variant-event API commit; keep upgrades pinned too. For a device
+pin a tested DaveOS commit; keep upgrades pinned to commits, as the
+[STM32 starter](../starters/stm32/README.md#updating-the-dependency-pin) describes. For a device
 application, use [the STM32 starter](../starters/stm32/README.md):
 its board dependency supplies CPU/ABI flags, startup, linker, and HAL settings.
 Custom boards supply their own equivalents.

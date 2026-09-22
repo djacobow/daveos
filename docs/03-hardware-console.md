@@ -33,7 +33,9 @@ console transports.
 The starter uses USART3 at **1 Mb/s, 8N1**, through ST-LINK's virtual serial port.
 The full [STM32 example](../examples/stm32_console/appmain.cpp) adds independently
 selected USB and Ethernet/TCP support. Its Meson-generated header selects objects;
-registration and shutdown behavior live in the library's Console group.
+registration and shutdown behavior live in the library's Console group. The
+[storage starter](../starters/stm32_storage/README.md) adds an SD card and FAT
+commands to the small starter using only library components.
 
 All long-lived application objects may have file scope. Generated `main()` calls
 `appmain()` after peripheral setup. `appmain()` initializes the platform timer,

@@ -371,8 +371,8 @@ own their transaction storage.
 Application device-alias lookup:
 
 ```cpp
-auto sd_device = spi.device<SpiDevice::sd_card>();
-SdCard card{sd_device};
+auto flash_device = spi.device<SpiDevice::flash>();
+FlashDriver flash{flash_device};
 ```
 
 The portable driver stores a `daveos::hal::spi::Device` handle by value. Use the

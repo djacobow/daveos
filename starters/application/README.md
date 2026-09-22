@@ -13,7 +13,8 @@ meson test -C build/host --print-errorlogs
 ```
 
 The first setup downloads DaveOS through `subprojects/daveos.wrap`. Its revision
-pins the tested NoEvent and compact-command API commit; keep future upgrades pinned too.
+pins a tested DaveOS commit; keep future upgrades pinned to commits (see
+[Updating the dependency pin](#updating-the-dependency-pin)).
 For local development, place a checkout (or symlink) at `subprojects/daveos`
 before setup to skip the download. The real-time host platform starts its
 timer thread when constructed in `main()`; module initialization waits for `run()`.

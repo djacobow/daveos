@@ -42,6 +42,8 @@ Build outputs stay under the ignored `build/` directory.
 - [Build, board setup, programming, and API reference](docs/reference.md)
 - [Host/fake application starter](starters/application/README.md)
 - [STM32 device starter](starters/stm32/README.md)
+- [STM32 storage starter](starters/stm32_storage/README.md): SD card and FAT
+  commands built only from the libraries
 - [Concept and core specification](PROJECT.md)
 - [Utilities and portable services specification](docs/spec/services.md)
 - [Platform specification](docs/spec/platforms.md)

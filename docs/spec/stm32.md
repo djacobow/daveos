@@ -147,10 +147,22 @@ reconnection. Its Cortex-M33 stack uses all remaining contiguous main SRAM,
 with MSPLIM guarding the aligned end of static data. Long-lived STM32
 application objects (modules, logger, scheduler, dispatcher, and transport
 buffers) have file-scope storage rooted in `examples/stm32_console/appmain.cpp`.
-Optional UART, USB, networking, and TCP components live in separate files selected
-by Meson, with no application feature-selection preprocessor branches. A generated
-`composition.hpp` assembles only selected members and their registration lists,
-statistics routing, and shutdown calls; disabled components have no instances.
+Components are selected by the `features` build option (see
+[Build features](../reference.md#build-features)), with no application
+feature-selection preprocessor branches. A table in
+`examples/stm32_console/meson.build` maps each selected feature to its
+dependency, header, member declaration and module or console entries; the
+generated `composition.hpp` contains only those declarations, registration lists
+and one-line calls to each component's early, failure and stop methods. Interrupt
+handlers are ordinary per-feature sources under `examples/stm32_console/irqs/`,
+compiled only when their feature is selected. Disabled components have no
+instances. The build records the resolved selection in `build-config.json`
+beside the firmware. Reusable pieces live in libraries rather than the example:
+`watchdog::HealthModule` (as `stm32::Health` for Nucleo), the SD session
+`storage::sd::Session` and its Nucleo wiring `stm32::SdCard`. The example adds
+board wiring, diagnostics such as the `sd` inspection commands, and composition;
+[`starters/stm32_storage`](../../starters/stm32_storage/README.md) shows the
+same libraries used without it.
 Component constructors are passive; hardware setup remains in module init.
 Both boards build one `stm32-console` application target. `platform=stm32` and
 `board=h563` (default) or `board=h755` select board files under
