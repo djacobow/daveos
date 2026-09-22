@@ -4,11 +4,8 @@
 #include <cinttypes>
 
 #include "application.h"
-#include "hal/adapters/daveos.hpp"
-#include "hal/controller.hpp"
-#include "sd_board.h"
+#include "platform/stm32/console/sd_card.hpp"
 #include "sd_inspect.h"
-#include "storage/sd/session.h"
 
 namespace app {
 
@@ -16,39 +13,14 @@ namespace app {
   namespace hal = daveos::hal;
   namespace spi = hal::spi;
 
-  // Nucleo SPI1 wiring for a storage::sd::Session, plus the read-only `sd`
-  // diagnostics: after the CSD, report the CID, compare repeated CRC-checked
-  // reads at 250 kHz and 1 MHz, and describe the partition layout. The
-  // session owns the card protocol and block device; this module owns pins,
-  // clocks, DMA and console output. Interrupt callbacks only publish HAL
-  // completions.
+  // Read-only `sd` diagnostics over the Nucleo SD card (stm32::SdCard):
+  // after the CSD, report the CID, compare repeated CRC-checked reads at
+  // 250 kHz and 1 MHz, and describe the partition layout. SdCard owns the
+  // wiring and the storage::sd::Session; this module adds console commands
+  // and output. Interrupt callbacks only publish HAL completions.
   class SdProbe : public core::Module<SdProbe, Event> {
-    using Clock = hal::DaveOsClock<core::SchedulerInterface<Event>, Platform>;
     using Session = daveos::storage::sd::Session;
 
-    // Dedicated fixture backend: keep a private config copy so startup can
-    // use <=400 kHz and completed transactions can switch to a conservative
-    // data rate. Only this module owns the bus; the session changes speed
-    // between transactions, never while a HAL operation owns the peripheral.
-    class SdBus : public board::SdSpiBus {
-     public:
-      explicit SdBus(const daveos::platform::stm32::detail::SpiDma& dma)
-          : board::SdSpiBus(SPI1, SPI1_IRQn, HSI_VALUE,
-                            {nullptr, Prepare, Reset, nullptr}, dma) {}
-
-      hal::Status init(std::span<const Config> devices) {
-        configs_[0] = devices[0];
-        configs_[0].maximum_hz = Session::kStartupHz;
-        return board::SdSpiBus::init(configs_);
-      }
-
-      void speed(std::uint32_t hz) { configs_[0].maximum_hz = hz; }
-
-     private:
-      std::array<Config, 1> configs_{};
-    };
-
-    using Bus = hal::Controller<SdBus, Clock, board::SdBusCritical, 1>;
     static constexpr std::uint32_t kStartupHz = Session::kStartupHz;
     static constexpr std::uint32_t kReadHz = Session::kDataHz;
     static constexpr std::uint32_t kReadRepeats = 3;
@@ -57,13 +29,7 @@ namespace app {
 
    public:
     explicit SdProbe(Platform& platform, bool dma = false)
-        : clock_(platform),
-          dma_(dma),
-          backend_(dma_.operations()),
-          bus_(backend_, clock_, critical_,
-               {{{{GPIOD, GPIO_PIN_14, false}, kReadHz, 0, false}}}),
-          session_(bus_.device<0>(), SpeedHooks(), ResetHooks(), PumpHook(),
-                   Diagnostics()) {}
+        : hardware_(platform, dma, Diagnostics()) {}
 
     static constexpr const char* name() { return "sd"; }
 
@@ -84,75 +50,46 @@ namespace app {
 
     core::Status init(core::InitStage stage) {
       if (stage == core::InitStage::stage1) {
-        clock_.bind(scheduler());
-        return bus_.init() == hal::Status::ok
+        return hardware_.init(scheduler()) == hal::Status::ok
                    ? core::Status::ok
                    : core::Status::initialization_failed;
       }
       return core::Status::ok;
     }
 
-    void interrupt() {
-      ++interrupts_;
-      bus_.interrupt();
-    }
+    void interrupt() { hardware_.interrupt(); }
 
     core::Status Probe() {
-      return session_.request() == hal::Status::ok ? core::Status::ok
-                                                   : core::Status::busy;
+      return CardSession().request() == hal::Status::ok ? core::Status::ok
+                                                        : core::Status::busy;
     }
 
     core::Status ResetBus() {
-      return session_.reset() == hal::Status::ok ? core::Status::ok
-                                                 : core::Status::busy;
+      return CardSession().reset() == hal::Status::ok ? core::Status::ok
+                                                      : core::Status::busy;
     }
 
     core::Status Stats() {
-      critical_.enter();
-      const auto counters = backend_.counters();
-      const auto interrupts = interrupts_;
-      critical_.leave();
+      [[maybe_unused]] const auto counters = hardware_.counters();
       I_("SPI1 IRQs=%" PRIu32 " polls=%" PRIu32 " DMA chunks=%" PRIu32
          " bytes=%" PRIu32,
-         interrupts, counters.polls, counters.dma_chunks, counters.dma_bytes);
+         counters.interrupts, counters.polls, counters.dma_chunks,
+         counters.dma_bytes);
       I_("SPI1 faulted=%s; SD ready=%s; last error=%s",
-         bus_.faulted() ? "yes" : "no", session_.ready() ? "yes" : "no",
-         session_.error());
+         hardware_.faulted() ? "yes" : "no",
+         CardSession().ready() ? "yes" : "no", CardSession().error());
       return core::Status::ok;
     }
 
     // File-scope wiring only takes the session's address; no card access.
     daveos::storage::BlockDevice block_device() {
-      return session_.block_device();
+      return hardware_.block_device();
     }
 
-    void Tick() { session_.tick(); }
+    void Tick() { hardware_.tick(); }
 
    private:
-    Session::Speed SpeedHooks() {
-      return {
-          this,
-          [](void* p, std::uint32_t hz) {
-            static_cast<SdProbe*>(p)->backend_.speed(hz);
-          },
-          [](void* p) { return static_cast<SdProbe*>(p)->backend_.rate(0); }};
-    }
-
-    Session::Reset ResetHooks() {
-      return {this, [](void* p, hal::Callback<hal::ResetResult> done) {
-                return static_cast<SdProbe*>(p)->bus_.reset(done);
-              }};
-    }
-
-    daveos::storage::sd::Transport::Pump PumpHook() {
-      return {this, [](void* context) {
-                const auto status =
-                    static_cast<SdProbe*>(context)->scheduler().yield();
-                return status == core::Status::ok ||
-                       status == core::Status::empty ||
-                       status == core::Status::depth_limit;
-              }};
-    }
+    Session& CardSession() { return hardware_.session(); }
 
     Session::Observer Diagnostics() {
       return {this,
@@ -178,7 +115,7 @@ namespace app {
 
     void ReadFailure(std::uint32_t sector) {
       E_("SD read LBA %" PRIu32 ": %s; reinitialization required", sector,
-         session_.error());
+         CardSession().error());
     }
 
     void WriteFailure(
@@ -213,19 +150,19 @@ namespace app {
            "(read-only)");
         I_("SD ready: SPI1 %" PRIu32 " Hz, OCR 0x%08" PRIx32
            " (read-only probe)",
-           backend_.rate(0), session_.ocr());
+           hardware_.rate(), CardSession().ocr());
       } else {
-        if (const auto init = session_.initialization();
+        if (const auto init = CardSession().initialization();
             init && init->status != hal::Status::ok) {
           E_("SD initialization failed at CMD%" PRIu32 ": %s", init->command,
              enum_name(init->status));
           return;
         }
-        const auto result = session_.last_transfer();
-        const auto rx = session_.wire();
+        const auto result = CardSession().last_transfer();
+        const auto rx = CardSession().wire();
         E_("SD probe failed at CMD%" PRIu32 ": %s (%s); first bytes %02" PRIx32
            " %02" PRIx32 " %02" PRIx32 " %02" PRIx32,
-           session_.command(), session_.error(),
+           CardSession().command(), CardSession().error(),
            result ? enum_name(result->status) : "no completion",
            static_cast<std::uint32_t>(rx[0]), static_cast<std::uint32_t>(rx[1]),
            static_cast<std::uint32_t>(rx[2]),
@@ -239,7 +176,7 @@ namespace app {
                        std::span<const std::uint8_t> data) {
       using Kind = Session::Step::Kind;
       if (command == 9) {
-        card_ = session_.card();
+        card_ = CardSession().card();
         I_("SD capacity: %" PRIu32 " MiB, sectors 0x%08" PRIx32 "%08" PRIx32
            ", maximum clock %" PRIu32 " Hz",
            static_cast<std::uint32_t>(card_.sectors / 2048),
@@ -279,12 +216,12 @@ namespace app {
       if (reads_ == kReadRepeats) {
         I_("SD LBA %" PRIu32 ": %" PRIu32 " CRC-checked reads at %" PRIu32
            " Hz match",
-           lba_, kReadRepeats, backend_.rate(0));
-        backend_.speed(std::min(kReadHz, card_.maximum_hz));
+           lba_, kReadRepeats, hardware_.rate());
+        hardware_.speed(std::min(kReadHz, card_.maximum_hz));
       } else if (reads_ == 2 * kReadRepeats) {
         I_("SD LBA %" PRIu32 ": %" PRIu32 " CRC-checked reads at %" PRIu32
            " Hz match slow baseline",
-           lba_, kReadRepeats, backend_.rate(0));
+           lba_, kReadRepeats, hardware_.rate());
         if (Inspect()) {
           return {Kind::finish};
         }
@@ -350,52 +287,13 @@ namespace app {
         }
         lba_ = part.start;
         reads_ = 0;
-        backend_.speed(kStartupHz);
+        hardware_.speed(kStartupHz);
         return false;
       }
       return true;
     }
 
-    static hal::Status Prepare(void*) {
-      // CKPER uses HSI (64 MHz); /256 yields 250 kHz for SD startup.
-      __HAL_RCC_GPIOA_CLK_ENABLE();
-      __HAL_RCC_GPIOB_CLK_ENABLE();
-      __HAL_RCC_GPIOG_CLK_ENABLE();
-      __HAL_RCC_GPIOD_CLK_ENABLE();
-      __HAL_RCC_CLKP_CONFIG(RCC_CLKPSOURCE_HSI);
-      __HAL_RCC_SPI1_CONFIG(RCC_SPI1CLKSOURCE_CLKP);
-      __HAL_RCC_SPI1_CLK_ENABLE();
-      HAL_GPIO_WritePin(GPIOD, GPIO_PIN_14, GPIO_PIN_SET);
-      GPIO_InitTypeDef gpio{};
-      gpio.Pin = GPIO_PIN_14;
-      gpio.Mode = GPIO_MODE_OUTPUT_PP;
-      gpio.Pull = GPIO_NOPULL;
-      gpio.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-      HAL_GPIO_Init(GPIOD, &gpio);
-      gpio.Mode = GPIO_MODE_AF_PP;
-      gpio.Pull = GPIO_PULLUP;
-      gpio.Alternate = GPIO_AF5_SPI1;
-      gpio.Pin = GPIO_PIN_5;
-      HAL_GPIO_Init(GPIOA, &gpio);
-      HAL_GPIO_Init(GPIOB, &gpio);
-      board::PrepareSdMiso(gpio);
-      return hal::Status::ok;
-    }
-
-    static void Reset(void*) {
-      __HAL_RCC_SPI1_FORCE_RESET();
-      __DSB();
-      __HAL_RCC_SPI1_RELEASE_RESET();
-      __DSB();
-    }
-
-    Clock clock_;
-    board::SdBusCritical critical_;
-    std::uint32_t interrupts_ = 0;
-    board::SdDma dma_;
-    SdBus backend_;
-    Bus bus_;
-    Session session_;
+    daveos::platform::stm32::SdCard<Event> hardware_;
     std::array<std::uint8_t, kSectorSize> sector_{};
     std::array<sd::Partition, 4> partitions_{};
     sd::Card card_{};

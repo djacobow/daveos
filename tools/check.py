@@ -57,7 +57,8 @@ def main():
             "platform/fake/bus.hpp", "platform/stm32/bus/driver.h",
             "platform/stm32/bus/spi_dma.h", "platform/stm32h7/spi_dma.h",
             "platform/stm32h5/spi_dma.h",
-            "storage/module.hpp", "storage/read_file.h", "update/file.h", "storage/sd/initializer.h", "storage/sd/read.h", "storage/sd/transport.h")]
+            "storage/module.hpp", "storage/read_file.h", "update/file.h", "storage/sd/initializer.h", "storage/sd/read.h", "storage/sd/transport.h",
+            "storage/sd/session.h", "watchdog/health.hpp")]
         subprocess.run(command + ["--language=c++", *hal_headers], cwd=ROOT, check=True)
 
 
