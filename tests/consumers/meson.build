@@ -4,15 +4,15 @@ consumer_compiler = meson.get_compiler('cpp').cmd_array()
 consumer_checks = {
   'state_machine': {
     'deps': [core_dep],
-    'forbid': 'core/platform/,core/schedule/,core/logging/,core/command/,core/event/,hal/,platform/',
+    'forbid': 'lib/core/platform/,lib/core/schedule/,lib/core/logging/,lib/core/command/,lib/core/event/,lib/hal/,platform/',
   },
   'driver': {
     'deps': [drivers_dep],
-    'forbid': 'core/platform/,core/schedule/,core/logging/,core/command/,core/event/,platform/',
+    'forbid': 'lib/core/platform/,lib/core/schedule/,lib/core/logging/,lib/core/command/,lib/core/event/,platform/',
   },
   'task_app': {
     'deps': [core_dep, fake_dep],
-    'forbid': 'hal/,drivers/,net/,storage/,console/,boot/,update/,otp/,watchdog/',
+    'forbid': 'lib/hal/,lib/drivers/,lib/net/,lib/storage/,lib/console/,lib/boot/,lib/update/,lib/otp/,lib/watchdog/',
   },
 }
 foreach name, check : consumer_checks

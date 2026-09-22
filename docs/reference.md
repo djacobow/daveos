@@ -68,12 +68,15 @@ time units, periodic tasks, Application composition, and failure diagnostics.
 ## Build structure
 
 Code is organized by component, with headers and implementations together:
-`core/{schedule,command,event,logging,queue,platform,enum}/` and
+`lib/core/{schedule,command,event,logging,queue,platform,enum}/` and
 `platform/{host,fake,stm32h5,stm32h7,detail}/`. Optional networking lives in
-`net/` and console helpers in `console/`, with shared hardware support in `platform/stm32/ethernet/`.
-There is no separate `include/`
-or `src/` tree. Include paths start at the repository root, for example
-`#include "core/schedule/scheduler.hpp"`. Namespaces are `daveos::core`,
+`lib/net/` and console helpers in `lib/console/`, with shared hardware support in `platform/stm32/ethernet/`.
+Executable bootloaders live in `apps/bootloader/{h563,h755}/`; their portable
+policy and journal library lives in `lib/boot/`. Vendor submodules live under
+`third_party/`, with configuration and adapters kept in their owning components.
+There is no separate `include/` or `src/` tree. Library include paths start at
+`lib/`, for example `#include "core/schedule/scheduler.hpp"`; platform includes
+start at the repository root. Meson supplies these include roots. Namespaces are `daveos::core`,
 `daveos::platform::*`, `daveos::console`, and `daveos::net` (including `daveos::net::stm32`).
 
 Headers defining templates use `.hpp`; other headers use `.h`. C++ translation
@@ -83,7 +86,9 @@ side by side in `platform/detail/stm32_tim2.hpp` and `stm32_tim2_impl.hpp`.
 
 Build definitions follow the dependency and target directories:
 
-- `core/meson.build`: allocation-free core headers.
+- `lib/meson.build`: reusable libraries, each with its own component build file.
+- `lib/core/meson.build`: allocation-free core headers.
+- `apps/bootloader/{h563,h755}/meson.build`: bootloader executables and A/B layouts.
 - `platform/{host,fake,stm32h5,stm32h7}/meson.build`: reusable adapter libraries.
 - `platform/{stm32h5,stm32h7}/{cmsis,hal}/meson.build`: vendor headers, device flags,
   and HAL component source dependencies.
@@ -100,6 +105,12 @@ STM32 configurations require CMSIS even when examples are disabled.
 
 Example and test binaries live in their corresponding directories under `build/`.
 Use `meson test -C build/host` to run tests without depending on binary paths.
+Bootloader artifacts now live under `build/<configuration>/apps/bootloader/<board>/`,
+and generated version stamps under `build/<configuration>/lib/util/`.
+After updating an existing checkout, initialize dependencies using the
+`third_party/` paths shown below and regenerate build directories to refresh
+source paths and compilation databases. A configuration that still contains
+removed Meson options must be recreated with the current options.
 
 ## Formatting and linting
 
@@ -189,12 +200,12 @@ regenerate with `Unknown options`. Set them up again, or delete those lines from
 ## ARM compile check
 
 STM32CubeH5 is pinned as a Git submodule at
-`platform/stm32h5/STM32CubeH5`. Initialize its HAL and CMSIS device dependencies
+`third_party/STM32CubeH5`. Initialize its HAL and CMSIS device dependencies
 after cloning DaveOS:
 
 ```sh
-git submodule update --init platform/stm32h5/STM32CubeH5
-git -C platform/stm32h5/STM32CubeH5 submodule update --init --recursive \
+git submodule update --init third_party/STM32CubeH5
+git -C third_party/STM32CubeH5 submodule update --init --recursive \
   Drivers/CMSIS/Device/ST/STM32H5xx Drivers/STM32H5xx_HAL_Driver
 ```
 
@@ -225,7 +236,7 @@ Board selection applies to the platform libraries as well as the application.
 To also build the DaveOS board console firmware:
 
 ```sh
-git submodule update --init platform/stm32/STM32_USB_Device_Library
+git submodule update --init third_party/STM32_USB_Device_Library
 # Enable firmware in the build configured above.
 meson configure build/arm -Dexamples=true
 meson compile -C build/arm
@@ -426,7 +437,7 @@ against their arguments at compile time. Test configuration verifies that valid
 arguments compile and mismatched types fail with `-Werror=format`.
 
 Module member functions can use `D_`, `I_`, `W_`, `E_`, and `F_` from
-`core/logging/log.hpp` for debug, info, warning, error, and fatal messages:
+`lib/core/logging/log.hpp` for debug, info, warning, error, and fatal messages:
 
 ```cpp
 I_("started");
@@ -624,10 +635,10 @@ The CubeMX project in `platform/stm32/nucleo/h755/` builds two hard-float images
 using the pinned STM32CubeH7 **v1.13.0** HAL and CMSIS without a board BSP:
 
 ```sh
-git submodule update --init platform/stm32h7/STM32CubeH7
-git -C platform/stm32h7/STM32CubeH7 submodule update --init --recursive \
+git submodule update --init third_party/STM32CubeH7
+git -C third_party/STM32CubeH7 submodule update --init --recursive \
   Drivers/CMSIS/Device/ST/STM32H7xx Drivers/STM32H7xx_HAL_Driver
-git submodule update --init platform/stm32/STM32_USB_Device_Library
+git submodule update --init third_party/STM32_USB_Device_Library
 export PATH="$PWD/tools/external/arm-gnu-toolchain-15.2.rel1-x86_64-arm-none-eabi/bin:$PATH"
 meson setup build/h755 --cross-file meson/stm32.ini -Dboard=h755 -Dexamples=true
 meson compile -C build/h755
@@ -792,7 +803,7 @@ and queued USB output. UART remains available independently.
 
 `platform/stm32/console/usb/` owns the shared console, CDC glue, and descriptors.
 Both boards use ST's USB Device Library **v2.11.3**, pinned as a shared submodule
-under `platform/stm32/STM32_USB_Device_Library` rather than depending on CubeH7.
+under `third_party/STM32_USB_Device_Library` rather than depending on CubeH7.
 Each example's `usb/` directory supplies its controller-specific setup.
 H755 configures USB2 OTG FS, PA9 VBUS sensing,
 PA11/PA12 data pins, IRQ priority 6, and HSI48 with USB2 SOF synchronization via
@@ -933,7 +944,7 @@ formatter; subscribers still choose the transport and line ending.
 
 ### Named enums
 
-`core/enum/enum.h` generates scoped enums, `constexpr enum_name()` overloads,
+`lib/core/enum/enum.h` generates scoped enums, `constexpr enum_name()` overloads,
 and `enum_choices()` name/value tables
 from a single list, with no allocation or separate string table to maintain:
 
@@ -978,7 +989,7 @@ API are not implemented yet. UDP is enabled for DHCP, without an application UDP
 Initialize the additional pinned submodules and build:
 
 ```sh
-git submodule update --init net/lwip platform/stm32/lan8742
+git submodule update --init third_party/lwip third_party/lan8742
 meson setup build/net-h755 --cross-file meson/stm32.ini --cross-file meson/profiles/network.ini -Dboard=h755 -Dexamples=true
 meson compile -C build/net-h755
 # H563: use build/net-h563 and omit -Dboard=h755 (or set -Dboard=h563).
@@ -1003,12 +1014,12 @@ convention, not an assigned globally unique address. Hardware-init faults are
 reported without preventing other modules from running; reset retries hardware
 initialization. Cable/DHCP recovery is automatic.
 
-`net/service.h` is independent of DaveOS and lwIP headers. The application owns
+`lib/net/service.h` is independent of DaveOS and lwIP headers. The application owns
 its borrowed driver and clock and calls `init()`, `poll()`, and `snapshot()`.
 One service may be active per process because NO_SYS lwIP has global state.
 Initialization is single-use; destruction stops the interface. All service
 access is serialized in one caller context, never from interrupts.
-`net/module.hpp` provides the thin DaveOS adapter and `net status` command.
+`lib/net/module.hpp` provides the thin DaveOS adapter and `net status` command.
 The module polls every 1 ms, consumes at most four frames per invocation, runs
 lwIP timeouts even without traffic, and samples link status every 250 ms.
 
@@ -1072,7 +1083,7 @@ open while waiting for command output.
 
 Omitting the `tcp` feature removes this transport while retaining networking. UART,
 USB, and logging remain independently selectable. To change the port, pass it
-to the application's `TcpConsole` constructor. `net/tcp_server.h` exposes the
+to the application's `TcpConsole` constructor. `lib/net/tcp_server.h` exposes the
 DaveOS-independent, nonblocking `TcpServer` used by this adapter. Its service
 must outlive it; stop the server before stopping the service. Call both from the
 same serialized context. It uses fixed 4 KiB input and 8 KiB output buffers;
@@ -1089,7 +1100,7 @@ without UART/USB/logging and networking without the TCP console. Its UART,
 USB, Ethernet, and TCP console also pass initial hardware bring-up checks.
 
 
-Shared console helpers live in `console/` under `daveos::console`, with an
+Shared console helpers live in `lib/console/` under `daveos::console`, with an
 explicit `console_dep` Meson dependency for transports and their tests.
 `Input` collects lines; `LineDisplay` handles terminal presentation through a
 borrowed callback context; `BufferedOutput` manages bounded asynchronous output
@@ -1253,6 +1264,6 @@ time. Self time still includes ISR time and waiting. The statistics table
 includes both totals and the `invalid_yields`/`yield_depth_errors` counters.
 
 The optional `daveos-drivers` dependency adds peripheral drivers over the HAL.
-`drivers/mcp3425.h` provides `daveos::drivers::Mcp3425`. H563's optional
+`lib/drivers/mcp3425.h` provides `daveos::drivers::Mcp3425`. H563's optional
 `i2c-adc` feature supplies `i2c scan`, `i2c stats`, `i2c reset` and
 `adc sample`; see [SPI/I2C](spi-i2c.md) for wiring and recovery semantics.

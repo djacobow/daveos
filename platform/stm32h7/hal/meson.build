@@ -1,5 +1,5 @@
 # Source dependencies are compiled in each target with its own HAL configuration.
-hal_root = '../STM32CubeH7/Drivers/STM32H7xx_HAL_Driver'
+hal_root = '../../../third_party/STM32CubeH7/Drivers/STM32H7xx_HAL_Driver'
 stm32h7_hal_dep = declare_dependency(
   sources: files(hal_root / 'Src/stm32h7xx_hal.c'),
   include_directories: include_directories(hal_root / 'Inc', hal_root / 'Inc/Legacy'),

@@ -8,11 +8,7 @@ Generated code, vendor sources and build artifacts require an explicit scope.
 EXCLUDE = (
     r"/(?:build|\.git)/"
     r"|/tools/external/"
-    r"|/net/lwip/"
-    r"|/storage/fatfs/"
-    r"|/platform/stm32/lan8742/"
-    r"|/platform/stm32h[57]/STM32CubeH[57]/"
-    r"|/platform/stm32/STM32_USB_Device_Library/"
+    r"|/third_party/"
     r"|/platform/stm32/nucleo/h755/(?:Drivers|Common|EWARM)/"
     r"|/platform/stm32/nucleo/h755/CM[47]/Core/"
     r"|/platform/stm32/nucleo/h755/.*\.(?:cmake|ioc|ld)$"
@@ -24,7 +20,9 @@ EXCLUDE = (
 CONFIG = {
     "subpaths": {
         "rr": ("repository root", []),
-        "core": ("core components", ["core"]),
+        "lib": ("libraries", ["lib"]),
+        "apps": ("applications", ["apps"]),
+        "core": ("core components", ["lib", "core"]),
         "host": ("host adapter", ["platform", "host"]),
         "fake": ("fake adapter", ["platform", "fake"]),
         "stm32": ("STM32H5 adapter", ["platform", "stm32h5"]),
@@ -34,7 +32,7 @@ CONFIG = {
         "stm32h7": ("STM32H7 adapter", ["platform", "stm32h7"]),
         "tests": ("tests", ["tests"]),
         "tools": ("tools", ["tools"]),
-        "vendor": ("STM32CubeH5", ["platform", "stm32h5", "STM32CubeH5"]),
+        "vendor": ("STM32CubeH5", ["third_party", "STM32CubeH5"]),
     },
     "code_file_types": {
         "cpp": {"default": True},
@@ -53,7 +51,9 @@ CONFIG = {
     "code_search_paths": {
         "daveos": {
             "repo": {"default": True, "include": ["."], "exclude": EXCLUDE},
-            "core": {"default": False, "include": ["core"]},
+            "lib": {"default": False, "include": ["lib"]},
+            "apps": {"default": False, "include": ["apps"]},
+            "core": {"default": False, "include": ["lib/core"]},
             "host": {
                 "default": False,
                 "include": ["platform/host", "platform/detail"],
@@ -72,7 +72,7 @@ CONFIG = {
             "tests": {"default": False, "include": ["tests"]},
             "tools": {"default": False, "include": ["tools"], "exclude": EXCLUDE},
             "generated": {"default": False, "include": ["platform/stm32/nucleo/h563"], "exclude": r"/(?:Drivers|cmake)/"},
-            "vendor": {"default": False, "include": ["platform/stm32h5/STM32CubeH5/Drivers"]},
+            "vendor": {"default": False, "include": ["third_party/STM32CubeH5/Drivers"]},
             "artifacts": {"default": False, "include": ["build"]},
         },
     },

@@ -53,7 +53,8 @@ foreach variant : [
   ['"two"', '"two"', true],
   ['"ONE"', '"two"', false],
   ['""', '"two"', false],
-  ['"two"', '"ONE"', false],
+  # Cross-module route collisions are validated after instance construction.
+  ['"two"', '"ONE"', true],
   ['"two"', '"help"', false],
   ['"two"', '"bad prefix"', false],
 ]
@@ -76,7 +77,7 @@ event_check = '''
     static constexpr const char* name() { return "example"; }
     void Task() {}
     static constexpr auto tasks() {
-      return std::array{core::TaskDescriptor<Example>{"task", &Example::Task}};
+      return std::array{DAVEOS_TASK(Example, Task)};
     }
   };
   static_assert(!core::ModuleFor<int, Event>);
@@ -86,8 +87,8 @@ event_check = '''
   }
 '''
 foreach operation : [
-    'interface.schedule(module, &Example::Task, 1)',
-    'interface.cancel(module, &Example::Task)',
+    'interface.schedule<&Example::Task>(module, std::chrono::microseconds{1})',
+    'interface.cancel<&Example::Task>(module)',
     'auto scheduler = core::make_scheduler<Event>(platform, core::ModuleList{&module})',
     'core::CommandDispatcher<Event, core::ModuleList<Example>> dispatcher(core::ModuleList{&module}, interface)']
   foreach event_type, expected : {'Event': true, 'Other': false}

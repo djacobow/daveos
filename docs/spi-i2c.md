@@ -119,7 +119,7 @@ and duplicate I2C addresses on one controller. Separate controllers can use the
 same I2C address. Initialization and registry wiring are task-context operations
 performed before transfers are allowed.
 
-`hal::DaveOsClock` in `hal/adapters/daveos.hpp` adapts scheduler timers. It can be
+`hal::DaveOsClock` in `lib/hal/adapters/daveos.hpp` adapts scheduler timers. It can be
 constructed with a platform reference alone and bound to a scheduler during
 initialization, avoiding constructor prerequisites. Budget up to two pending
 DaveOS timers per active controller, in addition to other application timers.
@@ -247,7 +247,7 @@ The `sd probe` command remains a read-only diagnostic. No sector
 writes, formatting, mounting, directory traversal or filesystem consistency
 checks occur within the probe. The optional `fatfs` feature adds a separate
 [filesystem worker](storage.md) with `fs mount/ls/read/unmount`. The fixed SPI action-list API keeps CS asserted for the command
-and data capture. `storage/sd/read.h` builds a shared sequence that reads R1
+and data capture. `lib/storage/sd/read.h` builds a shared sequence that reads R1
 (with an eight-byte response bound), waits for the data token, rejects bad
 responses before payload transfer, then reads only the payload and CRC. The
 module's receive buffer is 516 bytes; the transaction deadline still bounds
@@ -315,7 +315,7 @@ Commands:
   their full 64-bit values.
   Scan NACKs count as failed transactions, so they are expected in this output.
 
-`hal/adapters/i2c_module.hpp` provides `hal::I2cModule<Event, Buses...>` over
+`lib/hal/adapters/i2c_module.hpp` provides `hal::I2cModule<Event, Buses...>` over
 borrowed named bus adapters. The H563 composition passes only `I2C1`; adding
 another adapter includes it in both scan and stats without changing the command
 handlers. The module initializes the buses and reserves them for a scan,
@@ -324,7 +324,7 @@ lease through the conversion and all HAL completions, so scanning cannot change
 the client sequence between transactions. `adc` is a separate module with only `sample`;
 it does not own interrupt routing or bus initialization.
 
-`drivers/mcp3425.h` provides the board-independent `drivers::Mcp3425` reader
+`lib/drivers/mcp3425.h` provides the board-independent `drivers::Mcp3425` reader
 through the `daveos-drivers` Meson dependency (which depends on `daveos-hal`),
 using an injected `i2c::Device`. Its constructor is passive. One task calls
 `request()`, then `tick(monotonic_microseconds)`, and inspects `result()`.

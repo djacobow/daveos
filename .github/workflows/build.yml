@@ -33,7 +33,7 @@ jobs:
           cmake --install build/ci-tools/cppcheck-build
           build/ci-tools/cppcheck/bin/cppcheck --version
           echo "$PWD/build/ci-tools/cppcheck/bin" >> "$GITHUB_PATH"
-      - run: git submodule update --init net/lwip storage/fatfs
+      - run: git submodule update --init third_party/lwip third_party/fatfs
       - run: meson setup build/host --native-file meson/clang.ini -Db_sanitize=${{ matrix.sanitizer }} -Db_lundef=false -Dfeatures=net,fatfs -Dversion_build="$GITHUB_RUN_NUMBER"
       - run: meson compile -C build/host -j 2
       - run: meson test -C build/host --print-errorlogs
@@ -62,8 +62,8 @@ jobs:
       - run: uv pip install --system -r requirements-test.txt
       - run: sudo apt-get update && sudo apt-get install -y gcc-arm-none-eabi libstdc++-arm-none-eabi-dev libstdc++-arm-none-eabi-newlib
       - run: |
-          git submodule update --init platform/stm32h5/STM32CubeH5 platform/stm32/STM32_USB_Device_Library storage/fatfs
-          git -C platform/stm32h5/STM32CubeH5 submodule update --init --recursive Drivers/CMSIS/Device/ST/STM32H5xx Drivers/STM32H5xx_HAL_Driver
+          git submodule update --init third_party/STM32CubeH5 third_party/STM32_USB_Device_Library third_party/fatfs
+          git -C third_party/STM32CubeH5 submodule update --init --recursive Drivers/CMSIS/Device/ST/STM32H5xx Drivers/STM32H5xx_HAL_Driver
       - run: meson setup build/arm --cross-file meson/stm32.ini -Dexamples=true -Dversion_build="$GITHUB_RUN_NUMBER"
       - run: meson compile -C build/arm
       - name: Build optional H563 SD filesystem and file updater
@@ -74,8 +74,8 @@ jobs:
           meson compile -C build/arm
           meson configure build/arm -Dbootloader=false -Dfeatures=default
       - run: |
-          git submodule update --init platform/stm32h7/STM32CubeH7
-          git -C platform/stm32h7/STM32CubeH7 submodule update --init --recursive Drivers/CMSIS/Device/ST/STM32H7xx Drivers/STM32H7xx_HAL_Driver
+          git submodule update --init third_party/STM32CubeH7
+          git -C third_party/STM32CubeH7 submodule update --init --recursive Drivers/CMSIS/Device/ST/STM32H7xx Drivers/STM32H7xx_HAL_Driver
       - run: meson setup build/h755 --cross-file meson/stm32.ini -Dboard=h755 -Dexamples=true -Dversion_build="$GITHUB_RUN_NUMBER"
       - run: meson compile -C build/h755
       - name: Build optional H755 SD filesystem and file updater
@@ -99,7 +99,7 @@ jobs:
           done
       - name: Build optional networking on both STM32 families
         run: |
-          git submodule update --init net/lwip platform/stm32/lan8742
+          git submodule update --init third_party/lwip third_party/lan8742
           for target in arm h755; do
             meson configure build/$target -Dfeatures=default,net,tcp
             meson compile -C build/$target

@@ -30,14 +30,14 @@ from the copied project; the wrap revision pins a tested DaveOS commit (see
 Initialize the board's HAL/CMSIS submodules in the DaveOS checkout. For H563:
 
 ```sh
-git -C subprojects/daveos submodule update --init platform/stm32h5/STM32CubeH5
-git -C subprojects/daveos/platform/stm32h5/STM32CubeH5 submodule update --init --recursive Drivers/CMSIS/Device/ST/STM32H5xx Drivers/STM32H5xx_HAL_Driver
+git -C subprojects/daveos submodule update --init third_party/STM32CubeH5
+git -C subprojects/daveos/third_party/STM32CubeH5 submodule update --init --recursive Drivers/CMSIS/Device/ST/STM32H5xx Drivers/STM32H5xx_HAL_Driver
 meson setup build/arm --cross-file meson/stm32.ini
 meson compile -C build/arm
 meson compile -C build/arm flash-plan
 ```
 
-For H755, initialize `platform/stm32h7/STM32CubeH7`, then its
+For H755, initialize `third_party/STM32CubeH7`, then its
 `Drivers/CMSIS/Device/ST/STM32H7xx` and `Drivers/STM32H7xx_HAL_Driver` submodules,
 and configure a fresh build with:
 

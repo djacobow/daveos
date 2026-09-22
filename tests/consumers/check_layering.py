@@ -1,7 +1,7 @@
 """Fail if a consumer source transitively includes a forbidden project layer.
 
 Usage: check_layering.py ROOT SOURCE FORBIDDEN[,FORBIDDEN...] -- COMPILER...
-FORBIDDEN entries are repository-relative path prefixes such as core/platform/.
+FORBIDDEN entries are repository-relative path prefixes such as lib/core/platform/.
 """
 from pathlib import Path
 import subprocess
@@ -11,7 +11,7 @@ root, source, forbidden = Path(sys.argv[1]).resolve(), sys.argv[2], sys.argv[3]
 compiler = sys.argv[sys.argv.index('--') + 1:]
 prefixes = [entry for entry in forbidden.split(',') if entry]
 result = subprocess.run(
-    [*compiler, '-std=c++20', '-M', '-I', str(root), source],
+    [*compiler, '-std=c++20', '-M', '-I', str(root), '-I', str(root / 'lib'), source],
     capture_output=True, text=True)
 if result.returncode:
     sys.exit(f'{source}: dependency scan failed\n{result.stderr}')

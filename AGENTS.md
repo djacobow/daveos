@@ -5,6 +5,16 @@
 A lightweight cooperative scheduler for embedded targets written in c++20,
 with a build system in meson and tools written in Python
 
+## Source organization
+
+* Reusable components live under `lib/`; keep headers and implementations together.
+* Hardware/OS adapters and board support live under `platform/`.
+* Bootloader executables live under `apps/bootloader/`; reusable boot policy lives
+  under `lib/boot/`.
+* Vendor submodules live under `third_party/`; keep our integration code outside them.
+* Public library includes are relative to `lib/`, and platform includes to the
+  repository root. Keep Meson dependency definitions with their owning components.
+
 ## Before Pushing 
 
 * update affected docs and comments in the code

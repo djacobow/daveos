@@ -6,7 +6,7 @@ subscribers receive records and command sources submit lines.
 
 ## A new console transport
 
-Use `daveos::console::Module<Derived, Event>` from `console/module.hpp` for a
+Use `daveos::console::Module<Derived, Event>` from `lib/console/module.hpp` for a
 transport with its own polling/output behavior. Supply `name()`, `poll_line(Line&)`,
 `take_dropped()`, and `output(const LogRecord&)`. The base supplies an independent
 subscriber/source and dispatches at most one complete command per invocation.
@@ -110,7 +110,7 @@ and its small scheduling module are examples of that separation.
 
 ### Structured state machines
 
-[`core/state_machine/state_machine.hpp`](../core/state_machine/state_machine.hpp)
+[`lib/core/state_machine/state_machine.hpp`](../lib/core/state_machine/state_machine.hpp)
 provides an allocation-free CRTP helper, independent of the scheduler. Use a
 contiguous `enum class` starting at zero; supply its state count as the final
 argument. Declare the enum and machine in the narrowest scope that their users
@@ -171,7 +171,7 @@ no transition hooks or state change; the attempted tick remains counted.
 The helper is not thread-safe: serialize calls and snapshots, and synchronize
 flags written by interrupts separately.
 
-The [OTA engine](../update/engine.h) uses a private nested machine and exposes
+The [OTA engine](../lib/update/engine.h) uses a private nested machine and exposes
 these getters through its existing public interface. The journal, OTA writer,
 package reader, protocol, watchdog controller, confirmation gate, host FileFlash,
 and scheduler lifecycle also use the helper. Implementation-only enums stay
@@ -201,8 +201,8 @@ and polling-helper examples, STM32 IRQ wiring, and the read-only H563 SD fixture
 ## Asynchronous drivers
 
 Long operations are state machines advanced from a task, not blocking calls.
-New drivers should use the shape `drivers/mcp3425.h`, `storage/sd/initializer.h`
-and `storage/sd/session.h` share:
+New drivers should use the shape `lib/drivers/mcp3425.h`, `lib/storage/sd/initializer.h`
+and `lib/storage/sd/session.h` share:
 
 - `request()` accepts work or returns `busy`; it starts nothing inline.
 - `tick()` advances the state machine from a task; interrupts only publish

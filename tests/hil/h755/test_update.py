@@ -30,8 +30,8 @@ def install_confirmed(board, slot, full_metadata=False):
     import factory
 
     build = Path(board.config['build'])
-    layout = json.loads((build / 'boot/h755/layout.json').read_text())
-    version = json.loads((build / 'util/version.json').read_text())
+    layout = json.loads((build / 'apps/bootloader/h755/layout.json').read_text())
+    version = json.loads((build / 'lib/util/version.json').read_text())
     application = (board.firmware / ('stm32-console-b.bin' if slot else 'stm32-console.bin')).read_bytes()
     record = bytearray(factory.metadata(application, layout, version))
     if slot:
@@ -171,7 +171,7 @@ def test_bootloader_watchdog(board):
     from pathlib import Path
     if not board.config.get('bootloader', False):
         pytest.skip('requires H755 bootloader build')
-    boot = Path(board.config['build']).resolve() / 'boot/h755/bootloader.elf'
+    boot = Path(board.config['build']).resolve() / 'apps/bootloader/h755/bootloader.elf'
     board.uart.drain()
     board.prepare_execution(f'''file {boot}
 monitor reset halt

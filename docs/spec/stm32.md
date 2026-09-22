@@ -186,7 +186,7 @@ in [STM32 memory](../memory.md).
 Reusable USART3/USB transports, Board commands, Nucleo network wiring, and the
 Console group live in `platform/stm32/console`, namespace
 `daveos::platform::stm32`. The transport-agnostic serial module wrapper and TCP
-console live in `console/`, namespace `daveos::console`. Library code depends on
+console live in `lib/console/`, namespace `daveos::console`. Library code depends on
 core/console/net and a consumer-supplied board contract, never on example headers.
 `TransportModule<Event, Transport>` owns a passive transport, initializes it in
 stage1, and supplies the common command/log/statistics interface. UART and USB

@@ -81,7 +81,7 @@ idle/wait design rather than assuming yield reduces power consumption.
 
 ## Waiting for buffer release
 
-`core/schedule/wait.hpp` provides `core::wait_for_release(ready, pump, now, timeout)`.
+`lib/core/schedule/wait.hpp` provides `core::wait_for_release(ready, pump, now, timeout)`.
 The callables are borrowed and allocation-free; `now()` returns monotonic
 microseconds and the timeout is an exactly representable chrono duration.
 For example, after an asynchronous operation has accepted borrowed buffers:

@@ -1,13 +1,13 @@
-boot_layout_tool = files('../../tools/boot_layout.py')
+boot_layout_tool = files('../../../tools/boot_layout.py')
 boot_layout = custom_target('boot-layout',
   output: ['layout.h', 'boot.ld', 'slot_a.ld', 'slot_b.ld', 'layout.json'],
   command: [python, boot_layout_tool, '--board', 'h755',
     '--source-linker', board_linker_path, '--directory', meson.current_build_dir()],
   depend_files: board_linker_script)
 boot_firmware = executable('bootloader', 'main.cpp', boot_layout[0],
-  '../../platform/stm32h7/fault_handlers.S',
-  '../../platform/stm32/nucleo/h755/CM7/Core/Startup/startup_stm32h755xx_CM7.s',
-  '../../platform/stm32/nucleo/h755/Common/Src/system_stm32h7xx_dualcore_boot_cm4_cm7.c',
+  '../../../platform/stm32h7/fault_handlers.S',
+  '../../../platform/stm32/nucleo/h755/CM7/Core/Startup/startup_stm32h755xx_CM7.s',
+  '../../../platform/stm32/nucleo/h755/Common/Src/system_stm32h7xx_dualcore_boot_cm4_cm7.c',
   dependencies: [stm32_memory_dep, boot_dep, stm32h7_dep, boot_version_dep],
   include_directories: include_directories('.'),
   cpp_args: ['-DCORE_CM7', '-fno-rtti', '-fno-freestanding', '-D_GLIBCXX_NO_ASSERTIONS'],

@@ -261,7 +261,7 @@ section supersedes older H755 hardware deferrals; remaining gaps are explicit.
 
 - [x] Replace the fixed SD write delay with bounded SPI response polling,
   preserving CS, the original deadline, normal cleanup and per-window counters.
-- [x] Extract SD initialization into `storage/sd/initializer.h`: injected SPI
+- [x] Extract SD initialization into `lib/storage/sd/initializer.h`: injected SPI
   handle, nonblocking request/tick/result, bounded idle retries, reusable
   completion and diagnostics. Keep board configuration and read-only
   inspection in the example. ASan/UBSan 33/33, H563 A/B build, format/lint and

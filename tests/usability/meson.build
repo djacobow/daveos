@@ -8,7 +8,7 @@ foreach invalid : [
      using E = std::variant<std::monostate>;
      struct Bad : daveos::core::Module<Bad,E> {
        void Work() {}
-       void Use() { (void)schedule<&Bad::Work>(1); }
+       void Use() { (void)schedule<&Bad::Work>(std::chrono::microseconds{1}); }
      };
      int main() { Bad b; b.Use(); }''',
   '''#include "core/schedule/module.hpp"

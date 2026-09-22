@@ -60,7 +60,7 @@ def hil_config(request):
         firmware = build / 'examples/stm32_console'
         images = {name: firmware / name for name in names}
         if config.get('bootloader', board_name == 'h563'):
-            images['bootloader.elf'] = build / 'boot' / board_name / 'bootloader.elf'
+            images['bootloader.elf'] = build / 'apps/bootloader' / board_name / 'bootloader.elf'
         if board_name == 'h755':
             images['stm32h755-sleep-m4.elf'] = build / 'platform/stm32/nucleo/h755/CM4/stm32h755-sleep-m4.elf'
         for image in images.values():

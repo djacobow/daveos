@@ -7,7 +7,7 @@ import struct
 
 
 def verify(build, number):
-    identities = [json.loads((build / 'util' / name).read_text())
+    identities = [json.loads((build / 'lib/util' / name).read_text())
                   for name in ('version.json', 'boot_version.json')]
     for identity in identities:
         if identity['build'] != number:

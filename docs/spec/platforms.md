@@ -483,7 +483,7 @@ preparation before the first command. This is power-up preparation before
 CMD0 selects SPI operation, not an ordinary selected-device transaction.
 ST's SD SPI reference driver sends ten `0xFF` bytes with CS high during
 `SD_IO_Init()` in
-`platform/stm32h7/STM32CubeH7/Drivers/BSP/Adafruit_Shield/adafruit_802_sd.c`.
+`third_party/STM32CubeH7/Drivers/BSP/Adafruit_Shield/adafruit_802_sd.c`.
 
 ### I2C transactions and addressing
 
@@ -776,10 +776,10 @@ card or display. Full device-protocol models are not required for this phase.
 
 ### Implementation and validation
 
-- `hal/` owns shared statuses, borrowed handles, actions, exact duration
+- `lib/hal/` owns shared statuses, borrowed handles, actions, exact duration
   conversion, callback/polling completion, alias registries, and per-controller
   state machines. `daveos-hal` is the Meson dependency. The separate
-  `hal/adapters/daveos.hpp` header supplies the scheduler timer adapter.
+  `lib/hal/adapters/daveos.hpp` header supplies the scheduler timer adapter.
 - `Controller::bind<Index>(controller)` takes an address without accessing an
   unconstructed dependency. Instance `device<Index>()` requires a live object.
   Bus registries validate all entries before setup and roll back initialized
@@ -907,7 +907,7 @@ See [SPI/I2C](../spi-i2c.md) for commands, wiring, timing and validation limits.
 
 The I2C module also provides `i2c reset` with per-bus outcomes. Statistics remain
 64-bit; text output saturates each overflowing field to `4294967295+` instead
-of silently truncating. Peripheral drivers live in the separate `drivers/`
+of silently truncating. Peripheral drivers live in the separate `lib/drivers/`
 component and `daveos-drivers` dependency; MCP3425 is the first driver.
 
 ### SPI/SD timeout policy

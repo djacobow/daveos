@@ -37,13 +37,13 @@ def test_version_identity(board):
     import json
     import re
 
-    version = json.loads((Path(board.config['build']) / 'util/version.json').read_text())
+    version = json.loads((Path(board.config['build']) / 'lib/util/version.json').read_text())
     build = 'local' if version['build'] == 0xffffffff else str(version['build'])
     expected = f"Application {version['major']}.{version['minor']}.{build}; Git {version['commit']}"
     if version['dirty']:
         expected += ' dirty'
     board.query(board.uart, 'board version', re.escape(expected))
-    boot = json.loads((Path(board.config['build']) / 'util/boot_version.json').read_text())
+    boot = json.loads((Path(board.config['build']) / 'lib/util/boot_version.json').read_text())
     transcript = (board.output / 'uart-1.log').read_text(errors='replace')
     assert f"DaveOS bootloader {boot['major']}.{boot['minor']}" in transcript
     build = 'local' if boot['build'] == 0xffffffff else str(boot['build'])

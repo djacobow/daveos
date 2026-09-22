@@ -34,6 +34,19 @@ meson test -C build/host --print-errorlogs
 The console accepts `help`, `console echo "hello world"`, and `console exit`.
 Build outputs stay under the ignored `build/` directory.
 
+## Repository layout
+
+- `lib/`: reusable libraries, with headers and implementations together by component.
+- `platform/`: host, fake-time and STM32 adapters, including board support.
+- `apps/bootloader/`: H563 and H755 bootloader executables.
+- `third_party/`: pinned vendor submodules; integration code stays in `lib/` or `platform/`.
+- `examples/` and `starters/`: runnable demonstrations and new-project templates.
+- `tests/`, `docs/`, `meson/` and `tools/`: validation, documentation, build configuration and tooling.
+
+Library includes are relative to `lib/` (for example,
+`#include "core/schedule/application.hpp"`); platform includes are relative to
+the repository root. Meson dependencies supply both include roots.
+
 ## References and starters
 
 - [Testing: portable checks and H563/H755 HIL](docs/testing.md)

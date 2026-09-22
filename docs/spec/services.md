@@ -52,7 +52,7 @@ negotiation, authentication, or encryption, and relies on local terminal echo.
 Omitting the `tcp` feature removes the console without disabling networking, UART, or USB.
 
 
-Shared transport-agnostic console helpers belong in `console/`, namespace
+Shared transport-agnostic console helpers belong in `lib/console/`, namespace
 `daveos::console`, with an explicit Meson dependency. `BufferedOutput` serves
 asynchronous UART/USB transmission. A common CRTP console module handles task
 scheduling, dropped-line reporting, command logging/dispatch, and independent
@@ -138,7 +138,7 @@ interleaved callers, and exact hardware/software agreement.
 
 ### Watchdog and application health
 
-`watchdog::HealthModule<Event, Platform, Hardware>` (`watchdog/health.hpp`) is
+`watchdog::HealthModule<Event, Platform, Hardware>` (`lib/watchdog/health.hpp`) is
 the scheduler module applications register: heartbeat and task-progress checks,
 retained failures, trial-image confirmation and the `health` commands. Hardware
 is a policy type with static reliability services (watchdog driver, retained
@@ -477,7 +477,7 @@ borrowers and remain valid for file-scope construction.
 
 ## Filesystem service
 
-The optional `storage/` component owns no hardware. Its injected block-device
+The optional `lib/storage/` component owns no hardware. Its injected block-device
 contract supplies readiness, capacity, synchronous reads and an exclusive mount
 lease. An adapter may implement a synchronous read by pumping asynchronous HAL
 completion with task-only yield. Accepted I/O must complete or time out before

@@ -8,13 +8,16 @@ If:
   PathMatch:
     - examples/stm32_console/.*
     - platform/stm32h5/.*
+    - platform/stm32/nucleo/h563/.*
+    - apps/bootloader/h563/.*
 CompileFlags:
   CompilationDatabase: build/arm
 
 ---
 If:
   PathMatch:
-    - examples/stm32_console/boards/h755/.*
+    - platform/stm32/nucleo/h755/.*
     - platform/stm32h7/.*
+    - apps/bootloader/h755/.*
 CompileFlags:
   CompilationDatabase: build/h755

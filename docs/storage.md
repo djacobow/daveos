@@ -3,7 +3,7 @@
 Select the `fatfs` feature and initialize the pinned submodule:
 
 ```sh
-git submodule update --init storage/fatfs
+git submodule update --init third_party/fatfs
 meson configure build/host -Dfeatures=fatfs
 meson test -C build/host storage --print-errorlogs
 ```
@@ -89,7 +89,7 @@ bytes per request. It never sends binary file contents directly to a console.
 
 The initialized-card transport uses CMD17 and verifies each sector's CRC16.
 It reads R1 and the data token incrementally, then clocks only the 512-byte
-payload and CRC. The shared `storage/sd/read.h` sequence needs a 516-byte
+payload and CRC. The shared `lib/storage/sd/read.h` sequence needs a 516-byte
 buffer, retains CS across all phases, and rejects a bad response before reading
 the payload. A missing token is bounded by the transaction deadline. H755 uses
 DMA for sector payloads with the `sd-dma` feature (without it, interrupts);
@@ -102,7 +102,7 @@ There is no hot-plug automount or card-detect pin contract.
 
 ### Reusable SD initialization
 
-`storage/sd/initializer.h` provides `daveos::storage::sd::Initializer`,
+`lib/storage/sd/initializer.h` provides `daveos::storage::sd::Initializer`,
 independently of FatFs or an application module. It uses `daveos-hal` and the
 shared state-machine helper; construction only stores a SPI device handle.
 
@@ -145,7 +145,7 @@ fault checks passed, with zero heap attempts and 3,576 observed stack bytes
 
 ### SD session
 
-`storage/sd/session.h` provides `daveos::storage::sd::Session`: the whole card
+`lib/storage/sd/session.h` provides `daveos::storage::sd::Session`: the whole card
 lifecycle over an injected SPI device, with no logging and no board code. It
 initializes the card, reads the CSD, switches to its 1 MHz data rate and then
 exposes the card through `block_device()` for FatFs. `request()` and `reset()`
@@ -197,7 +197,7 @@ success. It adds no newline. Failure may leave an empty or partial new file;
 creation is not an atomic transaction, and there is no automatic deletion,
 overwrite, retry or power-loss guarantee. This phase does not expose append,
 rename or formatting commands. With no RTC, FatFs uses the fixed date
-in `storage/config.h`.
+in `lib/storage/config.h`.
 
 The SD writer sends CMD24, checks R1 before sending the token/data/CRC16,
 checks the data-response token, and polls eight-byte ready windows with CS held.
@@ -276,7 +276,7 @@ normal A/B trial confirmation/rollback rules apply after `board reset`.
 The source file is never modified or removed. Media-removal recovery is still
 subject to the underlying SD driver's qualification limits.
 
-`update/file.h` exposes the reusable worker and `storage/read_file.h` its
+`lib/update/file.h` exposes the reusable worker and `lib/storage/read_file.h` its
 borrowed I/O contract. Source operations may yield but must return only after
 releasing borrowed I/O buffers. `storage::Module::read_file()` supplies the
 FatFs adapter and excludes both queued and executing filesystem commands.

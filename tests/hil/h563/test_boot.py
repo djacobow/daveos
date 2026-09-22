@@ -14,7 +14,7 @@ pytestmark = [pytest.mark.hil, pytest.mark.slow]
 
 
 def test_journal_rollover(board):
-    layout = json.loads((Path(board.config['build']) / 'boot/h563/layout.json').read_text())
+    layout = json.loads((Path(board.config['build']) / 'apps/bootloader/h563/layout.json').read_text())
     records = layout['sector_size'] // 256
     header = (board.firmware / 'application.ota').read_bytes()[:128]
     board.query(board.uart, 'ota enable', 'OTA enabled')
@@ -57,7 +57,7 @@ def test_both_images_invalid_reset_loop(board):
     board.query(board.uart, 'ota enable', 'OTA enabled')
     with socket.create_connection((board.ip, 1001), timeout=30) as sock:
         ota.upload(sock, (board.firmware / 'application.ota').read_bytes())
-    layout = json.loads((Path(board.config['build']) / 'boot/h563/layout.json').read_text())
+    layout = json.loads((Path(board.config['build']) / 'apps/bootloader/h563/layout.json').read_text())
     board.control('reset halt')
     for address in layout['slots']:
         board.control(f'flash erase_address {address:#x} {layout["sector_size"]}')

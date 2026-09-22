@@ -1,11 +1,11 @@
-boot_sources = files('main.cpp', '../../platform/stm32h5/fault_handlers.S',
-  '../../platform/stm32/nucleo/h563/startup_stm32h563xx.s',
-  '../../platform/stm32/nucleo/h563/Core/Src/system_stm32h5xx.c')
+boot_sources = files('main.cpp', '../../../platform/stm32h5/fault_handlers.S',
+  '../../../platform/stm32/nucleo/h563/startup_stm32h563xx.s',
+  '../../../platform/stm32/nucleo/h563/Core/Src/system_stm32h5xx.c')
 boot_dependencies = [stm32_memory_dep, boot_dep, stm32h5_dep, stm32h5_cmsis_dep, boot_version_dep]
 boot_compile_args = ['-fno-rtti', '-fno-freestanding', '-D_GLIBCXX_NO_ASSERTIONS']
 boot_link_args = cpu_flags + ['--specs=nosys.specs', '--specs=nano.specs', '-Wl,--gc-sections', '-Wl,--print-memory-usage']
 subdir('probe')
-boot_layout_tool = files('../../tools/boot_layout.py')
+boot_layout_tool = files('../../../tools/boot_layout.py')
 boot_layout = custom_target('boot-layout', input: boot_probe,
   output: ['layout.h', 'boot.ld', 'slot_a.ld', 'slot_b.ld', 'layout.json'],
   command: [python, boot_layout_tool, '--probe', '@INPUT@',

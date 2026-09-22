@@ -1,18 +1,18 @@
 [submodule "platform/stm32h5/STM32CubeH5"]
-	path = platform/stm32h5/STM32CubeH5
+	path = third_party/STM32CubeH5
 	url = https://github.com/STMicroelectronics/STM32CubeH5.git
 [submodule "platform/stm32h7/STM32CubeH7"]
-	path = platform/stm32h7/STM32CubeH7
+	path = third_party/STM32CubeH7
 	url = https://github.com/STMicroelectronics/STM32CubeH7.git
 [submodule "platform/stm32/STM32_USB_Device_Library"]
-	path = platform/stm32/STM32_USB_Device_Library
+	path = third_party/STM32_USB_Device_Library
 	url = https://github.com/STMicroelectronics/stm32-mw-usb-device.git
 [submodule "net/lwip"]
-	path = net/lwip
+	path = third_party/lwip
 	url = https://github.com/lwip-tcpip/lwip.git
 [submodule "platform/stm32/lan8742"]
-	path = platform/stm32/lan8742
+	path = third_party/lan8742
 	url = https://github.com/STMicroelectronics/stm32-lan8742.git
 [submodule "storage/fatfs"]
-	path = storage/fatfs
+	path = third_party/fatfs
 	url = https://github.com/zephyrproject-rtos/fatfs.git

@@ -1,4 +1,4 @@
-usb_root = 'STM32_USB_Device_Library'
+usb_root = '../../third_party/STM32_USB_Device_Library'
 stm32_usb_device_dep = declare_dependency(
   sources: files(usb_root / 'Core/Src/usbd_core.c',
                  usb_root / 'Core/Src/usbd_ctlreq.c',

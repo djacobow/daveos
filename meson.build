@@ -94,20 +94,7 @@ endif
 message('Features: ' + (features.length() > 0 ? ', '.join(features) : 'none'))
 
 subdir('tools')
-subdir('core')
-subdir('hal')
-subdir('drivers')
-if 'fatfs' in features
-  subdir('storage')
-endif
-subdir('util')
-subdir('boot')
-subdir('update')
-subdir('otp')
-subdir('console')
-if 'net' in features
-  subdir('net')
-endif
+subdir('lib')
 firmware_images = []
 memory_audit_images = []
 subdir('platform')
@@ -115,7 +102,7 @@ if get_option('bootloader')
   if platform not in ['stm32h5', 'stm32h7'] or not get_option('examples')
     error('Bootloader requires STM32 and examples=true')
   endif
-  subdir('boot' / board)
+  subdir('apps/bootloader' / board)
 endif
 # Stable dependency names for applications using DaveOS as a Meson subproject.
 meson.override_dependency('daveos-core', core_dep)

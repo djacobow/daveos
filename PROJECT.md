@@ -318,7 +318,7 @@ Use explicit status returns rather than exceptions, with a success value for
 operations that complete normally. Distinguish error conditions such as repeated
 initialization, module initialization failure, invalid repeat interval, event
 queue overflow, timer overflow, and `not_running`. The shared type is
-`daveos::core::Status`, declared with `Time` in `core/foundation/types.hpp`;
+`daveos::core::Status`, declared with `Time` in `lib/core/foundation/types.hpp`;
 commands use it too. Foundation headers (`types.hpp`, `duration.hpp`) depend on no
 platform, scheduler or logging code, so state machines and injected drivers can use
 them alone. `tests/consumers/` checks that boundary.
@@ -1005,12 +1005,17 @@ example.
 ## Source organization
 
 Colocate headers and implementations by component: shared console helpers live
-under `console/`, core facilities live under
-`core/{schedule,command,event,logging,queue,platform,enum}/`, and adapters under
+under `lib/console/`, core facilities live under
+`lib/core/{schedule,command,event,logging,queue,platform,enum}/`, and adapters under
 `platform/{host,fake,stm32h5,stm32h7}/`, with shared adapter details in
-`platform/detail/`. Optional networking lives in `net/` (`daveos::net`), with
+`platform/detail/`. Optional networking lives in `lib/net/` (`daveos::net`), with
 shared STM32 Ethernet support in `platform/stm32/ethernet/`
-(`daveos::net::stm32`). Include paths are relative to the repository root.
+(`daveos::net::stm32`). Reusable libraries live under `lib/`, executable
+bootloaders under `apps/bootloader/`, and vendor submodules under `third_party/`.
+Platform adapters, examples, starters and tests remain separate top-level groups.
+Meson exposes both `lib/` and the repository root as include roots: library
+includes retain spellings such as `"core/schedule/scheduler.hpp"`, and platform
+includes retain `"platform/host/platform.hpp"`.
 Core/platform namespaces remain `daveos::core` and `daveos::platform::*`. No separate include
 and source trees are needed. Headers defining templates use `.hpp`, other
 headers use `.h`, and C++ translation units use `.cpp`. Vendor and generated

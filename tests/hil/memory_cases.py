@@ -56,7 +56,7 @@ def check_memory_policy(board):
 
     family = board.config.get('board', 'h563')
     if board.config.get('bootloader', family == 'h563'):
-        boot = Path(board.config['build']).resolve() / 'boot' / family / 'bootloader.elf'
+        boot = Path(board.config['build']).resolve() / 'apps/bootloader' / family / 'bootloader.elf'
         resume_m4 = ('monitor targets stm32h7x.cpu1\nmonitor resume\n'
                      'monitor targets stm32h7x.cpu0') if family == 'h755' else ''
         board.uart.drain()

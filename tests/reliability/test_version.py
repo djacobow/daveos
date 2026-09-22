@@ -54,9 +54,9 @@ def test_reject_invalid_build(tmp_path, build):
 def test_ci_identity_verification(tmp_path, mismatch):
     import struct
 
-    util = tmp_path / 'util'
+    util = tmp_path / 'lib/util'
     firmware = tmp_path / 'examples/stm32_console'
-    util.mkdir()
+    util.mkdir(parents=True)
     firmware.mkdir(parents=True)
     app = dict(major=7, minor=9, build=123, commit='1' * 40, dirty=True)
     boot = dict(app, major=2, minor=3)
