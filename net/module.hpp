@@ -37,8 +37,8 @@ namespace daveos::net {
         E_("Ethernet initialization failed; reset to retry");
         return core::Status::ok;
       }
-      return this->scheduler().schedule(*this, &Module::Poll, 1000,
-                                        core::Mode::repeat);
+      return this->scheduler().template schedule<&Module::Poll>(
+          *this, std::chrono::milliseconds{1}, core::Mode::repeat);
     }
 
    private:

@@ -43,8 +43,8 @@ TEST_CASE("startup is two passes; task deadlines start at run") {
     stages.push_back(stage == core::InitStage::stage1 ? 1 : 3);
     if (stage == core::InitStage::stage1) {
       CHECK(&one.scheduler() == &scheduler);
-      CHECK(scheduler.schedule(one, &decltype(one)::first, 10) ==
-            core::Status::ok);
+      CHECK(scheduler.schedule<&decltype(one)::first>(
+                one, std::chrono::microseconds{10}) == core::Status::ok);
       platform.advance(100);
     }
     return core::Status::ok;
@@ -82,7 +82,8 @@ TEST_CASE("initialization failure discards work and flushes diagnostics") {
       platform, core::ModuleList{&module, &later}, logger);
   module.first_action = [&] { ran = true; };
   module.initializer = [&](core::InitStage) {
-    scheduler.schedule(module, &test::TestModule::first, 0);
+    CHECK(scheduler.schedule<&test::TestModule::first>(
+              module, std::chrono::microseconds{0}) == core::Status::ok);
     scheduler.post(test::First{});
     scheduler.log(core::Level::error, "startup failed");
     return core::Status::initialization_failed;
@@ -123,14 +124,19 @@ TEST_CASE(
     order.push_back('a');
     platform.advance(++calls == 1 ? 25 : 1);
     if (calls == 4) {
-      scheduler.cancel(module, &test::TestModule::first);
+      CHECK(scheduler.cancel<&test::TestModule::first>(module) ==
+            core::Status::ok);
     }
   };
   module.second_action = [&] { order.push_back('b'); };
   module.third_action = [&] { scheduler.stop(); };
-  scheduler.schedule(module, &test::TestModule::first, 10, core::Mode::repeat);
-  scheduler.schedule(module, &test::TestModule::second, 25);
-  scheduler.schedule(module, &test::TestModule::third, 50);
+  CHECK(scheduler.schedule<&test::TestModule::first>(
+            module, std::chrono::microseconds{10}, core::Mode::repeat) ==
+        core::Status::ok);
+  CHECK(scheduler.schedule<&test::TestModule::second>(
+            module, std::chrono::microseconds{25}) == core::Status::ok);
+  CHECK(scheduler.schedule<&test::TestModule::third>(
+            module, std::chrono::microseconds{50}) == core::Status::ok);
   CHECK(scheduler.run() == core::Status::ok);
   CHECK(order == std::vector<char>{'a', 'a', 'b', 'a', 'a'});
   auto stats = scheduler.snapshot();
@@ -153,18 +159,22 @@ TEST_CASE("replacement and self-rescheduling take precedence") {
   module.first_action = [&] {
     times.push_back(platform.now());
     if (times.size() == 1) {
-      scheduler.schedule(module, &test::TestModule::first, 7);
+      CHECK(scheduler.schedule<&test::TestModule::first>(
+                module, std::chrono::microseconds{7}) == core::Status::ok);
     } else {
       scheduler.stop();
     }
   };
-  CHECK(scheduler.cancel(module, &test::TestModule::first) ==
+  CHECK(scheduler.cancel<&test::TestModule::first>(module) ==
         core::Status::not_found);
-  scheduler.schedule(module, &test::TestModule::first, 50);
-  CHECK(scheduler.schedule(module, &test::TestModule::first, 0,
-                           core::Mode::repeat) ==
+  CHECK(scheduler.schedule<&test::TestModule::first>(
+            module, std::chrono::microseconds{50}) == core::Status::ok);
+  CHECK(scheduler.schedule<&test::TestModule::first>(
+            module, std::chrono::microseconds{0}, core::Mode::repeat) ==
         core::Status::invalid_argument);
-  scheduler.schedule(module, &test::TestModule::first, 10, core::Mode::repeat);
+  CHECK(scheduler.schedule<&test::TestModule::first>(
+            module, std::chrono::microseconds{10}, core::Mode::repeat) ==
+        core::Status::ok);
   CHECK(scheduler.run() == core::Status::ok);
   CHECK(times == std::vector<core::Time>{10, 17});
 }
@@ -260,7 +270,9 @@ TEST_CASE("interrupt scheduling during initialization uses dispatch epoch") {
       platform.interrupt(
           [](void* context) {
             auto& module = *static_cast<test::TestModule*>(context);
-            module.scheduler().schedule(module, &test::TestModule::first, 12);
+            CHECK(module.scheduler().schedule<&test::TestModule::first>(
+                      module, std::chrono::microseconds{12}) ==
+                  core::Status::ok);
           },
           &module);
       platform.advance(50);

@@ -33,7 +33,8 @@ TEST_CASE("severity macros preserve arguments status and deferred delivery") {
   auto scheduler = core::make_scheduler<test::Event>(
       platform, core::ModuleList{&module}, logger);
   logger.minimum(core::Level::debug);
-  scheduler.schedule(module, &LoggingModule::emit, 10);
+  CHECK(scheduler.schedule<&LoggingModule::emit>(
+            module, std::chrono::microseconds{10}) == core::Status::ok);
   CHECK(sink.records.empty());
   REQUIRE(scheduler.run() == core::Status::ok);
   REQUIRE(sink.records.size() == 5);
@@ -73,7 +74,8 @@ TEST_CASE(
         static_cast<core::SchedulerInterface<test::Event>*>(&scheduler));
     scheduler.stop();
   };
-  scheduler.schedule(module, &test::TestModule::first, 10);
+  CHECK(scheduler.schedule<&test::TestModule::first>(
+            module, std::chrono::microseconds{10}) == core::Status::ok);
   CHECK(scheduler.run() == core::Status::ok);
   REQUIRE(sink.records.size() == 2);
   CHECK(sink.records[0].timestamp == 10);
@@ -100,7 +102,8 @@ TEST_CASE("filtering, truncation, overflow and reset") {
   CHECK(scheduler.log(core::Level::debug, "visible") == core::Status::ok);
   CHECK(scheduler.log(core::Level::error, "overflow") == core::Status::full);
   module.first_action = [&] { scheduler.stop(); };
-  scheduler.schedule(module, &test::TestModule::first, 0);
+  CHECK(scheduler.schedule<&test::TestModule::first>(
+            module, std::chrono::microseconds{0}) == core::Status::ok);
   CHECK(scheduler.run() == core::Status::ok);
   REQUIRE(sink.records.size() == 2);
   CHECK(sink.records[0].message == "1234567");
@@ -126,8 +129,10 @@ TEST_CASE("statistics table contains task names and diagnostic summary") {
     scheduler.log_statistics();
     scheduler.stop();
   };
-  scheduler.schedule(module, &test::TestModule::first, 1);
-  scheduler.schedule(module, &test::TestModule::second, 10);
+  CHECK(scheduler.schedule<&test::TestModule::first>(
+            module, std::chrono::microseconds{1}) == core::Status::ok);
+  CHECK(scheduler.schedule<&test::TestModule::second>(
+            module, std::chrono::microseconds{10}) == core::Status::ok);
   CHECK(scheduler.run() == core::Status::ok);
   REQUIRE(sink.records.size() == 5);
   CHECK(sink.records[1].message.find("module/first") != std::string::npos);
@@ -144,10 +149,12 @@ TEST_CASE("no logger discards logs and fatal does not stop") {
     for (int index = 0; index < 5; ++index) {
       CHECK(scheduler.log(core::Level::fatal, "fatal") == core::Status::ok);
     }
-    scheduler.schedule(module, &test::TestModule::second, 1);
+    CHECK(scheduler.schedule<&test::TestModule::second>(
+              module, std::chrono::microseconds{1}) == core::Status::ok);
   };
   module.second_action = [&] { scheduler.stop(); };
-  scheduler.schedule(module, &test::TestModule::first, 0);
+  CHECK(scheduler.schedule<&test::TestModule::first>(
+            module, std::chrono::microseconds{0}) == core::Status::ok);
   CHECK(scheduler.run() == core::Status::ok);
   CHECK(scheduler.snapshot().tasks[1].executions == 1);
 }
@@ -167,7 +174,9 @@ TEST_CASE("idle delivery yields to work scheduled by a subscriber") {
         auto& d = *static_cast<Delivery*>(pointer);
         d.order.emplace_back(record.message);
         if (d.order.size() == 1) {
-          d.scheduler->schedule(*d.module, &test::TestModule::second, 0);
+          CHECK(d.scheduler->schedule<&test::TestModule::second>(
+                    *d.module, std::chrono::microseconds{0}) ==
+                core::Status::ok);
         } else {
           d.scheduler->stop();
         }
@@ -181,7 +190,8 @@ TEST_CASE("idle delivery yields to work scheduled by a subscriber") {
     scheduler.log(core::Level::info, "second");
   };
   module.second_action = [&] { delivery.order.emplace_back("task"); };
-  scheduler.schedule(module, &test::TestModule::first, 0);
+  CHECK(scheduler.schedule<&test::TestModule::first>(
+            module, std::chrono::microseconds{0}) == core::Status::ok);
   REQUIRE(scheduler.run() == core::Status::ok);
   CHECK(delivery.order == std::vector<std::string>{"first", "task", "second"});
   CHECK(platform.sleeps() == 0);
@@ -266,8 +276,8 @@ TEST_CASE("logger platform mismatch fails before module initialization") {
   };
   module.first_action = [&] { ran = true; };
   module.receiver = [&](test::Event) { ran = true; };
-  CHECK(scheduler.schedule(module, &test::TestModule::first, 0) ==
-        core::Status::ok);
+  CHECK(scheduler.schedule<&test::TestModule::first>(
+            module, std::chrono::microseconds{0}) == core::Status::ok);
   CHECK(scheduler.post(test::First{}) == core::Status::ok);
   CHECK(scheduler.log(core::Level::info, "before init") == core::Status::ok);
   SECTION("explicit init") {

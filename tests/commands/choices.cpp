@@ -66,8 +66,8 @@ namespace {
       action(module, dispatcher);
       scheduler.stop();
     };
-    REQUIRE(scheduler.schedule(runner, &test::TestModule::first, 0) ==
-            core::Status::ok);
+    REQUIRE(scheduler.schedule<&test::TestModule::first>(
+                runner, std::chrono::microseconds{0}) == core::Status::ok);
     REQUIRE(scheduler.run() == core::Status::ok);
     return sink.records;
   }

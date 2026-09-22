@@ -35,7 +35,8 @@ namespace {
     }
 
     core::Status Run() {
-      return scheduler().schedule(*this, &Example::tick, 0);
+      return scheduler().schedule<&Example::tick>(*this,
+                                                  std::chrono::microseconds{0});
     }
 
     core::Status Sample(float, std::optional<bool>, std::optional<Mode>) {

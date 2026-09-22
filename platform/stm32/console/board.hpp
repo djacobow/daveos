@@ -58,7 +58,8 @@ namespace daveos::platform::stm32 {
     }
 
     core::Status Timer(std::uint32_t delay) {
-      return this->template timer<&Board::TimerFired>(delay);
+      return this->template timer<&Board::TimerFired>(
+          core::Microseconds{delay});
     }
 
     void TimerFired() { I_("Timer fired"); }

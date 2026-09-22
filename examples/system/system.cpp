@@ -35,9 +35,8 @@ namespace app {
 
     core::Status init(core::InitStage stage) {
       if (stage == core::InitStage::stage1) {
-        active_ = this;
-        return scheduler().schedule(*this, &Producer::pulse, 1000,
-                                    core::Mode::repeat);
+        return schedule<&Producer::pulse>(std::chrono::milliseconds{1},
+                                          core::Mode::repeat);
       }
       return core::Status::ok;
     }
@@ -47,8 +46,14 @@ namespace app {
       I_("pulse %u", count_);
       scheduler().post(Pulse{count_}, this);
       if (count_ == 3) {
-        scheduler().cancel(*this, &Producer::pulse);
-        scheduler().timer(500, FinishTimer);
+        // The bound timer fires in interrupt context and hands completion back
+        // to a task; no global owner pointer is needed.
+        if (cancel<&Producer::pulse>() != core::Status::ok ||
+            timer<&Producer::expired>(std::chrono::microseconds{500}) !=
+                core::Status::ok) {
+          E_("could not arm the completion timer");
+          scheduler().stop();
+        }
       }
     }
 
@@ -58,11 +63,10 @@ namespace app {
     }
 
    private:
-    static void FinishTimer() {
-      active_->scheduler().schedule(*active_, &Producer::complete, 0);
+    void expired() {
+      (void)schedule<&Producer::complete>(std::chrono::microseconds{0});
     }
 
-    inline static Producer* active_ = nullptr;
     std::uint32_t count_ = 0;
   };
 
@@ -81,7 +85,10 @@ namespace app {
 
     void OnPulse(const Pulse& pulse) {
       sequence_ = pulse.sequence;
-      scheduler().schedule(*this, &Consumer::report, 0);
+      if (schedule<&Consumer::report>(std::chrono::microseconds{0}) !=
+          core::Status::ok) {
+        W_("could not schedule report");
+      }
     }
 
     void report() { I_("received pulse %" PRIu32, sequence_); }

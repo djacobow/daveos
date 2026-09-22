@@ -262,13 +262,17 @@ TEST_CASE(
   };
   control.third_action = [&] {
     CHECK(fs.Unmount() == core::Status::ok);
-    scheduler.timer(
-        10000, +[] { testing::timer_action(); });
+    CHECK(scheduler.timer(
+              std::chrono::microseconds{10000},
+              +[] { testing::timer_action(); }) == core::Status::ok);
   };
   testing::timer_action = [&] { scheduler.stop(); };
-  scheduler.schedule(control, &testing::TestModule::first, 0);
-  scheduler.schedule(control, &testing::TestModule::second, 10000);
-  scheduler.schedule(control, &testing::TestModule::third, 100000);
+  CHECK(scheduler.schedule<&testing::TestModule::first>(
+            control, std::chrono::microseconds{0}) == core::Status::ok);
+  CHECK(scheduler.schedule<&testing::TestModule::second>(
+            control, std::chrono::microseconds{10000}) == core::Status::ok);
+  CHECK(scheduler.schedule<&testing::TestModule::third>(
+            control, std::chrono::microseconds{100000}) == core::Status::ok);
   REQUIRE(scheduler.run() == core::Status::ok);
 #if DAVEOS_LOGGING
   CHECK(std::none_of(
@@ -387,13 +391,17 @@ TEST_CASE("filesystem create command owns its text until the worker syncs it") {
   };
   control.third_action = [&] {
     CHECK(fs.Unmount() == core::Status::ok);
-    scheduler.timer(
-        10000, +[] { testing::timer_action(); });
+    CHECK(scheduler.timer(
+              std::chrono::microseconds{10000},
+              +[] { testing::timer_action(); }) == core::Status::ok);
   };
   testing::timer_action = [&] { scheduler.stop(); };
-  scheduler.schedule(control, &testing::TestModule::first, 0);
-  scheduler.schedule(control, &testing::TestModule::second, 10000);
-  scheduler.schedule(control, &testing::TestModule::third, 20000);
+  CHECK(scheduler.schedule<&testing::TestModule::first>(
+            control, std::chrono::microseconds{0}) == core::Status::ok);
+  CHECK(scheduler.schedule<&testing::TestModule::second>(
+            control, std::chrono::microseconds{10000}) == core::Status::ok);
+  CHECK(scheduler.schedule<&testing::TestModule::third>(
+            control, std::chrono::microseconds{20000}) == core::Status::ok);
   REQUIRE(scheduler.run() == core::Status::ok);
   storage::Volume volume(image.device.device());
   REQUIRE(volume.attach() == FR_OK);
@@ -506,13 +514,17 @@ TEST_CASE("filesystem remove command copies its path before dispatch returns") {
   };
   control.third_action = [&] {
     CHECK(fs.Unmount() == core::Status::ok);
-    scheduler.timer(
-        10000, +[] { testing::timer_action(); });
+    CHECK(scheduler.timer(
+              std::chrono::microseconds{10000},
+              +[] { testing::timer_action(); }) == core::Status::ok);
   };
   testing::timer_action = [&] { scheduler.stop(); };
-  scheduler.schedule(control, &testing::TestModule::first, 0);
-  scheduler.schedule(control, &testing::TestModule::second, 10000);
-  scheduler.schedule(control, &testing::TestModule::third, 20000);
+  CHECK(scheduler.schedule<&testing::TestModule::first>(
+            control, std::chrono::microseconds{0}) == core::Status::ok);
+  CHECK(scheduler.schedule<&testing::TestModule::second>(
+            control, std::chrono::microseconds{10000}) == core::Status::ok);
+  CHECK(scheduler.schedule<&testing::TestModule::third>(
+            control, std::chrono::microseconds{20000}) == core::Status::ok);
   REQUIRE(scheduler.run() == core::Status::ok);
   storage::Volume volume(image.device.device());
   REQUIRE(volume.attach() == FR_OK);
@@ -593,15 +605,20 @@ TEST_CASE(
       REQUIRE(journal.load(state) == core::Status::ok);
       CHECK(state.images[1].state == boot::ImageState::pending);
       CHECK(commands.dispatch("fs unmount") == core::Status::ok);
-      scheduler.timer(
-          10000, +[] { testing::timer_action(); });
+      CHECK(scheduler.timer(
+                std::chrono::microseconds{10000},
+                +[] { testing::timer_action(); }) == core::Status::ok);
     };
-    scheduler.schedule(control, &testing::TestModule::first, 1000000);
+    CHECK(scheduler.schedule<&testing::TestModule::first>(
+              control, std::chrono::microseconds{1000000}) == core::Status::ok);
   };
   testing::timer_action = [&] { scheduler.stop(); };
-  scheduler.schedule(control, &testing::TestModule::first, 0);
-  scheduler.schedule(control, &testing::TestModule::second, 10000);
-  scheduler.schedule(control, &testing::TestModule::third, 100000);
+  CHECK(scheduler.schedule<&testing::TestModule::first>(
+            control, std::chrono::microseconds{0}) == core::Status::ok);
+  CHECK(scheduler.schedule<&testing::TestModule::second>(
+            control, std::chrono::microseconds{10000}) == core::Status::ok);
+  CHECK(scheduler.schedule<&testing::TestModule::third>(
+            control, std::chrono::microseconds{100000}) == core::Status::ok);
   REQUIRE(scheduler.run() == core::Status::ok);
 #if DAVEOS_LOGGING
   CHECK(

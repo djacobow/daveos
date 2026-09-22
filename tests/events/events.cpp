@@ -84,8 +84,8 @@ TEST_CASE("variant events own queued values and attribute named handlers") {
   REQUIRE(scheduler.post(Ignored{}) == core::Status::ok);
   REQUIRE(scheduler.post(Ignored{}) == core::Status::ok);
   REQUIRE(scheduler.post(Reading{100}) == core::Status::full);
-  REQUIRE(scheduler.schedule<&Receiver::Finish>(receiver, 1) ==
-          core::Status::ok);
+  REQUIRE(scheduler.schedule<&Receiver::Finish>(
+              receiver, std::chrono::microseconds{1}) == core::Status::ok);
   REQUIRE(scheduler.run() == core::Status::ok);
   std::sort(
       receiver.values.begin(), receiver.values.end(),
@@ -191,8 +191,8 @@ TEST_CASE(
       core::make_logger(platform, core::SubscriberList{sink.subscriber()});
   auto scheduler =
       core::make_scheduler<Event>(platform, core::ModuleList{&module}, logger);
-  REQUIRE(scheduler.schedule<&Concurrent::Start>(module, 0) ==
-          core::Status::ok);
+  REQUIRE(scheduler.schedule<&Concurrent::Start>(
+              module, std::chrono::microseconds{0}) == core::Status::ok);
   REQUIRE(scheduler.run() == core::Status::ok);
   CHECK(module.interrupt_status == core::Status::ok);
   CHECK(module.post_status == core::Status::ok);

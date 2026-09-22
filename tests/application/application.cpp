@@ -294,8 +294,8 @@ TEST_CASE(
         CHECK(app.scheduler().post(std::monostate{}) == core::Status::ok);
         CHECK(app.scheduler().post(std::monostate{}) == core::Status::full);
         if (commands) {
-          CHECK(app.scheduler().template schedule<&Worker::Tick>(worker, 0) ==
-                core::Status::ok);
+          CHECK(app.scheduler().template schedule<&Worker::Tick>(
+                    worker, std::chrono::microseconds{0}) == core::Status::ok);
           CHECK(app.run() == core::Status::ok);
           CHECK(worker.calls == 1);
         } else {

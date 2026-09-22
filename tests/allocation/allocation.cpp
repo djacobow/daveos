@@ -62,7 +62,8 @@ TEST_CASE(
   module.receiver = [&](test::Event) { scheduler.stop(); };
   allocations = 0;
   counting = true;
-  scheduler.schedule(module, &test::TestModule::first, 10);
+  CHECK(scheduler.schedule<&test::TestModule::first>(
+            module, std::chrono::microseconds{10}) == core::Status::ok);
   core::Status status = scheduler.run();
   auto statistics = scheduler.snapshot();
   scheduler.reset_statistics();
@@ -130,7 +131,8 @@ TEST_CASE(
   };
   allocations = 0;
   counting = true;
-  scheduler.schedule(input, &test::TestModule::first, 0);
+  CHECK(scheduler.schedule<&test::TestModule::first>(
+            input, std::chrono::microseconds{0}) == core::Status::ok);
   core::Status status = scheduler.run();
   counting = false;
   CHECK(status == core::Status::ok);
@@ -337,8 +339,10 @@ TEST_CASE("nested task yielding allocates no heap storage") {
 
   test::Fake platform;
   auto scheduler = core::make_scheduler(platform, core::ModuleList{&module});
-  scheduler.schedule(module, &Module::Outer, 0);
-  scheduler.schedule(module, &Module::Inner, 0);
+  CHECK(scheduler.schedule<&Module::Outer>(
+            module, std::chrono::microseconds{0}) == core::Status::ok);
+  CHECK(scheduler.schedule<&Module::Inner>(
+            module, std::chrono::microseconds{0}) == core::Status::ok);
   allocations = 0;
   counting = true;
   const auto status = scheduler.run();

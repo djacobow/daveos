@@ -125,8 +125,8 @@ TEST_CASE(
   module.second_action = [&] { CHECK(scheduler.stop() == core::Status::ok); };
   CHECK(scheduler.timer<&Target::Fire>(first, time_units::microseconds{1}) ==
         core::Status::not_running);
-  CHECK(scheduler.schedule(module, &test::TestModule::first,
-                           time_units::microseconds{0}) == core::Status::ok);
+  CHECK(scheduler.schedule<&test::TestModule::first>(
+            module, time_units::microseconds{0}) == core::Status::ok);
   CHECK(scheduler.schedule<&test::TestModule::second>(
             module, time_units::microseconds{10}) == core::Status::ok);
   CHECK(scheduler.run() == core::Status::ok);
@@ -160,11 +160,13 @@ TEST_CASE(
   Target first{scheduler}, second{scheduler};
   first.other = &second;
   module.first_action = [&] {
-    CHECK(scheduler.timer<&Target::Fire>(first, 1) == core::Status::ok);
-    CHECK(scheduler.timer<&Target::Fire>(second, 2) == core::Status::ok);
+    CHECK(scheduler.timer<&Target::Fire>(first, std::chrono::microseconds{1}) ==
+          core::Status::ok);
+    CHECK(scheduler.timer<&Target::Fire>(
+              second, std::chrono::microseconds{2}) == core::Status::ok);
   };
-  CHECK(scheduler.schedule(module, &test::TestModule::first, 0) ==
-        core::Status::ok);
+  CHECK(scheduler.schedule<&test::TestModule::first>(
+            module, std::chrono::microseconds{0}) == core::Status::ok);
   CHECK(scheduler.run() == core::Status::ok);
   platform.advance(100);
   CHECK(first.calls == 1);
@@ -186,7 +188,8 @@ TEST_CASE(
     if (stage == core::InitStage::stage1) {
       CHECK(source.dispatch("help") == core::Status::not_running);
       stage1 = true;
-      return scheduler.schedule(module, &test::TestModule::first, 0);
+      return scheduler.schedule<&test::TestModule::first>(
+          module, std::chrono::microseconds{0});
     }
     return core::Status::ok;
   };
@@ -232,16 +235,18 @@ TEST_CASE("identical member bodies retain independent timer identities") {
   auto scheduler = core::make_scheduler<test::Event, 32, 2>(
       platform, core::ModuleList{&module});
   module.first_action = [&] {
-    CHECK(scheduler.timer(1, first) == core::Status::ok);
-    CHECK(scheduler.timer(2, second) == core::Status::ok);
+    CHECK(scheduler.timer(std::chrono::microseconds{1}, first) ==
+          core::Status::ok);
+    CHECK(scheduler.timer(std::chrono::microseconds{2}, second) ==
+          core::Status::ok);
     CHECK(scheduler.cancel_timer(first) == core::Status::ok);
     CHECK(scheduler.cancel_timer(first) == core::Status::not_found);
   };
   module.second_action = [&] { CHECK(scheduler.stop() == core::Status::ok); };
-  CHECK(scheduler.schedule<&test::TestModule::first>(module, 0) ==
-        core::Status::ok);
-  CHECK(scheduler.schedule<&test::TestModule::second>(module, 3) ==
-        core::Status::ok);
+  CHECK(scheduler.schedule<&test::TestModule::first>(
+            module, std::chrono::microseconds{0}) == core::Status::ok);
+  CHECK(scheduler.schedule<&test::TestModule::second>(
+            module, std::chrono::microseconds{3}) == core::Status::ok);
   CHECK(scheduler.run() == core::Status::ok);
   CHECK(target.calls == 1);
 }

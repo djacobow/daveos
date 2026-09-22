@@ -326,8 +326,8 @@ TEST_CASE(
     CHECK(memory.locks == 1);
     scheduler.stop();
   };
-  REQUIRE(scheduler.schedule(input, &testing::TestModule::first, 0) ==
-          Status::ok);
+  REQUIRE(scheduler.schedule<&testing::TestModule::first>(
+              input, std::chrono::microseconds{0}) == Status::ok);
   CHECK(scheduler.run() == Status::ok);
 }
 
@@ -405,8 +405,8 @@ TEST_CASE(
     CHECK(store.serial() == "  abc  ");
     scheduler.stop();
   };
-  REQUIRE(scheduler.schedule(input, &testing::TestModule::first, 0) ==
-          Status::ok);
+  REQUIRE(scheduler.schedule<&testing::TestModule::first>(
+              input, std::chrono::microseconds{0}) == Status::ok);
   CHECK(scheduler.run() == Status::ok);
 }
 
@@ -430,8 +430,8 @@ TEST_CASE("OTP module reports cached serial and backend diagnostics") {
     CHECK(dispatcher.dispatch("otp status") == Status::ok);
     scheduler.stop();
   };
-  REQUIRE(scheduler.schedule(input, &testing::TestModule::first, 0) ==
-          Status::ok);
+  REQUIRE(scheduler.schedule<&testing::TestModule::first>(
+              input, std::chrono::microseconds{0}) == Status::ok);
   REQUIRE(scheduler.run() == Status::ok);
   while (logger.dispatch()) {
   }

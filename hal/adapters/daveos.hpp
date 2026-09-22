@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/foundation/duration.hpp"
 #include "core/platform/platform.hpp"
 #include "core/platform/timer_callback.hpp"
 #include "hal/status.h"
@@ -31,7 +32,8 @@ namespace daveos::hal {
       if (deadline <= time) {
         return Status::timer_error;
       }
-      return scheduler_->timer(deadline - time, callback) == core::Status::ok
+      return scheduler_->timer(core::Microseconds{deadline - time}, callback) ==
+                     core::Status::ok
                  ? Status::ok
                  : Status::timer_error;
     }

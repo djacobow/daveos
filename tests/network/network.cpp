@@ -389,8 +389,8 @@ TEST_CASE("Networking hardware failure leaves unrelated module running") {
   auto scheduler = core::make_scheduler<Event>(platform, modules);
   core::CommandDispatcher dispatcher(modules, scheduler);
   dispatcher.bind_sources(core::CommandSourceList{other.source});
-  REQUIRE(scheduler.schedule(other, &Other::Run, 1) ==
-          daveos::core::Status::ok);
+  REQUIRE(scheduler.schedule<&Other::Run>(
+              other, std::chrono::microseconds{1}) == daveos::core::Status::ok);
   REQUIRE(scheduler.run() == daveos::core::Status::ok);
   CHECK(other.called);
   CHECK(other.status_result == core::Status::ok);

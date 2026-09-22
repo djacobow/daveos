@@ -37,9 +37,12 @@ TEST_CASE(
     order.push_back(3);
     platform.advance(3);
   };
-  scheduler.schedule(m, &test::TestModule::first, 0);
-  scheduler.schedule(m, &test::TestModule::third, 2);
-  scheduler.schedule(m, &test::TestModule::second, 1);
+  CHECK(scheduler.schedule<&test::TestModule::first>(
+            m, std::chrono::microseconds{0}) == core::Status::ok);
+  CHECK(scheduler.schedule<&test::TestModule::third>(
+            m, std::chrono::microseconds{2}) == core::Status::ok);
+  CHECK(scheduler.schedule<&test::TestModule::second>(
+            m, std::chrono::microseconds{1}) == core::Status::ok);
   CHECK(scheduler.run() == core::Status::ok);
   const auto stats = scheduler.snapshot();
   CHECK(stats.tasks[0].total_duration == 19);
@@ -59,7 +62,8 @@ TEST_CASE("yield excludes active callbacks even after explicit rescheduling") {
   m.first_action = [&] {
     ++calls;
     if (calls == 1) {
-      scheduler.schedule(m, &test::TestModule::first, 0);
+      CHECK(scheduler.schedule<&test::TestModule::first>(
+                m, std::chrono::microseconds{0}) == core::Status::ok);
       CHECK(scheduler.yield() == core::Status::ok);
       CHECK(calls == 1);
     } else {
@@ -67,8 +71,10 @@ TEST_CASE("yield excludes active callbacks even after explicit rescheduling") {
     }
   };
   m.second_action = [&] { CHECK(scheduler.yield() == core::Status::empty); };
-  scheduler.schedule(m, &test::TestModule::first, 0);
-  scheduler.schedule(m, &test::TestModule::second, 0);
+  CHECK(scheduler.schedule<&test::TestModule::first>(
+            m, std::chrono::microseconds{0}) == core::Status::ok);
+  CHECK(scheduler.schedule<&test::TestModule::second>(
+            m, std::chrono::microseconds{0}) == core::Status::ok);
   CHECK(scheduler.run() == core::Status::ok);
   CHECK(calls == 2);
 }
@@ -91,9 +97,12 @@ TEST_CASE(
     CHECK(scheduler.yield() == core::Status::depth_limit);
   };
   m.third_action = [&] { platform.advance(3); };
-  scheduler.schedule(m, &test::TestModule::first, 0);
-  scheduler.schedule(m, &test::TestModule::second, 0);
-  scheduler.schedule(m, &test::TestModule::third, 0);
+  CHECK(scheduler.schedule<&test::TestModule::first>(
+            m, std::chrono::microseconds{0}) == core::Status::ok);
+  CHECK(scheduler.schedule<&test::TestModule::second>(
+            m, std::chrono::microseconds{0}) == core::Status::ok);
+  CHECK(scheduler.schedule<&test::TestModule::third>(
+            m, std::chrono::microseconds{0}) == core::Status::ok);
   CHECK(scheduler.run() == core::Status::ok);
   CHECK(scheduler.snapshot().yield_depth_errors == 1);
   CHECK(scheduler.snapshot().tasks[0].total_nested_duration == 5);
@@ -130,7 +139,8 @@ TEST_CASE(
     CHECK(scheduler.yield() == core::Status::invalid_context);
     scheduler.stop();
   };
-  scheduler.schedule(m, &test::TestModule::first, 0);
+  CHECK(scheduler.schedule<&test::TestModule::first>(
+            m, std::chrono::microseconds{0}) == core::Status::ok);
   CHECK(scheduler.run() == core::Status::ok);
   CHECK(scheduler.yield() == core::Status::invalid_context);
   CHECK(scheduler.snapshot().invalid_yields == 7);
@@ -149,8 +159,10 @@ TEST_CASE(
     returned = true;
   };
   m.second_action = [&] { scheduler.stop(); };
-  scheduler.schedule(m, &test::TestModule::first, 0);
-  scheduler.schedule(m, &test::TestModule::second, 0);
+  CHECK(scheduler.schedule<&test::TestModule::first>(
+            m, std::chrono::microseconds{0}) == core::Status::ok);
+  CHECK(scheduler.schedule<&test::TestModule::second>(
+            m, std::chrono::microseconds{0}) == core::Status::ok);
   CHECK(scheduler.run() == core::Status::ok);
   CHECK(returned);
   CHECK(scheduler.snapshot().tasks[0].executions == 1);
@@ -180,7 +192,8 @@ TEST_CASE(
     CHECK(scheduler.yield() == core::Status::empty);
     scheduler.stop();
   };
-  scheduler.schedule(m, &test::TestModule::first, 0);
+  CHECK(scheduler.schedule<&test::TestModule::first>(
+            m, std::chrono::microseconds{0}) == core::Status::ok);
   CHECK(scheduler.run() == core::Status::ok);
   CHECK(scheduler.snapshot().invalid_yields == 1);
 }
@@ -196,8 +209,10 @@ TEST_CASE("Application forwards configured yield depth") {
     CHECK(scheduler.yield() == core::Status::depth_limit);
     scheduler.stop();
   };
-  scheduler.schedule(m, &test::TestModule::first, 0);
-  scheduler.schedule(m, &test::TestModule::second, 0);
+  CHECK(scheduler.schedule<&test::TestModule::first>(
+            m, std::chrono::microseconds{0}) == core::Status::ok);
+  CHECK(scheduler.schedule<&test::TestModule::second>(
+            m, std::chrono::microseconds{0}) == core::Status::ok);
   CHECK(app.run() == core::Status::ok);
 }
 
@@ -225,9 +240,12 @@ TEST_CASE("nested callback time counts once and log attribution restores") {
     platform.advance(3);
     scheduler.log(core::Level::info, "inner");
   };
-  scheduler.schedule(m, &test::TestModule::first, 0);
-  scheduler.schedule(m, &test::TestModule::second, 0);
-  scheduler.schedule(m, &test::TestModule::third, 0);
+  CHECK(scheduler.schedule<&test::TestModule::first>(
+            m, std::chrono::microseconds{0}) == core::Status::ok);
+  CHECK(scheduler.schedule<&test::TestModule::second>(
+            m, std::chrono::microseconds{0}) == core::Status::ok);
+  CHECK(scheduler.schedule<&test::TestModule::third>(
+            m, std::chrono::microseconds{0}) == core::Status::ok);
   CHECK(scheduler.run() == core::Status::ok);
   const auto stats = scheduler.snapshot();
   CHECK(stats.tasks[0].total_duration == 6);
@@ -261,8 +279,11 @@ TEST_CASE(
     }
   };
   m.second_action = [&] { CHECK(scheduler.yield() == core::Status::empty); };
-  scheduler.schedule(m, &test::TestModule::first, 10, core::Mode::repeat);
-  scheduler.schedule(m, &test::TestModule::second, 11);
+  CHECK(scheduler.schedule<&test::TestModule::first>(
+            m, std::chrono::microseconds{10}, core::Mode::repeat) ==
+        core::Status::ok);
+  CHECK(scheduler.schedule<&test::TestModule::second>(
+            m, std::chrono::microseconds{11}) == core::Status::ok);
   CHECK(scheduler.run() == core::Status::ok);
   CHECK(calls == 4);
   CHECK(scheduler.snapshot().tasks[0].executions == 4);
@@ -310,7 +331,8 @@ TEST_CASE(
     CHECK(first.yield() == core::Status::empty);
     first.stop();
   };
-  first.schedule(a, &test::TestModule::first, 0);
+  CHECK(first.schedule<&test::TestModule::first>(
+            a, std::chrono::microseconds{0}) == core::Status::ok);
   CHECK(first.run() == core::Status::ok);
   CHECK(second.snapshot().invalid_yields == 1);
 }

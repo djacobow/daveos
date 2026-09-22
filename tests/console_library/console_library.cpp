@@ -66,8 +66,8 @@ TEST_CASE(
     group.log_statistics(app.scheduler());
     CHECK(app.scheduler().stop() == core::Status::ok);
   };
-  CHECK(app.scheduler().schedule<&test::TestModule::first>(controller, 1) ==
-        core::Status::ok);
+  CHECK(app.scheduler().schedule<&test::TestModule::first>(
+            controller, std::chrono::microseconds{1}) == core::Status::ok);
   CHECK(app.run() == core::Status::ok);
   CHECK(first.output == second.output);
   CHECK((first.output > 0) == bool(DAVEOS_LOGGING));
@@ -87,8 +87,8 @@ TEST_CASE(
   module.first_action = [&] {
     CHECK(app.scheduler().stop() == core::Status::ok);
   };
-  CHECK(app.scheduler().schedule<&test::TestModule::first>(module, 0) ==
-        core::Status::ok);
+  CHECK(app.scheduler().schedule<&test::TestModule::first>(
+            module, std::chrono::microseconds{0}) == core::Status::ok);
   CHECK(app.run() == core::Status::ok);
   group.stop();
 }

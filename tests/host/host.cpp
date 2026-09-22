@@ -58,14 +58,16 @@ TEST_CASE(
             *context.concurrent = context.in_callback->load();
             context.module->scheduler().log(core::Level::warning,
                                             "socket interrupt");
-            *context.status = context.module->scheduler().schedule(
-                *context.module, &test::TestModule::second, 0);
+            *context.status =
+                context.module->scheduler().schedule<&test::TestModule::second>(
+                    *context.module, std::chrono::microseconds{0});
           },
           &context);
     }
     interrupt_done.release();
   });
-  scheduler.schedule(module, &test::TestModule::first, 0);
+  CHECK(scheduler.schedule<&test::TestModule::first>(
+            module, std::chrono::microseconds{0}) == core::Status::ok);
   CHECK(scheduler.run() == core::Status::ok);
   peer.join();
   ::close(sockets[0]);
@@ -91,11 +93,16 @@ TEST_CASE("host timer runs in interrupt context and finishes before shutdown") {
   test::timer_action = [&] {
     interrupt_context = platform.in_interrupt();
     ++count;
-    scheduler.schedule(module, &test::TestModule::second, 0);
+    CHECK(scheduler.schedule<&test::TestModule::second>(
+              module, std::chrono::microseconds{0}) == core::Status::ok);
   };
-  module.first_action = [&] { scheduler.timer(1000, test::Timer); };
+  module.first_action = [&] {
+    CHECK(scheduler.timer(std::chrono::microseconds{1000}, test::Timer) ==
+          core::Status::ok);
+  };
   module.second_action = [&] { scheduler.stop(); };
-  scheduler.schedule(module, &test::TestModule::first, 0);
+  CHECK(scheduler.schedule<&test::TestModule::first>(
+            module, std::chrono::microseconds{0}) == core::Status::ok);
   CHECK(scheduler.run() == core::Status::ok);
   CHECK(count == 1);
   CHECK(interrupt_context);
@@ -181,12 +188,14 @@ TEST_CASE("shutdown waits for a timer callback that is already executing") {
     finished = true;
   };
   module.first_action = [&] {
-    scheduler.timer(100, test::Timer);
+    CHECK(scheduler.timer(std::chrono::microseconds{100}, test::Timer) ==
+          core::Status::ok);
     CHECK(timer_started.try_acquire_for(chrono::seconds{2}));
     scheduler.stop();
     release_timer.release();
   };
-  scheduler.schedule(module, &test::TestModule::first, 0);
+  CHECK(scheduler.schedule<&test::TestModule::first>(
+            module, std::chrono::microseconds{0}) == core::Status::ok);
   CHECK(scheduler.run() == core::Status::ok);
   CHECK(finished);
 }

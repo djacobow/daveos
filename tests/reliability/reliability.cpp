@@ -199,8 +199,9 @@ TEST_CASE("Scheduler progress survives stats reset and resets on reschedule") {
   testing::TestModule module;
   auto scheduler =
       core::make_scheduler<testing::Event>(platform, core::ModuleList{&module});
-  REQUIRE(scheduler.schedule(module, &testing::TestModule::first, 10,
-                             core::Mode::repeat) == core::Status::ok);
+  REQUIRE(scheduler.schedule<&testing::TestModule::first>(
+              module, std::chrono::microseconds{10}, core::Mode::repeat) ==
+          core::Status::ok);
   unsigned calls = 0;
   module.first_action = [&] {
     auto before = scheduler.progress();
@@ -210,8 +211,9 @@ TEST_CASE("Scheduler progress survives stats reset and resets on reschedule") {
     ++calls;
     if (calls == 3) {
       auto generation = before.tasks[0].generation;
-      REQUIRE(scheduler.schedule(module, &testing::TestModule::first, 20,
-                                 core::Mode::repeat) == core::Status::ok);
+      REQUIRE(scheduler.schedule<&testing::TestModule::first>(
+                  module, std::chrono::microseconds{20}, core::Mode::repeat) ==
+              core::Status::ok);
       auto after = scheduler.progress();
       REQUIRE(after.tasks[0].generation == generation + 1);
       REQUIRE(after.tasks[0].completed == 0);
@@ -808,10 +810,11 @@ TEST_CASE("watchdog grace covers a suspended yielding task until it returns") {
     CHECK(scheduler.progress().tasks[0].completed == 0);
     scheduler.stop();
   };
-  REQUIRE(scheduler.schedule(module, &testing::TestModule::first, 10,
-                             core::Mode::repeat) == core::Status::ok);
-  REQUIRE(scheduler.schedule(module, &testing::TestModule::second, 15) ==
+  REQUIRE(scheduler.schedule<&testing::TestModule::first>(
+              module, std::chrono::microseconds{10}, core::Mode::repeat) ==
           core::Status::ok);
+  REQUIRE(scheduler.schedule<&testing::TestModule::second>(
+              module, std::chrono::microseconds{15}) == core::Status::ok);
   REQUIRE(scheduler.run() == core::Status::ok);
   CHECK(scheduler.progress().tasks[0].completed == 1);
 }

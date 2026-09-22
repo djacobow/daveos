@@ -17,24 +17,32 @@ TEST_CASE("timer replacement, cancellation, capacity and self-rearm") {
     CHECK(platform.in_interrupt());
     times.push_back(platform.now());
     if (++calls == 1) {
-      CHECK(scheduler.timer(4, test::Timer) == core::Status::ok);
+      CHECK(scheduler.timer(std::chrono::microseconds{4}, test::Timer) ==
+            core::Status::ok);
     } else {
-      scheduler.schedule(module, &test::TestModule::second, 0);
+      CHECK(scheduler.schedule<&test::TestModule::second>(
+                module, std::chrono::microseconds{0}) == core::Status::ok);
     }
   };
   module.first_action = [&] {
-    CHECK(scheduler.timer(0, test::Timer) == core::Status::invalid_argument);
-    CHECK(scheduler.timer(20, test::Timer) == core::Status::ok);
-    CHECK(scheduler.timer(5, test::Timer) == core::Status::ok);
-    CHECK(scheduler.timer(1, test::OtherTimer) == core::Status::full);
+    CHECK(scheduler.timer(std::chrono::microseconds{0}, test::Timer) ==
+          core::Status::invalid_argument);
+    CHECK(scheduler.timer(std::chrono::microseconds{20}, test::Timer) ==
+          core::Status::ok);
+    CHECK(scheduler.timer(std::chrono::microseconds{5}, test::Timer) ==
+          core::Status::ok);
+    CHECK(scheduler.timer(std::chrono::microseconds{1}, test::OtherTimer) ==
+          core::Status::full);
     CHECK(scheduler.cancel_timer(test::OtherTimer) == core::Status::not_found);
   };
   module.second_action = [&] {
     CHECK_FALSE(platform.in_interrupt());
     scheduler.stop();
   };
-  CHECK(scheduler.timer(1, test::Timer) == core::Status::not_running);
-  scheduler.schedule(module, &test::TestModule::first, 0);
+  CHECK(scheduler.timer(std::chrono::microseconds{1}, test::Timer) ==
+        core::Status::not_running);
+  CHECK(scheduler.schedule<&test::TestModule::first>(
+            module, std::chrono::microseconds{0}) == core::Status::ok);
   CHECK(scheduler.run() == core::Status::ok);
   CHECK(times == std::vector<core::Time>{5, 9});
   CHECK(scheduler.snapshot().timer_overflows == 1);
@@ -53,14 +61,18 @@ TEST_CASE(
   test::timer_action = [&] {
     CHECK(scheduler.cancel_timer(test::OtherTimer) == core::Status::ok);
     CHECK(scheduler.cancel_timer(test::OtherTimer) == core::Status::not_found);
-    scheduler.timer(10, test::OtherTimer);
+    CHECK(scheduler.timer(std::chrono::microseconds{10}, test::OtherTimer) ==
+          core::Status::ok);
     scheduler.stop();
   };
   module.first_action = [&] {
-    scheduler.timer(5, test::Timer);
-    scheduler.timer(10, test::OtherTimer);
+    CHECK(scheduler.timer(std::chrono::microseconds{5}, test::Timer) ==
+          core::Status::ok);
+    CHECK(scheduler.timer(std::chrono::microseconds{10}, test::OtherTimer) ==
+          core::Status::ok);
   };
-  scheduler.schedule(module, &test::TestModule::first, 0);
+  CHECK(scheduler.schedule<&test::TestModule::first>(
+            module, std::chrono::microseconds{0}) == core::Status::ok);
   CHECK(scheduler.run() == core::Status::ok);
   platform.advance(100);
   CHECK(unwanted == 0);
@@ -97,7 +109,8 @@ TEST_CASE("manual fake sleep is released by time advancement") {
   auto scheduler =
       core::make_scheduler<test::Event>(platform, core::ModuleList{&module});
   module.first_action = [&] { scheduler.stop(); };
-  scheduler.schedule(module, &test::TestModule::first, 10);
+  CHECK(scheduler.schedule<&test::TestModule::first>(
+            module, std::chrono::microseconds{10}) == core::Status::ok);
   std::thread runner([&] { (void)scheduler.run(); });
   while (!platform.sleeps()) {
     std::this_thread::yield();
@@ -120,7 +133,8 @@ TEST_CASE("indefinite fake sleep wakes on an interrupt") {
   platform.interrupt(
       [](void* context) {
         auto& module = *static_cast<test::TestModule*>(context);
-        module.scheduler().schedule(module, &test::TestModule::first, 0);
+        CHECK(module.scheduler().schedule<&test::TestModule::first>(
+                  module, std::chrono::microseconds{0}) == core::Status::ok);
       },
       &module);
   runner.join();
@@ -134,7 +148,8 @@ TEST_CASE("can_sleep false takes awake-wait path") {
   auto scheduler =
       core::make_scheduler<test::Event>(platform, core::ModuleList{&module});
   module.first_action = [&] { scheduler.stop(); };
-  scheduler.schedule(module, &test::TestModule::first, 10);
+  CHECK(scheduler.schedule<&test::TestModule::first>(
+            module, std::chrono::microseconds{10}) == core::Status::ok);
   CHECK(scheduler.run() == core::Status::ok);
   CHECK(platform.sleeps() == 0);
   CHECK(platform.awake_waits() > 0);
@@ -160,10 +175,13 @@ TEST_CASE(
     scheduler.stop();
   };
   module.first_action = [&] {
-    scheduler.timer(5, test::Timer);
-    scheduler.timer(8, test::OtherTimer);
+    CHECK(scheduler.timer(std::chrono::microseconds{5}, test::Timer) ==
+          core::Status::ok);
+    CHECK(scheduler.timer(std::chrono::microseconds{8}, test::OtherTimer) ==
+          core::Status::ok);
   };
-  scheduler.schedule(module, &test::TestModule::first, 0);
+  CHECK(scheduler.schedule<&test::TestModule::first>(
+            module, std::chrono::microseconds{0}) == core::Status::ok);
   CHECK(scheduler.run() == core::Status::ok);
   CHECK(calls == 1);
   CHECK(maximum == 1);

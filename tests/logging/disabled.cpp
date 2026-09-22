@@ -41,7 +41,8 @@ TEST_CASE("disabled logging owns no storage and attaches no service") {
     scheduler.log_statistics();
     scheduler.stop();
   };
-  scheduler.schedule(module, &test::TestModule::first, 0);
+  REQUIRE(scheduler.schedule<&test::TestModule::first>(
+              module, std::chrono::microseconds{0}) == core::Status::ok);
   REQUIRE(scheduler.run() == core::Status::ok);
   CHECK(sink.records.empty());
   CHECK(logger.counters().dropped == 0);

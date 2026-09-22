@@ -12,22 +12,14 @@ namespace daveos::console {
   // Shared console task and registration. Derived supplies name(),
   // poll_line(Line&), take_dropped(), and output(LogRecord). Transport work
   // stays in Derived; tokenization remains exclusively in CommandDispatcher.
-  // One line per invocation.
+  // One line per invocation, polled every millisecond once dispatch starts.
   template <typename Derived, typename Event>
   class Module : public core::Module<Derived, Event> {
    public:
     static constexpr auto tasks() {
-      return std::array{core::TaskDescriptor<Derived>{
-          "input", static_cast<void (Derived::*)()>(&Module::Poll)}};
-    }
-
-    core::Status init(core::InitStage stage) {
-      if (stage != core::InitStage::stage1) {
-        return core::Status::ok;
-      }
-      return this->scheduler().schedule(static_cast<Derived&>(*this),
-                                        tasks()[0].callback, 1000,
-                                        core::Mode::repeat);
+      return std::array{core::periodic_task<Derived>(
+          "input", static_cast<void (Derived::*)()>(&Module::Poll),
+          std::chrono::milliseconds{1})};
     }
 
     core::CommandSource& command_source() { return source_; }

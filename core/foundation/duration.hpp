@@ -14,6 +14,11 @@ namespace daveos::core {
   template <typename Rep>
   concept DurationRep = std::integral<Rep> && sizeof(Rep) <= sizeof(Time);
 
+  // Unsigned microseconds with the same count type as Time. Use it to pass a
+  // value already measured in Time (a deadline difference, a parsed delay) to
+  // a chrono-only API without a narrowing conversion.
+  using Microseconds = std::chrono::duration<Time, std::micro>;
+
   template <DurationRep Rep, typename Period>
   constexpr Status to_microseconds(std::chrono::duration<Rep, Period> delay,
                                    Time& result) {

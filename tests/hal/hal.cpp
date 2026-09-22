@@ -476,8 +476,11 @@ TEST_CASE(
     CHECK(completion.result()->status == hal::Status::timeout);
     scheduler.stop();
   };
-  scheduler.schedule(module, &testing::TestModule::first, 0);
-  scheduler.schedule(module, &testing::TestModule::second, 101);
+  CHECK(scheduler.schedule<&testing::TestModule::first>(
+            module, std::chrono::microseconds{0}) == daveos::core::Status::ok);
+  CHECK(scheduler.schedule<&testing::TestModule::second>(
+            module, std::chrono::microseconds{101}) ==
+        daveos::core::Status::ok);
   REQUIRE(scheduler.run() == testing::core::Status::ok);
   REQUIRE(bus.statistics().timed_out == 1);
 }
