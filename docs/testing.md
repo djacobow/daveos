@@ -286,10 +286,13 @@ not registration index, so optional application modules do not redirect the
 fault. It uses debugger memory expressions without calling target functions or
 requiring a Python-enabled ARM GDB.
 
-### H563 SD timeout injection (opt-in)
+### SD timeout injection (opt-in)
 
 `DAVEOS_HIL_SD_FAULT=1` enables
-`tests/hil/h563/test_sd_timeout.py` with an H563 `spi_sd_dma=true` build.
+`tests/hil/h563/test_sd_timeout.py` or `tests/hil/h755/test_sd_timeout.py`
+with the matching board configuration and a `spi_sd_dma=true` build. Both use
+`tests/hil/sd_timeout_cases.py`; only the debugger target, DMA request injection
+and register addresses differ.
 It factory-programs the board and interrupts a read-only sector transfer by
 redirecting its DMA request through GDB. It checks timeout cleanup, disabled
 DMA/interrupts, released CS, the unavailable-card latch, and explicit reset.

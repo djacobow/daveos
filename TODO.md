@@ -200,7 +200,10 @@ section supersedes older H755 hardware deferrals; remaining gaps are explicit.
   channels disabled, SPI requests/IRQs off, CS released, readiness latched off,
   no idle traffic, and explicit controller reset successful. One subsequent
   card probe failed at CMD0; this interrupted card needs a power cycle.
-  H755 timeout injection remains untested.
+  H755 subsequently passed read-only SD/filesystem HIL 2/2 and timeout
+  injection 1/1: both DMA streams disabled, SPI requests/IRQs off, CS high,
+  unchanged idle counters, explicit reset successful; the single subsequent
+  CMD0 probe failed and the card needs a power cycle on this board too.
 - [ ] Qualify SPI DMA with D-cache enabled, injected timeout/error cleanup, card removal and recovery
   from an interrupted data block. An aborted DMA read during bring-up left this
   card sending the remainder of its block; repeated probes eventually restored

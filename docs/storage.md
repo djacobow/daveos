@@ -514,3 +514,21 @@ ASan/UBSan passed 33/33, targeted TSan HAL/storage passed 2/2, both H563/H755
 A/B builds passed, and formatting/lint passed. H755 timeout injection, DMA
 hardware-error injection, cache-enabled operation and physical card removal
 remain unqualified.
+
+### H755 timeout follow-up
+
+After moving the same card to PA5/PA6/PB5/PD14, H755 passed the read-only
+SD/filesystem baseline (2/2), including repeated CRC-checked reads, mount/list,
+unmount/remount and watchdog checks. The shared opt-in timeout case then passed
+(1/1), redirecting DMA1 stream 2 through inactive SPI2's DMAMUX request.
+Both stream EN bits were clear after timeout; SPI DMA requests/interrupts were
+disabled and CS was high. IRQ/poll/chunk/byte counters stayed unchanged while
+idle. Mounting remained rejected until card initialization.
+
+Explicit `sd reset` succeeded, but the one subsequent card probe failed at
+CMD0 with `response_mismatch`, just as on H563. Physical SD power cycling is
+required after this injection. Watchdog and retained-fault checks passed;
+no SD or OTP writes were performed. The H755 A/B build, formatting and lint
+passed. Cache-enabled DMA, hardware-error injection and physical card-removal
+qualification remain open. The initial stale OpenOCD session could not examine
+the target; restarting it restored access before the successful runs.
