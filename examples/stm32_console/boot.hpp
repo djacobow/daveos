@@ -21,6 +21,14 @@ namespace app {
 
     static constexpr const char* name() { return "boot"; }
 
+    // Composition's early hook: let health confirm this image after it has
+    // stayed healthy. Only stores the callback; no hardware access.
+    template <typename Health>
+    void attach(Health& health) {
+      health.confirmation(
+          this, [](void* p) { return static_cast<Boot*>(p)->Confirm(); });
+    }
+
     core::Status init(core::InitStage stage) {
       if (stage != core::InitStage::stage1) {
         return core::Status::ok;

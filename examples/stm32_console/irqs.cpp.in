@@ -1,5 +1,0 @@
-#include "composition.hpp"
-namespace app {
-  extern Components components;
-}
-@IRQS@

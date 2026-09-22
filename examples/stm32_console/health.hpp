@@ -85,6 +85,16 @@ namespace app {
       return controller_.start(kWatchdogTimeout);
     }
 
+    // Composition's early hook, before HAL/clock setup: bind the progress
+    // source, then start the watchdog. A start failure is terminal.
+    template <typename Scheduler>
+    void early(Scheduler& scheduler) {
+      attach_progress(scheduler);
+      if (const auto status = early_start(); status != core::Status::ok) {
+        initialization_failed(status);
+      }
+    }
+
     // Safe before HAL/clock setup; no timer/logger prerequisite.
     [[noreturn]] void initialization_failed(core::Status status,
                                             const char* module = "core") {

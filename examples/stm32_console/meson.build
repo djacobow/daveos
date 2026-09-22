@@ -14,7 +14,7 @@ component_modules = []
 component_stop = []
 component_early = []
 component_failure = []
-component_irqs = []
+component_sources = []
 if get_option('i2c_adc_probe')
   if board != 'h563'
     error('i2c_adc_probe requires the H563 PB8/PB9 fixture')
@@ -26,8 +26,7 @@ if get_option('i2c_adc_probe')
   component_members += '    I2cProbe i2c{i2c1};'
   component_members += '    AdcProbe adc{platform, i2c1};'
   component_modules += ', i2c, adc'
-  component_irqs += 'extern "C" void I2C1_EV_IRQHandler() { app::components.i2c1.interrupt(); }'
-  component_irqs += 'extern "C" void I2C1_ER_IRQHandler() { app::components.i2c1.interrupt(); }'
+  component_sources += files('irqs/i2c.cpp')
 endif
 if get_option('spi_sd_probe')
   component_deps += hal_dep
@@ -41,13 +40,9 @@ if get_option('spi_sd_probe')
     component_members += '    daveos::storage::Module<Event> filesystem{sd.block_device()};'
     component_modules += ', filesystem'
   endif
-  component_irqs += 'extern "C" void SPI1_IRQHandler() { app::components.sd.interrupt(); }'
-  if sd_dma and board == 'h755'
-    component_irqs += 'extern "C" void DMA1_Stream1_IRQHandler() { app::components.sd.interrupt(); }'
-    component_irqs += 'extern "C" void DMA1_Stream2_IRQHandler() { app::components.sd.interrupt(); }'
-  elif sd_dma
-    component_irqs += 'extern "C" void GPDMA1_Channel1_IRQHandler() { app::components.sd.interrupt(); }'
-    component_irqs += 'extern "C" void GPDMA1_Channel2_IRQHandler() { app::components.sd.interrupt(); }'
+  component_sources += files('irqs/sd.cpp')
+  if sd_dma
+    component_sources += files('irqs/sd_dma_' + board + '.cpp')
   endif
 endif
 if board in ['h563', 'h755']
@@ -58,12 +53,10 @@ if board in ['h563', 'h755']
   component_includes += '#include "health.hpp"'
   component_members += '    Health health{platform};'
   component_modules += ', health'
-  component_early += '      health.attach_progress(scheduler);'
   if get_option('bootloader')
-    component_early += '      health.confirmation(&boot, [](void* p) { return static_cast<Boot*>(p)->Confirm(); });'
+    component_early += '      boot.attach(health);'
   endif
-  component_early += '      auto result = health.early_start();'
-  component_early += '      if (result != core::Status::ok) { health.initialization_failed(result); }'
+  component_early += '      health.early(scheduler);'
   component_failure += '      health.initialization_failed(status, module);'
 endif
 if get_option('bootloader')
@@ -133,11 +126,9 @@ composition.set('MODULES', ''.join(component_modules))
 composition.set('STOP', '\n'.join(component_stop))
 composition.set('EARLY', '\n'.join(component_early))
 composition.set('FAILURE', '\n'.join(component_failure))
-composition.set('IRQS', '\n'.join(component_irqs))
-irq_source = configure_file(input: 'irqs.cpp.in', output: 'irqs.cpp', configuration: composition)
 configure_file(input: 'composition.hpp.in', output: 'composition.hpp', configuration: composition)
 
-firmware = executable('stm32-console', ['appmain.cpp', irq_source],
+firmware = executable('stm32-console', ['appmain.cpp'] + component_sources,
   dependencies: component_deps, name_suffix: 'elf',
   # libstdc++ assertion reporting pulls in allocating stdio on this toolchain.
   override_options: ['b_ndebug=true'],
