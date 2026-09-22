@@ -271,10 +271,10 @@ TEST_CASE(
 #endif
 }
 
-TEST_CASE("direct factory retains handler attribution") {
+TEST_CASE("direct factory attributes logs to the command name") {
   constexpr auto descriptor =
       core::command<&Typed::Boolean>("public", "Boolean", core::arg("value"));
-  STATIC_REQUIRE(std::string_view(descriptor.handler) == "Boolean");
+  STATIC_REQUIRE(std::string_view(descriptor.handler) == "public");
 }
 
 TEST_CASE(
@@ -356,7 +356,9 @@ TEST_CASE(
   });
 }
 
-TEST_CASE("direct factory names support const and noexcept members") {
+TEST_CASE(
+    "direct factory labels default to the command name for const and "
+    "noexcept members") {
   struct Names {
     core::Status Plain() { return core::Status::ok; }
 
@@ -366,14 +368,15 @@ TEST_CASE("direct factory names support const and noexcept members") {
   };
 
   STATIC_REQUIRE(
-      std::string_view(core::command<&Names::Plain>("p", "P").handler) ==
-      "Plain");
+      std::string_view(core::command<&Names::Plain>("p", "P").handler) == "p");
+  STATIC_REQUIRE(std::string_view(
+                     core::command<&Names::Constant>("c", "C").handler) == "c");
+  STATIC_REQUIRE(std::string_view(
+                     core::command<&Names::NoThrow>("n", "N").handler) == "n");
+  // The macro replaces the default with the C++ handler identifier.
   STATIC_REQUIRE(
-      std::string_view(core::command<&Names::Constant>("c", "C").handler) ==
+      std::string_view(DAVEOS_COMMAND(Names, Constant, "c", "C").handler) ==
       "Constant");
-  STATIC_REQUIRE(
-      std::string_view(core::command<&Names::NoThrow>("n", "N").handler) ==
-      "NoThrow");
 }
 
 TEST_CASE(

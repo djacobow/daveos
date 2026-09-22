@@ -57,7 +57,7 @@ namespace {
   static_assert(std::string_view(core::command<&Example::Sample>(
                                      "sample", "Sample", core::arg("rate"),
                                      core::arg("enabled"), core::arg("mode"))
-                                     .handler) == "Sample");
+                                     .handler) == "sample");
 }  // namespace
 
 // Declaration-only platform: exercise core templates without any host/OS

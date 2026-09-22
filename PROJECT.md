@@ -612,8 +612,8 @@ allowing different handler signatures in one array. Validate metadata count,
 type-compatible bounds/policies, and trailing optional parameters at compile
 time. Argument names support useful diagnostics and generated help showing
 `<required>` and `[optional]` parameters. Preserve actual module/C++ handler
-logging context. Direct factory calls derive the function label from GCC/Clang
-compiler signatures; the macro captures the identifier explicitly.
+logging context. Direct factory calls label the handler with the command name;
+the macro captures the C++ identifier explicitly. No compiler text is parsed.
 
 Integer syntax is decimal, with optional `0x`/`0X` hexadecimal and `0b`/`0B`
 binary prefixes. Leading zeros remain decimal. A single leading sign is allowed;

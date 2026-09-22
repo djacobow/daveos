@@ -414,33 +414,6 @@ namespace daveos::core {
       return Status::ok;
     }
 
-    // GCC/Clang expose the selected function in their template signature. This
-    // is only a label for direct factory users; type validation never relies
-    // on parsing compiler text. The macro supplies its own exact identifier.
-    template <auto Function>
-    consteval auto HandlerName() {
-      constexpr std::string_view signature = __PRETTY_FUNCTION__;
-      constexpr auto marker = signature.find("Function = ");
-      static_assert(marker != std::string_view::npos,
-                    "unsupported compiler function signature format");
-      constexpr auto start = marker + 11;
-      constexpr auto end = signature.find_first_of(";]", start);
-      static_assert(end != std::string_view::npos && end > start,
-                    "unsupported compiler function signature format");
-      constexpr auto qualified = signature.substr(start, end - start);
-      constexpr auto scope = qualified.rfind("::");
-      constexpr auto name =
-          qualified.substr(scope == std::string_view::npos ? 0 : scope + 2);
-      std::array<char, name.size() + 1> result{};
-      for (std::size_t i = 0; i < name.size(); ++i) {
-        result[i] = name[i];
-      }
-      return result;
-    }
-
-    template <auto Function>
-    inline constexpr auto HandlerLabel = HandlerName<Function>();
-
     template <typename T>
     struct Signature;
 
@@ -566,7 +539,8 @@ namespace daveos::core {
   }  // namespace detail
 
   // Build a homogeneous descriptor and an allocation-free typed invocation
-  // thunk.
+  // thunk. The log attribution label defaults to the command name;
+  // DAVEOS_COMMAND replaces it with the C++ handler identifier.
   template <auto Function, typename... A>
   consteval auto command(const char* name, const char* help, A... arguments) {
     using S = detail::Signature<decltype(Function)>;
@@ -580,8 +554,7 @@ namespace daveos::core {
                   "one argument descriptor is required per handler parameter");
     static_assert(raw || count <= CommandParameterCapacity,
                   "too many command parameters");
-    CommandDescriptor<M> result{name, help, nullptr,
-                                detail::HandlerLabel<Function>.data()};
+    CommandDescriptor<M> result{name, help, nullptr, name};
     if constexpr (raw) {
       result.callback = [](M& owner, CommandArguments args,
                            const CommandParameters&,
