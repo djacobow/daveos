@@ -208,6 +208,8 @@ section supersedes older H755 hardware deferrals; remaining gaps are explicit.
   from an interrupted data block. An aborted DMA read during bring-up left this
   card sending the remainder of its block; repeated probes eventually restored
   it, but one-shot reinitialization after that fault is not guaranteed.
+- [ ] Capture file and line number for errors and warnings, so that the logger
+  can (optionally) choose to display them
 
 ## For STM32
 
