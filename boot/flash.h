@@ -25,10 +25,19 @@ namespace daveos::boot {
     bool valid() const;
   };
 
-  // Borrowed, single-operation flash device. erase/program start and return;
-  // poll returns busy until completion or a terminal status. Program storage
-  // must remain alive/unchanged until completion. read reports ECC/read errors.
-  // now is monotonic microseconds and is available before scheduler dispatch.
+  // Borrowed, single-operation flash device.
+  //
+  // Admission: erase() and program() start one operation and return; a
+  //   rejected start leaves nothing in progress. read() is synchronous.
+  // Ownership: program() data stays borrowed and unchanged until poll()
+  //   reports a terminal status.
+  // Execution: all calls from one task/thread; now() is monotonic
+  //   microseconds and works before scheduler dispatch.
+  // Deadline: callers bound each operation with Layout::operation_timeout,
+  //   polling until then.
+  // Failure: poll() returns busy until completion, then ok or the terminal
+  //   error. read() reports ECC and read errors. No retries.
+  // Lifetime: the device outlives its users and any operation in progress.
   struct Flash {
     void* context = nullptr;
     Status (*read)(void*, std::uint32_t, std::span<std::byte>) = nullptr;

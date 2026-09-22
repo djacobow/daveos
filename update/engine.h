@@ -8,8 +8,23 @@
 namespace daveos::update {
 
 
-  // Transport-independent OTA owner. One task/thread calls all methods; IRQs
-  // buffer data elsewhere. Public mutators submit requests; tick owns state.
+  // Transport-independent OTA owner. Public mutators submit requests; tick()
+  // owns the state machine.
+  //
+  // Admission: begin() fails busy while another owner holds a reservation or
+  //   an installation is active, not_running while disabled, and with the
+  //   header's decoding error otherwise. chunk() is accepted only when
+  //   ready(), in order, within the package and with a matching CRC.
+  // Ownership: chunk() copies its data before returning; the header span is
+  //   read during begin() only.
+  // Execution: one task/thread calls every method; interrupts buffer data
+  //   elsewhere. Flash work advances only in tick().
+  // Deadline: an upload idle for the inactivity period (30 s default) aborts;
+  //   each flash step is bounded by the layout's operation timeout.
+  // Failure: an abort or error ends in failed with status(); the next begin()
+  //   starts over. Nothing is retried, and the running image is untouched.
+  // Lifetime: the flash device and layout outlive the engine; stop feeding
+  //   chunks and let tick() finish an abort before destroying it.
   class Engine {
    public:
     enum class State {

@@ -197,3 +197,48 @@ Inject a `hal::spi::Device` or `hal::i2c::Device` into a peripheral driver. The
 application owns controller configuration and alias registries; the driver owns
 its transaction descriptors and buffers. See [SPI/I2C](spi-i2c.md) for callback
 and polling-helper examples, STM32 IRQ wiring, and the read-only H563 SD fixture.
+
+## Asynchronous drivers
+
+Long operations are state machines advanced from a task, not blocking calls.
+New drivers should use the shape `drivers/mcp3425.h`, `storage/sd/initializer.h`
+and `storage/sd/session.h` share:
+
+- `request()` accepts work or returns `busy`; it starts nothing inline.
+- `tick()` advances the state machine from a task; interrupts only publish
+  completions.
+- `result()` (or `ready()` plus accessors) reports the outcome once it is final.
+- `reset()`, where recovery is possible, is itself a request.
+
+Existing HAL and flash interfaces keep their own shapes (`start()` with a
+callback or `Completion`; `erase`/`program` plus `poll()`); do not wrap them just
+to match.
+
+Every public asynchronous API states its contract at the top of its header
+under six labels, as the HAL, boot flash, update engine, SD and storage headers
+do:
+
+| Label | Answers |
+| --- | --- |
+| Admission | What is rejected, and does rejection change anything? Can completion happen inline? |
+| Ownership | Which buffers and descriptors are borrowed, and until when? |
+| Execution | Which context calls it, and which context completes it? |
+| Deadline | What bounds it, and does expiry release buffers or only request cleanup? |
+| Failure | What latches, and which explicit call clears it? |
+| Lifetime | What must stay alive or be quiesced before destruction? |
+
+Inject dependencies in one of three ways, chosen by what the boundary needs:
+
+- A struct of function pointers with a `void*` context for runtime-swappable
+  device boundaries (`storage::BlockDevice`, `boot::Flash`, `watchdog::Driver`,
+  the SD session's hooks).
+- A template parameter where a per-transfer path must stay static
+  (`hal::Controller<Backend, Clock, Critical, N>`), or where a policy supplies
+  static services (`watchdog::HealthModule<..., Hardware>`).
+- CRTP only for the platform.
+
+Report failure causes as a status, not a `bool`, and map them once at each
+boundary: a HAL status becomes a `core::Status` in the SD session, which becomes
+a FatFs result in the disk bridge. Nested `scheduler().yield()`, and
+`core::wait_for_release()` built on it, are for wrapping synchronous libraries
+such as FatFs, not for ordinary drivers; see [task yielding](yield.md).

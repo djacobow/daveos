@@ -87,9 +87,18 @@ namespace daveos::hal {
     std::uint64_t cleanup_failures = 0, resets = 0, reset_failures = 0;
   };
 
-  // One outstanding transaction; result publication is safe across task/ISR
-  // contexts. Single consumer owns start()/result(); the HAL owns completion.
-  // Destruction/reuse requires the transaction to have completed.
+  // Polling helper for one outstanding transaction.
+  //
+  // Admission: start() returns busy while its previous transaction is pending,
+  //   leaving that result untouched. A rejected submission is published at
+  //   once as a ready result carrying the rejection status.
+  // Ownership: descriptors and buffers stay borrowed until ready() is true.
+  // Execution: one task owns start()/ready()/result(); the HAL publishes the
+  //   result from interrupt context, possibly before start() returns.
+  // Deadline: as Device::start(); a timeout is a ready result, not an early
+  //   return.
+  // Failure: the result's status reports it; nothing is retried here.
+  // Lifetime: do not destroy or reuse it while a transaction is pending.
   template <typename Action>
   class Completion {
    public:
@@ -152,8 +161,21 @@ namespace daveos::hal {
                      const Operations* operations)
         : owner_(owner), index_(index), operations_(operations) {}
 
-    // Task/ISR safe and nonblocking. Accepted buffers/descriptors remain
-    // borrowed until callback entry. Rejection never invokes the callback.
+    // Admission: nonblocking from task or ISR context. Rejects malformed
+    //   actions (invalid_argument), an uninitialized controller
+    //   (not_initialized) and a pending transaction (busy). Rejection never
+    //   invokes the callback.
+    // Ownership: accepted descriptors and buffers stay borrowed until the
+    //   callback is entered; do not change or read them before then.
+    // Execution: the callback runs in interrupt context, possibly before
+    //   start() returns, and may start the next transaction.
+    // Deadline: timeout defaults to the pauses plus max(10 ms, 4x the
+    //   estimated wire time + 1 ms). Expiry stops the transfer and completes
+    //   with timeout; completion is the release point either way.
+    // Failure: a failed cleanup faults the controller until its reset()
+    //   succeeds. No queue, retry or cancellation.
+    // Lifetime: the controller, backends, clock and callback target outlive
+    //   the transaction; quiesce interrupts before destroying any of them.
     Status start(std::span<const Action> actions,
                  Callback<Result<Action>> callback,
                  std::optional<Duration> timeout = std::nullopt) const {

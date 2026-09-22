@@ -13,15 +13,22 @@ namespace daveos::storage::sd {
 
   // CMD17/CMD24 adapter for an initialized SDHC/SDXC card. Does not own
   // initialization, bus speed or CS configuration; use Initializer first. rate
-  // must be the actual SCK rate, <=1 MHz. Caller supplies a capture buffer and
-  // a cooperative pump. Pump returns false to request abort; an accepted
-  // transfer ALWAYS finishes (including its HAL timeout) before buffers are
-  // released. Pump must keep making progress even after requesting abort; fake
-  // platforms advance there. No ISR calls. One execution thread owns the
-  // transport and its scratch buffer. An accepted transfer failure or bad card
-  // response latches failed(); no subsequent I/O is issued by this instance.
-  // Reconstruct only after explicit card reinitialization. Rejected arguments
-  // and reentry do not invalidate an otherwise usable transport.
+  // must be the actual SCK rate, <=1 MHz.
+  //
+  // Admission: read()/write() reject bad ranges, sizes and reentry without
+  //   touching the bus; those rejections leave the transport usable.
+  // Ownership: the caller's capture buffer and data stay borrowed until the
+  //   call returns; an accepted transfer ALWAYS finishes (including its HAL
+  //   timeout) before they are released.
+  // Execution: synchronous on one execution thread, never from an ISR. The
+  //   injected pump runs while a transfer is pending; it returns false to
+  //   request abort but must keep making progress (fake platforms advance
+  //   time there).
+  // Deadline: 250 ms per read transaction; writes allow 1 s including busy
+  //   polling, then require clean CMD13 status.
+  // Failure: an accepted transfer failure or bad card response latches
+  //   failed(); no further I/O from this instance. No automatic retry.
+  // Lifetime: reconstruct only after explicit card reinitialization.
   class Transport {
    public:
     static constexpr std::uint32_t kMaximumHz = 1000000;

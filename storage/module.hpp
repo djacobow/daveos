@@ -16,12 +16,25 @@ namespace daveos::storage {
   DAVEOS_ENUM(MountMode, std::uint8_t, DAVEOS_MOUNT_MODES)
 #undef DAVEOS_MOUNT_MODES
 
-  // One request at a time. Command handlers only copy arguments and schedule
-  // the one-shot worker: FatFs calls can yield from that worker, never from a
-  // command handler. Returning between entries/chunks lets logs and events
-  // drain. The worker is not periodic, so a slow card is not a missed
-  // heartbeat. Name each instance when mounting more than one volume; its
-  // commands then route by that name (e.g. "sd ls", "flash ls").
+  // FatFs commands over a borrowed BlockDevice. Name each instance when
+  // mounting more than one volume; its commands then route by that name (e.g.
+  // "sd ls", "flash ls").
+  //
+  // Admission: one request at a time; another returns busy. Commands return
+  //   acceptance only; completion and errors are logged later.
+  // Ownership: handlers copy their path and text arguments before returning.
+  // Execution: handlers only schedule a one-shot worker task. FatFs calls,
+  //   which may yield while media I/O is pending, run in that worker, never in
+  //   a command handler. It returns between entries and preview chunks so logs
+  //   and events drain; being non-periodic, a slow card is not a missed
+  //   heartbeat.
+  // Deadline: bounded by the block device's own transfer timeouts.
+  // Failure: FatFs and device failures end the request with a logged status.
+  //   The volume stays mounted, but after a media failure it is unusable
+  //   until unmounted, the media reinitialized and mounted again. Nothing is
+  //   retried.
+  // Lifetime: the block device outlives the module; unmount before replacing
+  //   media.
   template <typename Event = core::NoEvent>
   class Module : public core::Module<Module<Event>, Event> {
     static constexpr auto kContinueDelay = std::chrono::milliseconds{1};

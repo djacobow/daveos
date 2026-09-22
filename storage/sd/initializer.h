@@ -12,13 +12,21 @@
 namespace daveos::storage::sd {
 
 
-  // Nonblocking SPI initialization for SDHC/SDXC cards. Configure mode 0,
-  // 8-bit MSB-first transfers and SCK <=400 kHz before request(); keep that
-  // configuration until result(). The caller owns power-up settling and bus
-  // exclusion. No scheduler, logging, board or filesystem dependency.
-  // Call request/tick/result on one execution thread. Keep this object and
-  // its injected device alive and stationary until completion; callbacks only
-  // publish completion. No cancellation, legacy SDSC support or error retries.
+  // Nonblocking SPI initialization for SDHC/SDXC cards. No scheduler,
+  // logging, board or filesystem dependency.
+  //
+  // Admission: request() returns busy while initialization is running; it
+  //   starts nothing inline.
+  // Ownership: owns its command and response buffers. The caller owns
+  //   power-up settling, bus exclusion and the bus configuration (mode 0,
+  //   8-bit MSB-first, SCK <=400 kHz) from request() until result().
+  // Execution: request/tick/result on one execution thread; HAL callbacks
+  //   only publish transaction completion.
+  // Deadline: each transaction has a 250 ms HAL timeout, and ACMD41 is
+  //   limited to 1,000 idle responses; total time depends on tick cadence.
+  // Failure: result() reports the status, OCR and failing command. No
+  //   cancellation, retries or legacy SDSC support.
+  // Lifetime: keep it and its device alive and stationary until result().
   class Initializer {
    public:
     struct Result {
