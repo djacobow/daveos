@@ -35,7 +35,8 @@ The support matrix identifies which services have drivers for each family.
 
 The optional `ssd1306` fixture uses I2C1 PB8/PB9 and a 128×64 panel at 0x3c,
 without a reset GPIO. H755 scan and asynchronous page-write tests exercise the
-shared I2C driver; visual confirmation remains pending. See [SSD1306](../ssd1306.md).
+shared I2C driver. The user visually confirmed "DaveOS H755" on the panel;
+test-pattern inspection remains pending. See [SSD1306](../ssd1306.md).
 
 The user has connected an SD card to the NUCLEO-H563ZI connector marked
 "SPI A", with this wiring:

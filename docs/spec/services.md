@@ -515,5 +515,7 @@ The reusable `drivers::Ssd1306` driver takes a HAL I2C device and owns a fixed
 128×64 framebuffer. Requests progress through an asynchronous state machine;
 callers tick it until completion and retain the driver throughout pending I/O.
 Drawing is rejected during updates. The optional STM32 `ssd1306` feature adds
-explicit initialization, text, test-pattern and clear commands, sharing the
-I2C module's lease and diagnostics. See [SSD1306](../ssd1306.md).
+automatic 1 Hz status rendering alongside manual initialization, text,
+test-pattern and clear commands, sharing the I2C module's lease and diagnostics.
+The status view quietly disables itself if initialization or transfer fails;
+manual commands pause it until `display live on`. See [SSD1306](../ssd1306.md).

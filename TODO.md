@@ -262,8 +262,14 @@ section supersedes older H755 hardware deferrals; remaining gaps are explicit.
   framebuffer, 6x8 text, and an optional display module. H755 PB8/PB9 scan
   finds 0x3c; initialization/page-write commands exercised on hardware.
   See [display](docs/ssd1306.md).
-- [ ] Visually confirm H755 SSD1306 text orientation and test-pattern pixels
-  when the user is back at the board (currently remote).
+- [x] User visually confirmed the H755 OLED displays "DaveOS H755"
+  (2026-09-23).
+- [x] Add an automatic 1 Hz debug-display module with uptime, application
+  rows, serial/version fields, manual pause/resume, and silent disable on
+  absent/failed display initialization. H755 HIL verified automatic startup,
+  paused counters, resumed full frames and zero new bus errors/timeouts.
+  Silent absent-panel behavior is host-tested, not physical-disconnect tested.
+- [ ] Visually inspect SSD1306 test-pattern pixels and screen-edge coverage.
 
 - [x] Add task-only nested `yield()`, one eligible callback per call, bounded depth, context diagnostics and elapsed/self/nested accounting.
 - [x] Integrate FatFs through a serialized filesystem worker and asynchronous SD reader that yields while waiting. Same-volume nested calls and competing requests fail immediately. See [storage](docs/storage.md).

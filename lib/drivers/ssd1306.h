@@ -10,7 +10,7 @@
 namespace daveos::drivers {
 
   // SSD1306 128x64 I2C display, internal charge pump, no external reset GPIO.
-  // Command sequence/font adapted from the Form fork of afiskon/stm32-ssd1306;
+  // Command sequence/font adapted from a fork of afiskon/stm32-ssd1306;
   // see ssd1306_LICENSE. Fixed framebuffer, asynchronous page writes, no heap.
   // One task owns all methods. tick() never waits. Keep this object and its
   // injected device alive until busy() is false; accepted transfers retain

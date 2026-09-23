@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-// Adapted from afiskon/stm32-ssd1306, via the Form fork.
+// Adapted from afiskon/stm32-ssd1306
 // Copyright (c) 2018 Aleksander Alekseev; see ssd1306_LICENSE.
 namespace daveos::drivers::detail {
   inline constexpr std::uint16_t kFont6x8[] = {

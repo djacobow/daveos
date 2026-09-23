@@ -338,8 +338,6 @@ There are no automatic error retries. Keep the reader alive until completion.
 The fixture uses **seven-bit address `0x68`**, encoded on the wire as `0xd0`
 (write) or `0xd1` (read). Sample scaling is 62.5 uV/LSB, truncated toward zero
 for integer microvolts. See the [Microchip MCP3425 datasheet](https://ww1.microchip.com/downloads/aemDocuments/documents/OTH/ProductDocuments/DataSheets/22072b.pdf).
-The reference driver in the Form repository informed the selected mode; its
-singleton and vendor-specific I2C API are not used.
 
 `tests/mcp3425/` exercises signed endpoints, repeated conversions, busy
 responses, configuration mismatch, write/read NACKs, transfer and conversion

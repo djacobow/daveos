@@ -315,6 +315,7 @@ OTP writes are performed.
 
 The H755 SSD1306 fixture uses PB8/PB9 with a 128×64 panel at 0x3c. With
 `ssd1306` selected, run `tests/hil/h755/test_display.py` through the normal
-`--hil --hil-config ...` workflow. It starts from a factory image, scans before
-initialization, and exercises clear/pattern/text over UART and USB. Visual
+`--hil --hil-config ...` workflow. It starts from a factory image, checks automatic startup, then pauses the
+status renderer to scan and exercise clear/pattern/text over UART and USB.
+It verifies the paused counters stay unchanged and live mode resumes at 1 Hz. Visual
 confirmation remains a separate manual check.

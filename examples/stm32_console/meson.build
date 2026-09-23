@@ -28,9 +28,11 @@ components = {
     'modules': ['adc'],
   },
   'ssd1306': {
-    'include': ['display.hpp'],
-    'members': ['Display display{i2c1};'],
-    'modules': ['display'],
+    'include': ['display.hpp', 'debug_display.hpp'],
+    'deps': ['util_dep'],
+    'members': ['Display display{i2c1, I2cBus::device<1>(i2c1)};',
+                'DebugDisplay debug_display{platform, display, daveos::build::kApplicationVersion, {nullptr, DebugDisplayLine}};'],
+    'modules': ['display', 'debug_display'],
   },
   'sd': {
     'deps': ['hal_dep'],
