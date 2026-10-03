@@ -4,6 +4,11 @@ Keep the same vocabulary as the earlier steps. A module does cooperative work;
 a platform supplies timing and synchronization; Application owns dispatch;
 subscribers receive records and command sources submit lines.
 
+Reusable module adapters should accept a borrowed instance name and forward it
+to `core::Module`; preserve a useful default. Test two instances of the real
+adapter, including command routes and statistics, rather than only a synthetic
+module. Names identify instances; they do not grant shared hardware ownership.
+
 ## A new console transport
 
 Use `daveos::console::Module<Derived, Event>` from `lib/console/module.hpp` for a

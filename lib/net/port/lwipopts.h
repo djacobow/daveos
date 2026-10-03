@@ -10,7 +10,8 @@
 #define TCP_SND_BUF 4096
 #define TCP_SND_QUEUELEN 16
 #define MEMP_NUM_TCP_PCB 4
-#define MEMP_NUM_TCP_PCB_LISTEN 2
+// Console, OTA, and file service may listen simultaneously.
+#define MEMP_NUM_TCP_PCB_LISTEN 3
 #define MEMP_NUM_TCP_SEG 24
 #define TCP_LISTEN_BACKLOG 1
 #define TCP_OVERSIZE 0

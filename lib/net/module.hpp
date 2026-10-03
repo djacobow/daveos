@@ -15,8 +15,11 @@ namespace daveos::net {
   class Module final : public core::Module<Module<Event>, Event> {
    public:
     // Optional configuration factory runs in stage1, after platform setup.
-    explicit Module(Service& service, Config (*configure)() = nullptr)
-        : service_(service), configure_(configure) {}
+    explicit Module(Service& service, Config (*configure)() = nullptr,
+                    const char* name = nullptr)
+        : core::Module<Module<Event>, Event>(name),
+          service_(service),
+          configure_(configure) {}
 
     static constexpr const char* name() { return "net"; }
 

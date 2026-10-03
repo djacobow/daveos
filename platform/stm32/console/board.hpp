@@ -18,8 +18,11 @@ namespace daveos::platform::stm32 {
   class Board final : public daveos::core::Module<Board<Event>, Event> {
    public:
     Board(Platform& platform,
-          void (*log_transports)(core::SchedulerInterface<Event>&))
-        : platform_(platform), log_transports_(log_transports) {}
+          void (*log_transports)(core::SchedulerInterface<Event>&),
+          const char* name = nullptr)
+        : core::Module<Board<Event>, Event>(name),
+          platform_(platform),
+          log_transports_(log_transports) {}
 
     static constexpr const char* name() { return "board"; }
 

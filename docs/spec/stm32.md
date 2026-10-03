@@ -92,14 +92,19 @@ The portable API contract is in the
 
 | Component | H563 | H755 M7 / M4 |
 | --- | --- | --- |
-| SPI/I2C HAL | IRQ adapters and optional SPI1 GPDMA payloads implemented; SD CRC-checked reads, read-only FatFs and temporary-file write/readback/remove tested; I2C MCP3425 scan/conversion and GPIO recovery tested | SPI SD initialization, CRC-checked 250 kHz/1 MHz reads, read-only FatFs and opt-in create/readback/remove HIL passed, including optional RX/TX DMA payloads; I2C hardware pending |
+| SPI/I2C HAL | IRQ adapters and optional SPI1 GPDMA payloads implemented; SD CRC-checked reads, read-only FatFs and temporary-file write/readback/remove tested; I2C MCP3425 scan/conversion and GPIO recovery tested | SPI SD initialization, CRC-checked 250 kHz/1 MHz reads, read-only FatFs and opt-in create/readback/remove HIL passed, including optional RX/TX DMA payloads; I2C SSD1306 ACK scanning and initialization/page writes tested, while reads, repeated START, clock stretching and recovery remain unqualified |
 | Scheduler platform, TIM2, critical sections, sleep, reset | Implemented; hardware tested | M7 implemented; current console and reset paths hardware tested. M4 only performs boot synchronization and sleeps. |
 | UART DMA/FIFO, USB CDC, board commands, shared console | Implemented; current HIL and earlier physical checks | Implemented; current UART/USB/TCP command and UART burst HIL. |
 | lwIP Ethernet and TCP console | Implemented; hardware tested | Implemented; DHCP, large-packet ping, TCP reconnect and reset HIL. |
 | A/B bootloader, flash journal, OTA integration | Implemented; hardware HIL plus host fault models | Implemented; 23-case HIL covers A/B OTA, journal rollover, watchdog/fault recovery and invalid-image fallback. |
 | SD-file OTA | DMA A→B→A, byte-exact flash verification, unchanged flash during preparation, trial boots and confirmation tested | Same A→B→A checks tested with DMA and a compatible older package |
 | IWDG, startup/trial health policy, retained fault handlers | Implemented; hardware HIL | IWDG1, startup health, and retained fault capture implemented and hardware tested; no IWDG early-warning IRQ. Bootloader starts IWDG; the application confirms healthy trial boots. |
+| TCP file service (port 1002) | Temporary-file upload/download, directory operations, mount-mode rejection and disconnect/timeout cleanup tested; see [file-transfer record](../file-transfer.md) | Builds pass; file-service hardware testing remains pending. |
+| SSD1306 and automatic status display | Adapter and ADC/display composition build; no attached-display hardware qualification | ACK scan and page writes tested; static text visually confirmed. Automatic startup, 1 Hz updates and manual pause/resume tested by HIL; full live-view appearance remains unconfirmed. See [display record](../ssd1306.md). |
 | Real OTP and bank-B emulator | Implemented; emulator HIL, one authorized real write/lock, then read-only hardware checks | Not implemented; do not assume H563 OTP geometry or register semantics. |
+
+The [2026-09-23 HIL record](../hil-review-2026-09-23.md) records the latest
+instance-naming/integration checks and their exact scope.
 
 Host/file models validate portable behavior; they do not qualify physical flash,
 ECC, or brownout behavior. Physical power-cut testing remains deferred. See
@@ -229,8 +234,11 @@ and programming plans. Hardware claims remain distinct from build coverage.
 The reusable full console has passed H563 UART/USB/TCP, Ethernet ping, timer,
 and software-reset recovery checks. The standalone H563 starter has passed
 periodic-worker, UART help/timer/statistics, and reset-recovery checks. The H755
-full console also has current hardware coverage. Its standalone starter remains
-build/programming-plan tested only.
+full console also has current hardware coverage. The pinned H755 standalone
+device starter now passes periodic-worker, UART help/timer and reset checks.
+The pinned H563 storage starter passes read-only SD mount/list/unmount and
+command/reset checks; H755 storage starter remains build/programming-plan only
+without an attached card. See the [latest HIL record](../hil-review-2026-09-23.md).
 
 ## Flash layout and executable images
 

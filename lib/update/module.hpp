@@ -14,8 +14,11 @@ namespace daveos::update {
   template <typename Event = core::NoEvent, bool Files = false>
   class Module : public core::Module<Module<Event, Files>, Event> {
    public:
-    explicit Module(Engine& engine, FileSource source = {})
-        : engine_(engine), file_(engine, source) {}
+    explicit Module(Engine& engine, FileSource source = {},
+                    const char* name = nullptr)
+        : core::Module<Module<Event, Files>, Event>(name),
+          engine_(engine),
+          file_(engine, source) {}
 
     static constexpr const char* name() { return "ota"; }
 

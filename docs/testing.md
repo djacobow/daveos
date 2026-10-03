@@ -319,3 +319,26 @@ The H755 SSD1306 fixture uses PB8/PB9 with a 128×64 panel at 0x3c. With
 status renderer to scan and exercise clear/pattern/text over UART and USB.
 It verifies the paused counters stay unchanged and live mode resumes at 1 Hz. Visual
 confirmation remains a separate manual check.
+
+### Starter dependency checks
+
+The ordinary starter tests use the current checkout. A separate pinned lane
+exports the exact Git revision in each wrap, including initialized vendor
+submodules at their recorded commits; it never substitutes HEAD for missing
+objects. Fetch the wrap commits and initialize the usual board dependencies first.
+Run:
+
+```sh
+python -B -m pytest tests/starter/test_starter.py --starter-pinned \
+  --starter-board host --starter-board h563 --starter-board h755 \
+  --starter-work build/pinned-starters
+```
+
+ARM checks build firmware
+and validate programming plans; they do not flash boards. CI fetches the published
+pins and runs both lanes. Use a fresh work directory after changing which vendor
+submodules are initialized.
+
+CI also compiles file-transfer and SSD1306 integration on both boards, with
+ADC/display sharing on H563. Keep this integration coverage updated when adding
+features; portable algorithm tests alone do not compile board composition.

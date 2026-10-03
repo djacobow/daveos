@@ -1,5 +1,6 @@
 #include "drivers/ssd1306.h"
 
+#include "core/schedule/application.hpp"
 #include "drivers/adapters/ssd1306.hpp"
 #include "drivers/debug_display.hpp"
 #include "support.hpp"
@@ -279,4 +280,44 @@ TEST_CASE(
   }
   CHECK(bus.packets.size() == 34);
   CHECK_FALSE(bus.leased);
+}
+
+TEST_CASE("display adapters route commands and statistics by instance name") {
+  namespace core = daveos::core;
+  namespace drivers = daveos::drivers;
+  testing::Fake platform;
+  Bus left_bus, right_bus;
+  drivers::Ssd1306Module<Bus, testing::Event> left(left_bus, left_bus.device,
+                                                   "left");
+  drivers::Ssd1306Module<Bus, testing::Event> right(right_bus, right_bus.device,
+                                                    "right");
+  drivers::DebugDisplay<testing::Fake, decltype(left), testing::Event>
+      left_view(platform, left, {}, {}, "left_view");
+  drivers::DebugDisplay<testing::Fake, decltype(right), testing::Event>
+      right_view(platform, right, {}, {}, "right_view");
+  testing::TestModule input;
+  auto modules =
+      core::ModuleList{&left, &right, &left_view, &right_view, &input};
+  auto scheduler = core::make_scheduler<testing::Event>(platform, modules);
+  core::CommandDispatcher<testing::Event, decltype(modules)> dispatcher(
+      modules, scheduler);
+  REQUIRE(dispatcher.bind_sources(core::CommandSourceList{}) ==
+          core::Status::ok);
+  input.first_action = [&] {
+    CHECK(dispatcher.dispatch("left live off") == core::Status::ok);
+    CHECK_FALSE(left.live());
+    CHECK(right.live());
+    CHECK(dispatcher.dispatch("right live off") == core::Status::ok);
+    CHECK_FALSE(right.live());
+    CHECK(dispatcher.dispatch("display live off") == core::Status::not_found);
+    const auto stats = scheduler.snapshot();
+    CHECK(std::string_view(stats.tasks[0].module) == "left");
+    CHECK(std::string_view(stats.tasks[1].module) == "right");
+    CHECK(std::string_view(stats.tasks[2].module) == "left_view");
+    CHECK(std::string_view(stats.tasks[3].module) == "right_view");
+    scheduler.stop();
+  };
+  REQUIRE(scheduler.schedule<&testing::TestModule::first>(
+              input, std::chrono::microseconds{0}) == core::Status::ok);
+  CHECK(scheduler.run() == core::Status::ok);
 }

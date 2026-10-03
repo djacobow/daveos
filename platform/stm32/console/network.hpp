@@ -11,14 +11,14 @@ namespace daveos::platform::stm32 {
   // the module supplies polling. Stop consoles before stopping this service.
   template <typename Event>
   struct Network {
-    explicit Network(board::Platform& platform)
+    explicit Network(board::Platform& platform, const char* name = nullptr)
         : service(net::stm32::ethernet_driver(),
                   {&platform,
                    [](void* context) -> std::uint32_t {
                      return static_cast<board::Platform*>(context)->now() /
                             1000;
                    }}),
-          module(service, net::stm32::board_network_config) {}
+          module(service, net::stm32::board_network_config, name) {}
 
     void stop() { service.stop(); }
 

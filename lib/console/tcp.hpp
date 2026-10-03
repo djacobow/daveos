@@ -15,8 +15,10 @@ namespace daveos::console {
       : public daveos::console::Module<TcpConsole<Event, Platform>, Event> {
    public:
     TcpConsole(Platform& platform, daveos::net::Service& service,
-               std::uint16_t port = 1000)
-        : server_(service, port), input_(platform) {}
+               std::uint16_t port = 1000, const char* name = nullptr)
+        : daveos::console::Module<TcpConsole<Event, Platform>, Event>(name),
+          server_(service, port),
+          input_(platform) {}
 
     static constexpr const char* name() { return "tcp"; }
 

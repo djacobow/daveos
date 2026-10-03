@@ -35,8 +35,10 @@ namespace daveos::drivers {
       : public core::Module<DebugDisplay<Platform, Target, Event>, Event> {
    public:
     DebugDisplay(Platform& platform, Target& target,
-                 const util::Version& version, DisplayContent content = {})
-        : platform_(platform),
+                 const util::Version& version, DisplayContent content = {},
+                 const char* name = nullptr)
+        : core::Module<DebugDisplay<Platform, Target, Event>, Event>(name),
+          platform_(platform),
           target_(target),
           version_(version),
           content_(content) {}

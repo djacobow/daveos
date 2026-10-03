@@ -181,8 +181,11 @@ namespace daveos::watchdog {
   template <typename Event = core::NoEvent>
   class Module : public core::Module<Module<Event>, Event> {
    public:
-    Module(Controller& controller, std::chrono::microseconds period)
-        : controller_(controller), period_(period) {}
+    Module(Controller& controller, std::chrono::microseconds period,
+           const char* name = nullptr)
+        : core::Module<Module<Event>, Event>(name),
+          controller_(controller),
+          period_(period) {}
 
     static constexpr const char* name() { return "watchdog"; }
 

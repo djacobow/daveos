@@ -13,8 +13,11 @@ namespace daveos::drivers {
   template <typename Bus, typename Event = core::NoEvent>
   class Ssd1306Module : public core::Module<Ssd1306Module<Bus, Event>, Event> {
    public:
-    Ssd1306Module(Bus& bus, const hal::i2c::Device& device)
-        : bus_(bus), panel_(device) {}
+    Ssd1306Module(Bus& bus, const hal::i2c::Device& device,
+                  const char* name = nullptr)
+        : core::Module<Ssd1306Module<Bus, Event>, Event>(name),
+          bus_(bus),
+          panel_(device) {}
 
     static constexpr const char* name() { return "display"; }
 

@@ -3,6 +3,11 @@
 Completed validation entries describe their respective phases. The H755 parity
 section supersedes older H755 hardware deferrals; remaining gaps are explicit.
 
+Latest regression: [2026-09-23 HIL record](docs/hil-review-2026-09-23.md):
+65 passing H563/H755 cases and three pinned hardware starter smoke checks.
+This supersedes older H755 device-starter deferrals. H755 storage-starter
+hardware testing still requires a card; SD DMA timeout injection was deferred.
+
 ## Bootloader and reliability
 
 - [x] Implement SD-file OTA preparation/install using the existing package:

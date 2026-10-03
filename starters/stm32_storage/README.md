@@ -38,3 +38,8 @@ fs unmount
 
 The subproject is configured with `features=uart,sd,fatfs`; FatFs mounts
 read-only unless you pass `fs mount rw`.
+
+The repository tests both the current checkout and the exact wrap revision.
+Use the `--starter-pinned` test lane described in
+[testing](../../docs/testing.md#starter-dependency-checks) when updating the pin;
+a passing HEAD-consumer build alone does not validate a published starter.

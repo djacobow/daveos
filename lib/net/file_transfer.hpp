@@ -20,8 +20,11 @@ namespace daveos::net {
    public:
     FileTransferModule(Platform& platform, Service& network,
                        const storage::FileAccess& access,
-                       std::uint16_t port = 1002)
-        : platform_(platform), server_(network, port), transfer_(access) {}
+                       std::uint16_t port = 1002, const char* name = nullptr)
+        : core::Module<FileTransferModule<Platform, Event>, Event>(name),
+          platform_(platform),
+          server_(network, port),
+          transfer_(access) {}
 
     static constexpr const char* name() { return "files"; }
 

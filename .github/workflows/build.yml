@@ -110,6 +110,15 @@ jobs:
             meson configure build/$target -Dfeatures=health,net,tcp
             meson compile -C build/$target
           done
+      - name: Build file service and displays on both boards
+        run: |
+          for target in arm h755; do
+            features=default,net,tcp,sd,sd-dma,fatfs,file-transfer,ota,ssd1306
+            if [ "$target" = arm ]; then features="$features,i2c-adc"; fi
+            meson configure build/$target -Dbootloader=true -Dlogging=true -Dfeatures="$features"
+            meson compile -C build/$target -j 2
+            meson compile -C build/$target flash-plan
+          done
       - name: Build A/B bootloader and verify CI version propagation
         run: |
           for board in h563 h755; do
@@ -122,3 +131,9 @@ jobs:
         run: |
           python -B -m pytest tests/starter/test_starter.py --starter-board h563 --starter-work "$PWD/build/device-starters"
           python -B -m pytest tests/starter/test_starter.py --starter-board h755 --starter-work "$PWD/build/device-starters"
+      - name: Test published starter pins
+        run: |
+          for pin in $(sed -n 's/^revision = //p' starters/*/subprojects/daveos.wrap | sort -u); do
+            git fetch --no-tags origin "$pin"
+          done
+          python -B -m pytest tests/starter/test_starter.py --starter-pinned --starter-board host --starter-board h563 --starter-board h755 --starter-work "$PWD/build/pinned-starters"

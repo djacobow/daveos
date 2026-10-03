@@ -14,8 +14,13 @@ name = {'stm32': 'my-device', 'stm32_storage': 'my-storage'}[starter]
 source = work / 'application'
 shutil.copytree(root / 'starters' / starter, source, dirs_exist_ok=True)
 checkout = source / 'subprojects/daveos'
+dependency = Path(os.environ.get('DAVEOS_STARTER_DEPENDENCY', str(root))).resolve()
+if checkout.is_symlink() and checkout.resolve() != dependency:
+    raise RuntimeError('Starter dependency changed; use a fresh --starter-work directory')
 if not checkout.exists():
-    checkout.symlink_to(root, target_is_directory=True)
+    checkout.symlink_to(dependency, target_is_directory=True)
+if checkout.resolve() != dependency:
+    raise RuntimeError('Unexpected existing starter dependency')
 build = work / 'build'
 env = os.environ.copy()
 env['CCACHE_DIR'] = str(work / 'ccache')

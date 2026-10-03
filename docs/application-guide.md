@@ -119,6 +119,15 @@ logging and command sources remain independent.
 A module type can be registered more than once when each instance has its own
 name, passed to the protected `core::Module(const char*)` constructor, for
 example `storage::Module<Event> card(sd, "sd"), internal(flash, "flash");`.
+Reusable module adapters accept an optional trailing `const char* name`,
+defaulting to their existing name. The string is borrowed and must outlive the
+module. For example, `Ssd1306Module(bus, device, "left")` and
+`Ssd1306Module(bus, other_device, "right")` get independent command prefixes.
+Adapters with other optional arguments put the name last. `I2cModule` instead
+accepts the name before its variadic bus list: `I2cModule<Event, Bus>("sensors", bus)`.
+Naming an adapter does not remove hardware restrictions: the current lwIP stack,
+USB controller, and board watchdog still have their documented ownership limits.
+
 Logs, statistics and command routes use the instance name; duplicates fail
 initialization with `duplicate_name` before any module's `init()` runs. See the
 [reference](reference.md) for the full rules.

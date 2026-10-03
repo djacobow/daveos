@@ -26,7 +26,12 @@ namespace daveos::hal {
     static constexpr std::size_t kBusCount = sizeof...(Buses);
 
    public:
-    explicit I2cModule(Buses&... buses) : buses_(&buses...) {}
+    explicit I2cModule(Buses&... buses) : I2cModule(nullptr, buses...) {}
+
+    // Name precedes the bus pack; borrowed for the module lifetime.
+    I2cModule(const char* name, Buses&... buses)
+        : core::Module<I2cModule<Event, Buses...>, Event>(name),
+          buses_(&buses...) {}
 
     static constexpr const char* name() { return "i2c"; }
 

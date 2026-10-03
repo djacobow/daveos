@@ -13,7 +13,8 @@ namespace daveos::otp {
   template <typename Event = core::NoEvent>
   class Module final : public core::Module<Module<Event>, Event> {
    public:
-    explicit Module(Store& store) : store_(store) {}
+    explicit Module(Store& store, const char* name = nullptr)
+        : core::Module<Module<Event>, Event>(name), store_(store) {}
 
     static constexpr const char* name() { return "otp"; }
 

@@ -47,8 +47,10 @@ namespace daveos::watchdog {
    public:
     // version is recorded with every retained failure; borrowed, so it must
     // outlive the module (normally the build's version-stamp constant).
-    HealthModule(Platform& platform, const util::Version& version)
-        : platform_(platform),
+    HealthModule(Platform& platform, const util::Version& version,
+                 const char* name = nullptr)
+        : core::Module<Self, Event>(name),
+          platform_(platform),
           version_(version),
           checks_{{{"heartbeat", this,
                     [](void* p) {

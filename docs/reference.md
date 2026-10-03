@@ -1091,8 +1091,8 @@ must outlive it; stop the server before stopping the service. Call both from the
 same serialized context. It uses fixed 4 KiB input and 8 KiB output buffers;
 TCP receive-window flow control handles full input buffers, and slow-client
 output overflow drops whole records (`dropped_output()` counts these drops).
-No logs are saved for disconnected clients. lwIP has fixed pools for one
-listener, four TCP PCBs (including handshakes), and 24 segments.
+No logs are saved for disconnected clients. lwIP has fixed pools for three simultaneous listeners (console, OTA, and file
+service), four TCP PCBs (including handshakes), and 24 segments.
 
 Earlier H755 hardware checks passed for TCP `help`, `net status`, asynchronous
 timer logs, rejection of a second client, and reconnect after an unfinished command.
@@ -1134,7 +1134,10 @@ reset recovery. The standalone H563 starter also passed periodic-worker and UART
 command/reset checks. Both H563 and H755 starters build independently and their
 programming plans select the correct images, including H755's sleeping M4.
 The current H755 console and reliability paths have also been hardware-tested;
-its standalone starter still has build/programming-plan coverage only. The
+its pinned standalone device starter now passes periodic-worker, UART commands
+and reset on hardware too. The H563 storage starter passes read-only SD checks;
+H755 storage-starter hardware validation awaits a card. See the
+[2026-09-23 validation record](hil-review-2026-09-23.md). The
 [factory-image guide](03-hardware-console.md#h755-factory-boot-image) describes
 H755 A/B builds, which include the fixed M4 in one factory HEX file.
 

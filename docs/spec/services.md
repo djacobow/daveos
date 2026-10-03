@@ -33,7 +33,7 @@ never call lwIP. All packet and stack allocation uses fixed preallocated pools.
 The first milestone supports Ethernet/ARP, IPv4, ICMP ping, UDP for DHCP, and
 DHCP or application-configured static addressing. TCP provides a single-client
 nonblocking byte-stream server for the console. IPv6, DNS, fragmentation, TLS,
-and a general multi-listener/connection API are deferred. Future application
+and a general multi-client connection API are deferred. Future application
 networking uses this separate library rather than extending SchedulerInterface.
 Hardware-init failure leaves the remaining application operational and requires
 reset to retry. Cable and DHCP recovery are automatic. `net status` reports link,

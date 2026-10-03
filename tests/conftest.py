@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def pytest_addoption(parser):
     parser.addoption('--starter-board', action='append', default=[], choices=['host', 'h563', 'h755'])
     parser.addoption('--starter-work')
+    parser.addoption('--starter-pinned', action='store_true', help='Test actual wrap revisions, not HEAD')
     parser.addoption('--test-binary')
     parser.addoption('--test-logging', default='enabled', choices=['enabled', 'disabled'])
     parser.addoption('--hil', action='store_true', help='Enable board-specific HIL; always mass-erase and program factory firmware')
@@ -16,4 +17,7 @@ def pytest_addoption(parser):
 
 
 def pytest_ignore_collect(collection_path, config):
-    return collection_path == ROOT / 'tests/hil' and not config.getoption('--hil')
+    if collection_path == ROOT / 'tests/hil' and not config.getoption('--hil'):
+        return True
+    # This is a first-result hook: False would bypass pytest's --ignore logic.
+    return None

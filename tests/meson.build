@@ -31,6 +31,7 @@ if platform == 'host'
   subdir('host')
 endif
 subdir('programming')
+subdir('collection')
 if 'net' in features
   subdir('network')
 endif

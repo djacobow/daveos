@@ -9,14 +9,16 @@ namespace daveos::core {
   // a dispatcher before init/run; stage2 binds sources after all stage1 hooks
   // and fails initialization with the dispatcher's status if its command routes
   // are invalid or duplicated (no source is bound then). The dispatcher and
-  // source objects must outlive this module's use. The module name "commands"
-  // must be unique in the application.
+  // source objects must outlive this module's use. The instance name defaults
+  // to "commands" and must be unique.
   template <typename Event, std::size_t Sources>
   class CommandBinding final
       : public Module<CommandBinding<Event, Sources>, Event> {
    public:
-    explicit CommandBinding(CommandSourceList<Sources> sources)
-        : sources_(sources) {}
+    explicit CommandBinding(CommandSourceList<Sources> sources,
+                            const char* name = nullptr)
+        : Module<CommandBinding<Event, Sources>, Event>(name),
+          sources_(sources) {}
 
     static constexpr const char* name() { return "commands"; }
 

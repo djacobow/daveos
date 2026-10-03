@@ -414,11 +414,12 @@ namespace {
   }
 
   Packet Tcp(std::uint16_t port, std::uint32_t seq, std::uint32_t ack,
-             std::uint8_t flags, std::string_view text = {}) {
+             std::uint8_t flags, std::string_view text = {},
+             std::uint16_t destination = 1000) {
     auto p = Ethernet(0x800);
     p.size = 54 + text.size();
     Put16(p, 34, port);
-    Put16(p, 36, 1000);
+    Put16(p, 36, destination);
     Put32(p, 38, seq);
     Put32(p, 42, ack);
     p.bytes[46] = 0x50;
@@ -436,14 +437,15 @@ namespace {
     return p;
   }
 
-  std::uint32_t Connect(Fake& f, net::Service& service, std::uint16_t port) {
-    f.queue(Tcp(port, 100, 0, 2));
+  std::uint32_t Connect(Fake& f, net::Service& service, std::uint16_t port,
+                        std::uint16_t destination = 1000) {
+    f.queue(Tcp(port, 100, 0, 2, {}, destination));
     service.poll();
     REQUIRE(f.sent != 0);
     auto& response = f.tx[f.sent - 1];
     REQUIRE(response.bytes[47] == 0x12);
     auto seq = Get32(response, 38);
-    f.queue(Tcp(port, 101, seq + 1, 0x10));
+    f.queue(Tcp(port, 101, seq + 1, 0x10, {}, destination));
     service.poll();
     return seq + 1;
   }
@@ -632,4 +634,24 @@ TEST_CASE("Network stop and reconnect cannot abort a local update owner") {
   engine.tick();
   CHECK(engine.state() == update::Engine::State::receiving);
   CHECK(engine.reserved());
+}
+
+TEST_CASE("console files and OTA can listen and connect simultaneously") {
+  Fake f;
+  net::Service service(f.driver(), f.clock(), Static());
+  REQUIRE(service.init());
+  service.poll();
+  net::TcpServer console(service, 1000), files(service, 1002),
+      ota(service, 1001);
+  console.poll();
+  files.poll();
+  ota.poll();
+  f.queue(Arp());
+  service.poll();
+  Connect(f, service, 40000, 1000);
+  Connect(f, service, 40001, 1002);
+  Connect(f, service, 40002, 1001);
+  CHECK(console.connected());
+  CHECK(files.connected());
+  CHECK(ota.connected());
 }
